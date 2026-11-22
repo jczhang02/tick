@@ -13,7 +13,8 @@ an implementation disagree, the implementation is wrong unless the owner changes
   size (GNOME default: Adwaita Sans 11 pt = 14.67 px). Breakpoints use `sp` (scales with the
   text-scaling setting).
 - Owner rules: `~/.agents/rules/design-principles.md`. Where this file departs from a default rule
-  it says so and why. It never departs from a hard rule.
+  it says so and why. Where a hard rule needs interpretation or a narrow exemption, 1.2.1 lists
+  it; nothing else departs from a hard rule.
 
 Contents
 
@@ -63,7 +64,7 @@ Four signature moves make Tick recognizable without costume:
 | P6 | Designed dark mode | Every custom color has its own dark value tuned for contrast; floating surfaces get a faint light ring in dark mode where shadows vanish. | Dark mode (hard) |
 | P7 | AA everywhere | All text 4.5:1 (including secondary text and captions), all graphical state indicators 3:1, in both themes, on every background the text can sit on (hover and selected included). Tick raises libadwaita's secondary-text opacity to get there (2.4.2). | Contrast (hard) |
 | P8 | 44 px targets | Every pointer or touch target is at least 44 x 44 px. Visual size may be smaller; the hit area is not (2.7). | Tap targets (hard) |
-| P9 | Input parity | Anything hover reveals, keyboard focus reveals too; Escape dismisses every popover, overlay and dialog; every pointer action has a keyboard path. | Input parity (hard) |
+| P9 | Input parity | Anything hover reveals, keyboard focus reveals too; Escape dismisses every popover, overlay and dialog; every pointer action, including drag and drop, has a keyboard path. | Input parity (hard) |
 | P10 | Change form, not size | Narrow windows change the presentation (overlay detail, collapsed sidebar, full-width detail), they do not shrink the wide layout. | Change form, not size (default) |
 | P11 | Calm motion | Short state transitions only. Reduced motion keeps fades and drops movement. | Motion (hard) |
 | P12 | Bilingual by design | English and Simplified Chinese strings are designed together; Chinese uses ASCII punctuation and spaces around Latin words and numbers; font stacks are Latin first. | CJK rules (hard) |
@@ -76,6 +77,26 @@ Departures from owner defaults, stated once:
 - **Hairlines vs boxes.** Lists are flat on the view background with hairline section rules,
   as the default asks. The only boxed lists are in the login page and preferences, where they
   are the GNOME convention for forms.
+
+#### 1.2.1 Hard-rule interpretations and exemptions (the complete list)
+
+The owner should confirm or reject each item; until then they are binding as written.
+
+1. **Inline links inside rendered text** (task descriptions, comments) keep their text height as
+   hit area. GTK cannot pad a link inside a `GtkLabel`. WCAG 2.5.8 exempts links inside
+   sentences. Standalone links (login page) are 44 px buttons.
+2. **Project dots on the selected sidebar row** measure about 2.5:1 (2.4.7). The dot repeats
+   information the adjacent name already gives (9.86:1 or better).
+3. **Modal dialogs are not floating surfaces.** `AdwDialog` sheets, alert dialogs, preferences and
+   the shortcuts dialog dim the window and keep libadwaita's sheet style. The one-surface rule
+   covers popovers, menus, tooltips, toasts and the drag icon.
+4. **Disabled controls** keep libadwaita's 50 % opacity; WCAG exempts inactive components from
+   contrast.
+5. **"Animations" off in GNOME counts as reduced motion.** GNOME's Accessibility "Reduce
+   Animation" switch sets `gtk-enable-animations = false`, which turns off all GTK and
+   libadwaita animation. Tick keeps its own short fades in that case (5.3), so the hard rule
+   "keep fades, drop movement" holds for everything Tick draws; libadwaita's own fades (popover
+   and toast appearance) become instant, which Tick cannot change.
 
 ### 1.3 References: what Tick adopts and rejects
 
@@ -157,8 +178,8 @@ custom properties (7.2).
 | Token | Value | Use |
 |---|---|---|
 | `radius-row` | 9 px | task rows, sidebar rows, menu items, field rows (same as libadwaita `.navigation-sidebar` rows and buttons) |
-| `radius-card` | 12 px | boxed lists (login, preferences), the drag icon of a task row (libadwaita `.card`) |
-| `radius-float` | 15 px | every floating surface: popovers, menus, tooltips, toasts (libadwaita popover value) |
+| `radius-card` | 12 px | boxed lists (login, preferences) (libadwaita `.card`) |
+| `radius-float` | 15 px | every floating surface: popovers, menus, tooltips, toasts, the drag icon (libadwaita popover value) |
 | `radius-round` | 9999 px | priority ring, color dots, avatars, the selected calendar day |
 
 ### 2.3 Typography
@@ -330,31 +351,37 @@ token tint, switches and check buttons (libadwaita defaults).
 
 Not allowed: selection backgrounds of task or sidebar rows (they are neutral, 2.4.6), headings,
 icons at rest, priority rings, and accent-colored text on the sidebar background (on the selected
-sidebar row some accents drop to 3.98:1).
+sidebar row some accents drop below 4.5:1).
 
-Contrast of the derived `--accent-color` for all nine GNOME accents. Focus ring = Tick's ring
-color (accent at 80 %, 2.4.5) composited over the surface.
+Contrast of the derived `--accent-color` for all nine GNOME accents. "Ring, worst surface" is
+the solid focus ring (2.4.5) on the worst of every surface in 2.4.2 (view, window, dialog,
+popover, sidebar, and the hover, selected and selected + hover tints of list and sidebar rows;
+the worst is always the selected + hover sidebar row). The derived colors were checked by
+rendering `oklab(from <accent> min(l, 0.5) a b)` in GTK 4.22.5 and sampling the pixels: they
+match the table exactly.
 
-| Accent | `--accent-bg-color` | light `--accent-color` | on view | on selected sidebar row | focus ring on view | focus ring on selected row | dark `--accent-color` | on view | on popover | focus ring on view | focus ring on selected row |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| blue | `#3584e4` | `#0461be` | 6.07 | 4.27 | 4.09 | 3.61 | `#81d0ff` | 9.93 | 7.10 | 6.81 | 5.30 |
-| teal | `#2190a4` | `#007184` | 5.68 | 4.00 | 3.85 | 3.40 | `#7bdff4` | 10.97 | 7.85 | 7.46 | 5.80 |
-| green | `#3a944a` | `#15772e` | 5.66 | 3.98 | 3.81 | 3.37 | `#8de698` | 11.13 | 7.97 | 7.56 | 5.88 |
-| yellow | `#c88800` | `#905300` | 6.13 | 4.31 | 4.01 | 3.55 | `#ffc057` | 10.35 | 7.41 | 7.07 | 5.50 |
-| orange | `#ed5b00` | `#b62200` | 6.53 | 4.59 | 4.66 | 4.11 | `#ff9c5b` | 8.13 | 5.82 | 5.66 | 4.42 |
-| red | `#e62d42` | `#c00023` | 6.43 | 4.52 | 5.03 | 4.43 | `#ff888c` | 7.33 | 5.24 | 5.15 | 4.03 |
-| pink | `#d56199` | `#a2326c` | 6.54 | 4.60 | 4.36 | 3.86 | `#ffa0d8` | 9.03 | 6.46 | 6.23 | 4.86 |
-| purple | `#9141ac` | `#8939a4` | 6.59 | 4.64 | 4.30 | 3.81 | `#fba7ff` | 9.67 | 6.92 | 6.64 | 5.17 |
-| slate | `#6f8396` | `#526678` | 5.95 | 4.18 | 3.81 | 3.38 | `#bbd1e5` | 10.70 | 7.66 | 7.30 | 5.68 |
+| Accent | `--accent-bg-color` | light `--accent-color` | text on view | text on popover | ring, worst surface | dark `--accent-color` | text on view | text on popover | ring, worst surface |
+|---|---|---|---|---|---|---|---|---|---|
+| blue | `#3584e4` | `#0461be` | 6.07 | 6.07 | 4.06 | `#81d0ff` | 9.93 | 7.10 | 5.29 |
+| teal | `#2190a4` | `#007184` | 5.68 | 5.68 | 3.80 | `#7bdff4` | 10.97 | 7.85 | 5.85 |
+| green | `#3a944a` | `#15772e` | 5.66 | 5.66 | 3.79 | `#8de698` | 11.13 | 7.97 | 5.93 |
+| yellow | `#c88800` | `#905300` | 6.13 | 6.13 | 4.10 | `#ffc057` | 10.35 | 7.41 | 5.52 |
+| orange | `#ed5b00` | `#b62200` | 6.53 | 6.53 | 4.37 | `#ff9c5b` | 8.13 | 5.82 | 4.33 |
+| red | `#e62d42` | `#c00023` | 6.43 | 6.43 | 4.30 | `#ff888c` | 7.33 | 5.24 | 3.91 |
+| pink | `#d56199` | `#a2326c` | 6.54 | 6.54 | 4.38 | `#ffa0d8` | 9.03 | 6.46 | 4.81 |
+| purple | `#9141ac` | `#8939a4` | 6.59 | 6.59 | 4.41 | `#fba7ff` | 9.67 | 6.92 | 5.15 |
+| slate | `#6f8396` | `#526678` | 5.95 | 5.95 | 3.98 | `#bbd1e5` | 10.70 | 7.66 | 5.70 |
 
 #### 2.4.5 Focus ring
 
 Libadwaita draws focus rings at 50 % of `--accent-color`, which measures 2.14 to 2.75:1 on white:
-below the 3:1 non-text minimum. Tick draws every focus ring at 80 % (libadwaita's own
-`prefers-contrast: more` value): 3.37:1 or better on every surface and accent above.
+below the 3:1 non-text minimum. Even 80 % (libadwaita's `prefers-contrast: more` value) drops to
+2.87:1 on the selected + hovered sidebar row with the green accent. Tick draws every focus ring
+in solid `--accent-color`: 3.79:1 or better in light and 3.91:1 or better in dark, on every
+surface and accent.
 
 ```css
-*:focus:focus-visible { outline-color: color-mix(in srgb, var(--accent-color) 80%, transparent); }
+*:focus:focus-visible { outline-color: var(--accent-color); }
 ```
 
 Ring geometry stays libadwaita's: 2 px wide; offset -2 px on rows (inside the row), libadwaita's
@@ -415,10 +442,16 @@ allowed; avatars always sit next to the person's name or have the name as access
 WCAG 2.x relative luminance and contrast ratio on sRGB. Translucent colors (`rgb(0 0 6 / 80%)`
 text, tints, `--dim-opacity`) were alpha-composited onto the surface before measuring. The
 derived accent colors and the lightness adjustments use OKLab (Bjorn Ottosson's matrices) with
-clipping to sRGB, which is how GTK evaluates `oklab(from ...)`. GTK may round a channel
-differently by 1/255; every ratio above has at least 0.2 headroom except where the table shows a
-value within 0.05 of its target (orange ring on a selected + hovered row: 3.21, project dots: 3.0x),
-which pass by construction.
+clipping to sRGB.
+
+Two pixel checks in GTK 4.22.5 confirm the model: `oklab(from ...)` renders exactly the accent
+values in 2.4.4, and a black box with `.dimmed` under Tick's `--dim-opacity: 72%` renders as
+`#474747` on white (0.28 x 255 = 71), so the override takes effect.
+
+Some ratios sit close to their target (for example 4.60 and 4.63 for text, 3.21 for the orange
+ring, 3.0x for project dots). They pass as computed; a GTK rounding difference of 1/255 in a
+channel moves a ratio by about 0.01 to 0.02. Do not adjust these colors further toward their
+targets.
 
 ### 2.5 Elevation
 
@@ -459,39 +492,42 @@ this sense: they dim the window and keep libadwaita's sheet style.
 
 Every pointer and touch target is at least 44 x 44 px. Three techniques, in order of preference:
 
-1. **Make the widget 44 px.** Rows (task, sidebar, field, menu item, picker option) have
-   `min-height: 44px`. The priority ring button is 44 x 44 with an 18 px ring centered inside.
-2. **Transparent border.** For small buttons whose visual size must stay small (header bar icon
-   buttons are 34 x 34), add `.tick-hit`: a transparent border that extends the hit area with a
-   matching negative margin so layout does not move. Verified on GTK 4.22 in headless mutter: a
-   flat 34 px header-style button with `.tick-hit` reports 44 x 44 bounds and `Gtk.Widget.pick`
-   hits it 21 px above its center; without it, picking misses at 18 px.
-
-   ```css
-   .tick-hit { border: 5px solid transparent; margin: -5px; background-clip: padding-box; }
-   ```
-
-   (`background-clip: padding-box` keeps hover and pressed backgrounds at the visual size.)
+1. **Make the widget 44 px.** Rows (task, sidebar, field, menu item, picker option), entries and
+   Tick's own icon buttons have `min-height: 44px` (and `min-width: 44px` for icon buttons,
+   class `.tick-icon-44`). The priority ring button is 44 x 44 with an 18 px ring inside.
+2. **Transparent border.** For buttons whose visual size must stay small, a 5 px transparent
+   border extends the hit area and a matching -5 px margin keeps the layout from moving;
+   `background-clip: padding-box` keeps hover and pressed backgrounds at the visual size.
+   Stylesheet 7.2 applies this to every header bar button (including menu buttons and the window
+   controls) and to toast buttons, and offers `.tick-hit` for any other small button.
+   Verified on GTK 4.22.5 / libadwaita 1.9.4 in headless mutter: a 34 px header bar button, a
+   header bar `GtkMenuButton` and each window-control button report 44 x 44 bounds, and
+   `Gtk.Widget.pick` hits the add and menu buttons 21 px left and right of their centers. Without
+   the rule a button is 34 x 34 and picking misses at 18 px. For `GtkMenuButton` the border must
+   go on the `menubutton` node, not its inner `button` (the parent's 34 px allocation clips
+   picking).
 3. **Make it display-only.** Meta-line items (due, deadline, labels, counts, project) are not
    buttons. They are read in the row and edited in the detail pane.
 
-Per-control targets:
+Per-control targets (every row has a matching rule in 7.2 or a widget property):
 
-| Control | Visual | Hit area | Technique |
+| Control | Visual | Hit area | How |
 |---|---|---|---|
-| Sidebar row | full width x 44 | full width x 44 | 1 |
-| Sidebar section header (collapse) | full width x 44 | full width x 44 | 1 |
-| Header bar icon buttons | 34 x 34 | 44 x 44 | 2 |
-| Priority ring | 18 x 18 ring | 44 x 44 | 1 |
-| Task row | full width x >= 44 | full width x >= 44 | 1 |
-| Sub-task collapse chevron (trailing) | 16 px icon | 44 x 44 | 1 |
-| Section header chevron and menu | 16 px icons | 44 x 44 each | 1 |
-| Detail field rows | full width x 44 | full width x 44 | 1 |
-| Menu items (`popover.menu modelbutton`) | full width x 44 | same | 1 (libadwaita default is 32) |
-| Date picker quick options | full width x 44 | same | 1 |
-| Calendar days | 36 px circle | 44 x 44 cell | 1 (`calendar > grid > label.day-number { min-width: 44px; min-height: 44px; }`) |
-| Toast "Undo" button | text button | 44 px tall | 1 |
-| Links in descriptions and comments | inline text | text line height (exempt: WCAG 2.5.8 exempts inline links in sentences) | none |
+| Sidebar row | full width x 44 | same | `.navigation-sidebar > row { min-height: 44px }` |
+| Sidebar section header | full width x 44 | same | `.tick-section-header { min-height: 44px }` |
+| Header bar buttons, menu buttons, window controls | 34 x 34 (controls: 24 px circles) | 44 x 44 | header bar rule (technique 2) |
+| Priority ring | 18 x 18 ring | 44 x 44 | `checkbutton.tick-ring` |
+| Task row | full width x >= 44 | same | the ring sets the minimum |
+| Sub-task chevron, section chevron and menu, field clear button, comment send | 16 px icon | 44 x 44 | `.tick-icon-44` |
+| Detail field rows | full width x 44 | same | `.tick-field-row` |
+| Menu items | full width x 44 | same | `popover.menu modelbutton { min-height: 44px }` (libadwaita: 32) |
+| Picker rows (date quick options, labels, priority, sync list) | full width x 44 | same | `.tick-picker-row` |
+| Text entries (quick add, date entry, label search, search, comment composer) | 44 tall | same | `.tick-entry` |
+| Calendar days | 44 px circle when selected | 44 x 44 | `popover calendar > grid > label.day-number` |
+| Calendar month/year arrows | 16 px icon | 44 x 44 | `popover calendar > header > button` |
+| Toast buttons ("Undo", dismiss) | libadwaita size | +10 px each way | toast rule (technique 2) |
+| Standalone links (login page) | text | 44 tall | `button.link.tick-link-44` |
+| Links inside descriptions and comments | inline text | text line height | exemption 1 in 1.2.1 |
 
 ---
 
@@ -560,15 +596,15 @@ automatically). Libadwaita decides which header bar shows the window controls.
 
 | Pane | Start | Title | End |
 |---|---|---|---|
-| Sidebar | "Add Task" (`list-add-symbolic`), only in B2/B3 (breakpoint setter `visible = true`) | none | Search (`system-search-symbolic`, toggles the Search view), Main menu (`open-menu-symbolic`: Preferences, Keyboard Shortcuts, About Tick, Log Out, Quit) |
+| Sidebar | "Add Task" (`list-add-symbolic`), only in B2/B3 (breakpoint setter `visible = true`) | none | Main menu (`open-menu-symbolic`: Preferences, Keyboard Shortcuts, About Tick, Log Out, Quit) |
 | Task list | back button (automatic in B2/B3), "Add Task" (`list-add-symbolic`) | `AdwWindowTitle` with the view name, hidden until the large title scrolls out (4.2) | Sync status (only when not idle, 4.14), View menu (`view-more-symbolic`) |
 | Detail | B3 only: Back (`go-previous-symbolic`, "Close Task") | none | Task menu (`view-more-symbolic`), Close (`sidebar-show-right-symbolic`, "Close Task"; hidden in B3) |
 
 The detail close button deliberately uses `sidebar-show-right-symbolic`, not a cross, because the
 window close button can sit in the same header bar.
 
-All header bar icon buttons: `.flat` (libadwaita default in header bars) plus `.tick-hit`, a
-tooltip that names the action and its shortcut ("Add Task (Q)"), and the same text as accessible
+All header bar icon buttons: `.flat` (libadwaita default in header bars), the 44 px hit area from
+the header bar rule in 7.2 (no class needed), a tooltip that names the action and its shortcut ("Add Task (Q)"), and the same text as accessible
 label without the shortcut.
 
 ### 3.5 Wireframes
@@ -577,20 +613,20 @@ Wide, 1280 x 800, a project open with a task selected:
 
 ```
 ┌ sidebar 282 ───────────┬ list 619 ─────────────────────────────┬ detail 379 ─────────────┐
-│                 ⌕  ☰   │ +                                  ⋮  │                   ⋮  ▶│ │
+│                    ☰   │ +                                  ⋮  │                   ⋮  ▶│ │
 │ ▢ Inbox            4   │                                       │ ◯ Book flights          │
 │ ☆ Today            7   │  ● Vacation                           │                         │
 │ ▦ Upcoming             │    12 tasks                           │ Compare prices on the   │
-│                        │                                       │ two airlines...         │
-│ FAVORITES          ⌄   │  ◯ Check passport validity            │                         │
+│ ⌕ Search               │                                       │ two airlines...         │
+│ Favorites          ⌄   │  ◯ Check passport validity            │                         │
 │ ● Work            18   │  ◯ Book flights               ⌄       │ ▦ Date      Fri 28 Nov  │
-│ PROJECTS       +   ⌄   │    Compare prices on the two...       │ ⚑ Deadline  Mon 1 Dec   │
+│ Projects       +   ⌄   │    Compare prices on the two...       │ ⚑ Deadline  Mon 1 Dec   │
 │ ● Vacation        12   │    ▦ Fri 28 Nov  ⚑ 1 Dec  ◔ 1/3       │ ◯ Priority  Priority 2  │
 │   ● Packing        4   │      ◯ Pick seats                     │ ⌗ Labels    travel      │
 │ ● Home             6   │                                       │                         │
-│ LABELS             ⌄   │  Preparation  3                ⌄  ⋮   │ Sub-tasks          1/3  │
+│ Labels             ⌄   │  Preparation  3                ⌄  ⋮   │ Sub-tasks          1/3  │
 │ ⌗ errands          3   │  ───────────────────────────────────  │ Comments             2  │
-│ FILTERS            ⌄   │  ◯ Rent a car                         │ [ Write a comment     ] │
+│ Filters            ⌄   │  ◯ Rent a car                         │ [ Write a comment     ] │
 └────────────────────────┴───────────────────────────────────────┴─────────────────────────┘
 ```
 
@@ -627,8 +663,8 @@ Tick needs a project tree with drag-to-nest. Revisit when it gains hierarchy.)
 
 **Sections, in order.**
 
-1. System views (no header): Inbox, Today, Upcoming, Completed (Completed sits last in this group).
-   Search is reached through the header bar button and `/`, not a row.
+1. System views (no header): Inbox, Today, Upcoming, Search, Completed. Search is a row, as SPEC
+   lists it among the sidebar views; `/` selects it and focuses its entry.
 2. Favorites (header "Favorites"; hidden when empty): favorite projects, labels and filters,
    each with its own icon or dot.
 3. Projects (header "Projects", trailing "Add Project" button): the tree. Inbox is not repeated
@@ -643,13 +679,14 @@ Tick needs a project tree with drag-to-nest. Revisit when it gains hierarchy.)
 ```
 
 - Icons: Inbox `tick-inbox-symbolic`, Today `tick-today-symbolic` (a calendar page with the day
-  number area), Upcoming `x-office-calendar-symbolic`, Completed `object-select-symbolic`,
+  number area), Upcoming `x-office-calendar-symbolic`, Search `system-search-symbolic`, Completed
+  `object-select-symbolic`,
   labels `tick-label-symbolic`, filters `tick-filter-symbolic`. Icons at rest use the row's text
   color at full opacity (they are 16 px symbolic, 3:1 is met by text color).
 - Projects show the color dot (2.4.7) instead of an icon. Shared projects add
   `system-users-symbolic` (12 px, dimmed) after the name.
 - Count = number of active tasks (Inbox, Today: including overdue; projects: excluding
-  sub-projects). Hidden when 0. Upcoming and Completed show no count.
+  sub-projects). Hidden when 0. Upcoming, Search and Completed show no count.
 - Counts are always neutral, even when they include overdue tasks. Overdue is visible inside
   the view; the sidebar stays calm.
 
@@ -670,16 +707,18 @@ inset accent outline instead of the line). Disabled: none.
 **Keyboard.** Up/Down move focus; Enter or Space opens the view (and on B2 pushes the list
 page); Left collapses a project or moves to its parent; Right expands; Menu key or Shift+F10
 opens the row's context menu (Rename, Color, Favorite, Archive, Delete for projects; Edit,
-Delete for labels and filters). Ctrl+Up/Down are not used for reordering; reordering projects
-is pointer-only in v1 (stated gap; the context menu offers "Move to..." instead).
+Delete for labels and filters). Keyboard equivalents of dragging: Alt+Shift+Up/Down moves the
+focused project among its siblings, Alt+Shift+Right makes it a sub-project of the sibling above,
+Alt+Shift+Left moves it one level out; the context menu also offers "Move to..." (a picker of
+possible parents). Each move shows the same Undo toast as a drag.
 
 **Accessible names.** Row: "Inbox, 4 tasks" (name plus count). Section header: "Projects,
 expanded". Add buttons: "Add Project".
 
 ### 4.2 View header
 
-At the top of every list, scrolling with it (it is the first item of the scrolled content, not
-a list row):
+At the top of every list, scrolling with it. It is the first item of the list model (kind
+"view header", not selectable, not focusable; 7.4 pitfall 14):
 
 ```
 [top margin 48 (24 in B2)]
@@ -783,7 +822,7 @@ rotated -90 degrees when collapsed, `.dimmed` at rest, accessible name "Collapse
 | completed-pending (recurring) | ring filled, title not struck, meta line shows the spinner and "Completing" until the sync returns with the next date; then the ring empties and the due date updates |
 | failed change | trailing `dialog-warning-symbolic` 16 px in `--tick-red`, tooltip with the server message; the row shows the server state (the change was rolled back) |
 | dragging (source) | the row stays in place at 40 % opacity |
-| drag icon | the row rendered on the floating surface (2.6) at its own width, radius 12, 95 % opacity |
+| drag icon | the row rendered on the floating surface (2.6) at its own width, radius 15, 95 % opacity |
 | drop position | 2 px `--accent-color` line with a 6 px dot at its start, inset by the target depth's indent, between rows; dropping on the right half of a row's content nests it as a sub-task (row gets the inset accent outline instead) |
 | disabled | not used (read-only Completed rows use the ring's disabled state and full-contrast titles) |
 
@@ -791,7 +830,10 @@ rotated -90 degrees when collapsed, `.dimmed` at rest, accessible name "Collapse
 E completes; Left collapses or moves to the parent, Right expands; 1 to 4 set priority; T opens
 the date picker anchored to the row; L opens the label picker; Shift+Delete deletes (with toast,
 no confirmation dialog); Menu key or Shift+F10 opens the context menu (Open, Complete, Date,
-Priority, Labels, Move to..., Delete). Every hover-only affordance (the faint check) also shows
+Priority, Labels, Move to..., Delete). Keyboard equivalents of dragging: Alt+Shift+Up/Down moves
+the task among its siblings, Alt+Shift+Right nests it under the task above, Alt+Shift+Left
+un-nests it, V opens "Move to..." (project or section picker, the same as dropping on a sidebar
+project). Every hover-only affordance (the faint check) also shows
 on focus.
 
 **Accessible name.** The row's name is the title; its description is the meta line read as text
@@ -832,7 +874,7 @@ The list is a sequence of day groups, starting with "Overdue" (if any) and then 
 The next 7 days always appear, even when empty; after that only days with tasks.
 
 ```
-Day header (not a row; 56 px tall, top space 18, bottom 6):
+Day header (a non-selectable header row, 7.4 pitfall 14; 56 px tall, top space 18, bottom 6):
 [day number .title-2 .numeric, min-width 36, right-aligned][gap 12][relative label .heading][gap 9][weekday/date .body .dimmed]
 [hairline below, from the day number's x]
 ```
@@ -918,7 +960,7 @@ padding 12.
   closes when the change is queued. Offline: the text is queued like any change.
 - "This Weekend" and "Next Week" resolve with the user's `weekend_start_day` and `next_week`
   settings; the calendar's first weekday is `start_day`.
-- Calendar: today's number in `--accent-color`, weight 700; the selected day is a 36 px filled
+- Calendar: today's number in `--accent-color`, weight 700; the selected day is a 44 px filled
   circle `--accent-bg-color` with `--accent-fg-color` text; other-month days use `.dimmed`
   (72 %, replacing libadwaita's 30 %); the header shows "November 2026" with previous/next month
   buttons (44 x 44).
@@ -1087,7 +1129,7 @@ menu. Sections and items:
 |---|---|
 | General | Quick add `Q`; Search `/`; Preferences `Ctrl+,`; Keyboard shortcuts `Ctrl+?`; Close window `Ctrl+W`; Quit `Ctrl+Q`; Undo `Ctrl+Z` |
 | Navigation | Inbox `G I`; Today `G T`; Upcoming `G U`; Move focus `Up`/`Down` or `K`/`J`; Collapse/expand `Left`/`Right`; Back `Alt+Left` |
-| Tasks | Open `Enter`; Close details `Escape`; Complete `E` or `Space`; Set date `T`; Set priority `1`-`4`; Add labels `L`; Delete `Shift+Delete`; Context menu `Shift+F10` |
+| Tasks | Open `Enter`; Close details `Escape`; Complete `E` or `Space`; Set date `T`; Set priority `1`-`4`; Add labels `L`; Move to project `V`; Reorder `Alt+Shift+Up`/`Down`; Nest / un-nest `Alt+Shift+Right`/`Left`; Delete `Shift+Delete`; Context menu `Shift+F10` |
 
 Sequences use `AdwShortcutLabel`'s sequential syntax with `+` (`g+t` renders G, then T);
 alternatives are space-separated (`e space`). Single-letter shortcuts are
@@ -1133,23 +1175,27 @@ No entrance animations on view switch, no list staggering, no animated counters.
 
 ### 5.3 Reduced motion
 
-GTK 4.22 exposes two system preferences; Tick handles both:
+Owner rule: keep fades, drop movement. GTK 4.22 exposes two system preferences and Tick
+treats both as "reduce motion":
 
-1. `Gtk.Settings:gtk-enable-animations = false` (GNOME "Animations" off; also forced in test
-   mode). GTK and libadwaita skip all animations, including fades. Tick's own animations are
-   `AdwAnimation`s that follow this setting (the default `follow-enable-animations-setting =
-   true`), so they also become instant. The user asked for no animation at all; that is stricter
-   than reduced motion and wins.
+1. `Gtk.Settings:gtk-enable-animations = false`. This is what GNOME's Accessibility "Reduce
+   Animation" switch sets. GTK and libadwaita then skip all their animations, movement and fades
+   alike (split views, navigation, popovers, toasts, CSS transitions).
+   Tick's own fades (completed-row fade-out, title hand-off, description crossfade) are
+   `AdwTimedAnimation`s on `opacity` with `follow-enable-animations-setting = false`, so they
+   still run. Tick has no movement of its own outside CSS transitions and `scroll_to`, which
+   GTK already makes instant. Result: fades kept, movement dropped. (1.2.1, item 5.)
 2. `Gtk.Settings:gtk-interface-reduced-motion = reduce` (new in GTK 4.22; CSS
-   `@media (prefers-reduced-motion: reduce)`). Tick keeps fades and drops movement:
-   - CSS: chevron rotation transitions are removed inside the media query (fades stay).
-   - Code: when the setting is `Reduce`, Tick replaces `scroll_to` smooth scrolling with jumps
-     and keeps its opacity animations.
-   - Libadwaita 1.9 reads this setting too (the library references
-     `gtk-interface-reduced-motion`); whether it turns split-view slides into crossfades must be
-     verified in a screenshot run with the setting forced. If it does not, Tick sets
-     `AdwOverlaySplitView`/`AdwNavigationSplitView` transitions to their instant form while the
-     setting is `Reduce` (accepting no animation over movement).
+   `@media (prefers-reduced-motion: reduce)`). Tick keeps its fades and drops its own movement:
+   chevron rotation transitions are removed inside the media query, and `scroll_to` uses
+   jumps instead of smooth scrolling. Libadwaita 1.9 references this setting internally; whether
+   its split-view and navigation slides become crossfades or stay as slides is not verified.
+   Libadwaita offers no per-widget switch for those transitions, so if they still slide, that is
+   a known gap to raise upstream, not something Tick works around.
+
+**Test mode.** `TICK_TEST_MODE=1` disables animations (architecture doc). Because Tick's fades
+ignore `gtk-enable-animations`, test mode must also skip them explicitly (set their duration to
+0 or apply the end state directly), so screenshots and E2E timing stay deterministic.
 
 ---
 
@@ -1232,7 +1278,7 @@ Formats depend on the user's Todoist settings `date_format` (0 = day first, 1 = 
 | Breakpoints | `AdwBreakpoint` on the window | conditions in `sp`, inclusive |
 | Pane chrome | `AdwToolbarView` + `AdwHeaderBar` | `top-bar-style: flat` |
 | Sidebar list | `GtkListView` + `GtkTreeListModel` + `GtkTreeExpander`, `.navigation-sidebar` | not `AdwSidebar` (no tree, no drag source in 1.9) |
-| Task list | `GtkListView` (`.tick-task-list`) in `AdwClampScrollable` | `gio::ListStore` of `TaskObject`; section headers via `GtkListView` header factory (`GtkListHeader`) for project sections and Upcoming days |
+| Task list | `GtkListView` (`.tick-task-list`) in `AdwClampScrollable` | one flat model of row items with a kind: view header, section header, day header, month header, task, "Add task" ghost row, "Load more"; the factory builds the widget per kind (pitfall 14) |
 | Wrapping meta line | `AdwWrapBox` (1.7) | |
 | Empty states | `AdwStatusPage.compact` | |
 | Quick add, alerts | `AdwDialog`, `AdwAlertDialog` | |
@@ -1250,10 +1296,11 @@ Formats depend on the user's Todoist settings `date_format` (0 = day first, 1 = 
 Libadwaita loads `style.css` from the application's resource base path automatically
 (`/dev/chengrui/Tick/style.css`) at application priority, so these rules override libadwaita
 regardless of selector specificity. Verification done for this sketch on GTK 4.22.5 /
-libadwaita 1.9.4 in headless mutter: no `parsing-error`; a rendered mock in light and dark
-showed the priority rings (rest, checked, dark check mark), neutral selected rows overriding the
-accent, red and green due text switching per theme, 44 px sidebar rows, a 44 x 44 `.tick-hit`
-button and the toast on the floating surface. Popovers did not map in that minimal test, so the
+libadwaita 1.9.4 in headless mutter, with the file auto-loaded from a resource base path: no
+`parsing-error`; a rendered mock in light and dark showed the priority rings (rest, checked,
+dark check mark), neutral selected rows overriding the accent, red and green due text switching
+per theme, 44 px sidebar rows, 44 x 44 header bar buttons and toast buttons, and the toast on
+the floating surface. Popovers did not map in that minimal test, so the
 popover, menu, tooltip and calendar rules are parsed but not yet seen; the first screenshot run
 must check them.
 
@@ -1283,16 +1330,41 @@ must check them.
   :root { --dim-opacity: 90%; }
 }
 
-/* ---------- focus ring at 80 % (2.4.5) ---------- */
+/* ---------- solid focus ring (2.4.5) ---------- */
 *:focus:focus-visible {
-  outline-color: color-mix(in srgb, var(--accent-color) 80%, transparent);
+  outline-color: var(--accent-color);
 }
 
-/* ---------- 44 px hit area for small buttons (2.7) ---------- */
-.tick-hit {
+/* ---------- 44 px targets (2.7) ---------- */
+/* technique 2: transparent border + matching negative margin */
+.tick-hit,
+headerbar button,
+headerbar menubutton,
+headerbar splitbutton,
+toast button {
   border: 5px solid transparent;
   margin: -5px;
   background-clip: padding-box;
+}
+/* the border belongs on the menubutton node, not its inner button */
+headerbar menubutton > button,
+headerbar splitbutton > button,
+headerbar splitbutton > menubutton {
+  border: none;
+  margin: 0;
+}
+/* technique 1: real 44 px widgets */
+.tick-icon-44 {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+.tick-entry { min-height: 44px; }
+.tick-picker-row { min-height: 44px; }
+button.link.tick-link-44 { min-height: 44px; }
+popover calendar > header > button {
+  min-width: 44px;
+  min-height: 44px;
 }
 
 /* ---------- one floating surface (2.6) ---------- */
@@ -1351,7 +1423,7 @@ listview.tick-task-list > row.tick-drag-source { opacity: 0.4; }
   color: var(--popover-fg-color);
   border: 1px solid var(--tick-float-border);
   box-shadow: var(--tick-float-shadow);
-  border-radius: 12px;
+  border-radius: 15px;
   opacity: 0.95;
 }
 
@@ -1418,7 +1490,10 @@ checkbutton.tick-ring > check:checked {
 }
 
 /* ---------- section and Upcoming headers (4.5, 4.7) ---------- */
-.tick-section-header { margin-top: 24px; }
+.tick-section-header {
+  margin-top: 24px;
+  min-height: 44px;
+}
 .tick-section-rule {
   min-height: 1px;
   background-color: var(--border-color);
@@ -1571,9 +1646,13 @@ gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` na
     for screenshots.
 13. **Font provider.** The CJK fallback provider must be rebuilt when `gtk-font-name` changes;
     do not hard-code "Adwaita Sans" (users may choose another UI font).
-14. **Header factories.** Use `GtkListView`'s section header factory for section and day
-    headers rather than mixing header rows into the task model; it keeps keyboard navigation and
-    selection on tasks only. Section headers still need focusable controls (chevron, menu).
+14. **Headers are model rows, not `GtkListHeader`s.** `GtkListView`'s section headers only
+    exist for sections with at least one item, so a collapsed project section and an empty
+    Upcoming day would lose their headers, and headers cannot take focus. Put the view header,
+    section headers, day and month headers, ghost rows and "Load more" into the list model as
+    their own item kinds. For those rows set `GtkListItem:selectable = false`; headers and ghost
+    rows stay `focusable` and `activatable` (Enter toggles a section, activates a ghost row).
+    The task-count and selection logic must skip non-task kinds.
 15. **Color-scheme media queries need the provider's scheme.** The auto-loaded `style.css`
     follows `AdwStyleManager` (verified: dark values apply). A `GtkCssProvider` that Tick creates
     in code (the font provider in 2.3, any test provider) ignores `@media (prefers-color-scheme:
@@ -1648,10 +1727,12 @@ A "no" blocks the PR unless the item is marked as a known gap in the PR body.
 
 - [ ] Every control is at least 44 x 44 (rows, ring, header buttons via `.tick-hit`, calendar
       days). E2E AT-SPI extents confirm header buttons.
-- [ ] Focus rings are visible (80 % accent) on rows, buttons and calendar days.
+- [ ] Focus rings are visible (solid accent) on rows, buttons and calendar days.
 - [ ] Anything that appears on hover also appears on keyboard focus; Escape closes every popover,
       dialog and the detail pane.
-- [ ] With reduced motion, nothing slides or rotates; fades remain.
+- [ ] With "Reduce Animation" on (`gtk-enable-animations = false`) and with
+      `prefers-reduced-motion: reduce`, Tick's own elements do not slide or rotate, and its fades
+      (row fade-out, title hand-off) remain.
 
 **Copy and language**
 
