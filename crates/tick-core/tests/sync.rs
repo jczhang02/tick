@@ -1432,3 +1432,45 @@ async fn background_engine_sends_deferred_commands_when_due() {
     assert!(enqueued.elapsed() >= Duration::from_millis(500));
     handle.shutdown();
 }
+
+/// Failed filter requests arrive as structured events: a query the server cannot parse is
+/// `rejected`, an unreachable server is `offline`.
+#[tokio::test]
+async fn background_engine_reports_filter_failures() {
+    let e = env().await;
+    let dir = tempfile::tempdir().unwrap();
+    let config = tick_core::EngineConfig {
+        api_base: e.server.base_url(),
+        token: e.server.token(),
+        db_path: dir.path().join("bg.sqlite3"),
+        foreground_interval: Duration::from_secs(60),
+        background_interval: Duration::from_secs(60),
+        clock: Some(fixed_clock()),
+    };
+    let (handle, events) = tick_core::Engine::spawn(config).unwrap();
+    let next_error = || async {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(Instant::now() < deadline, "no error event");
+            if let Ok(Ok(tick_core::EngineEvent::Error(f))) =
+                tokio::time::timeout(Duration::from_secs(5), events.recv()).await
+            {
+                return f;
+            }
+        }
+    };
+    // `due after:` is outside both the local subset and the fake server's subset.
+    handle.fetch_filter("due after: 2026-03-01");
+    let f = next_error().await;
+    assert_eq!(
+        f.request,
+        tick_core::FailedRequest::Filter("due after: 2026-03-01".into())
+    );
+    assert!(f.rejected && !f.offline, "{f:?}");
+
+    e.server.set_offline(true);
+    handle.fetch_filter("due after: 2026-03-01");
+    let f = next_error().await;
+    assert!(f.offline && !f.rejected, "{f:?}");
+    handle.shutdown();
+}

@@ -449,6 +449,20 @@ fn complete_and_uncomplete_locally() {
     s.enqueue(Command::item_close("r")).unwrap();
     let r = s.task("r").unwrap().unwrap();
     assert!(r.checked && r.pending);
+    // Views keep showing it (completed-pending) until the server moves its date.
+    let in_inbox = |s: &Store| {
+        s.project_view("inbox")
+            .unwrap()
+            .unwrap()
+            .tasks
+            .iter()
+            .any(|n| n.task.id == "r" && n.task.checked && n.task.pending)
+    };
+    assert!(in_inbox(&s));
+    assert!(s.today().unwrap().today.iter().any(|t| t.id == "r"));
+    // A completed non-recurring task leaves the views.
+    s.enqueue(Command::item_close("a")).unwrap();
+    assert!(!s.today().unwrap().today.iter().any(|t| t.id == "a"));
 
     // Reopening a task from the completed history cache.
     s.cache_completed(&[
@@ -585,4 +599,32 @@ fn v1_caches_upgrade_to_v2() {
     assert_eq!(queued[0].not_before, None);
     assert!(queued[0].is_due(0));
     assert_eq!(s.resolve_id("a").unwrap(), "a");
+}
+
+#[test]
+fn subtask_counts_and_filter_fetch_time() {
+    let mut s = seeded();
+    // "e" is the only (open) sub-task of "d".
+    assert_eq!(s.subtask_counts().unwrap().get("d"), Some(&(1, 0)));
+    s.enqueue(Command::item_close("e")).unwrap();
+    assert_eq!(s.subtask_counts().unwrap().get("d"), Some(&(0, 1)));
+
+    assert_eq!(s.filter_fetched_at("due after: today").unwrap(), None);
+    s.cache_filter_results("due after: today", &[]).unwrap();
+    assert_eq!(
+        s.filter_fetched_at("due after: today").unwrap().as_deref(),
+        Some("2026-03-10T01:00:00.000000Z")
+    );
+}
+
+#[test]
+fn today_count_matches_today() {
+    let mut s = seeded();
+    let count = |s: &Store| {
+        let t = s.today().unwrap();
+        t.overdue.len() + t.today.len()
+    };
+    assert_eq!(s.today_count().unwrap(), count(&s));
+    s.enqueue(Command::item_close("a")).unwrap();
+    assert_eq!(s.today_count().unwrap(), count(&s));
 }
