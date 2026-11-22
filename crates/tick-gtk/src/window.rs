@@ -500,12 +500,18 @@ impl TickWindow {
             e.set_token(&token);
             return;
         }
+        // The engine opens its own connection to the same file. An in-memory cache (no file
+        // could be opened) cannot be shared: syncing into another database would never show
+        // up here, so do not sync at all.
         let path = imp
             .store
             .borrow()
             .as_ref()
-            .and_then(|s| s.path().map(std::path::Path::to_path_buf))
-            .unwrap_or_else(tick_core::store::default_path);
+            .and_then(|s| s.path().map(std::path::Path::to_path_buf));
+        let Some(path) = path else {
+            eprintln!("tick: no cache file, not syncing");
+            return;
+        };
         let config = tick_core::EngineConfig::from_env(token, path);
         let (handle, events) = match tick_core::Engine::spawn(config) {
             Ok(v) => v,
@@ -592,7 +598,20 @@ impl TickWindow {
         let only_queue = !c.full && c.kinds.iter().all(|k| *k == Kind::Queue);
         if !only_queue {
             self.refresh_rows_with(&c.id_map);
-            self.refresh_sidebar();
+            // Sidebar names and counts (filter counts evaluate every saved filter) depend
+            // only on these kinds; comments, reminders and completed history do not.
+            const SIDEBAR: [Kind; 7] = [
+                Kind::Item,
+                Kind::Project,
+                Kind::Section,
+                Kind::Label,
+                Kind::Filter,
+                Kind::Collaborator,
+                Kind::User,
+            ];
+            if c.full || c.kinds.iter().any(|k| SIDEBAR.contains(k)) {
+                self.refresh_sidebar();
+            }
         }
         self.refresh_sync();
     }
@@ -600,7 +619,13 @@ impl TickWindow {
     fn on_status(&self, s: SyncStatus) {
         let imp = self.imp();
         let was_offline = imp.ui.borrow().offline;
-        let offline = s.state == ConnState::Offline;
+        // A sync attempt (Syncing) does not end the offline state: only an answer does.
+        // Otherwise the indicator (and its open popover) would vanish on every retry.
+        let offline = match s.state {
+            ConnState::Offline => true,
+            ConnState::Online | ConnState::Unauthorized => false,
+            ConnState::Idle | ConnState::Syncing => was_offline,
+        };
         imp.ui.borrow_mut().offline = offline;
         imp.status.replace(s.clone());
 
@@ -745,6 +770,12 @@ impl TickWindow {
 
     fn refresh_rows(&self) {
         self.refresh_rows_with(&[]);
+    }
+
+    fn selected_position(&self) -> Option<u32> {
+        let sel = self.imp().selection.get()?;
+        let pos = sel.selected();
+        (pos != gtk::INVALID_LIST_POSITION).then_some(pos)
     }
 
     fn selected_task(&self) -> Option<String> {
@@ -1153,6 +1184,8 @@ impl TickWindow {
         let focus_pos = gtk::prelude::GtkWindowExt::focus(self)
             .filter(|f| f.is_ancestor(&*imp.task_list))
             .map(|_| self.row_position(id).unwrap_or(0));
+        // The selection moves on only when the completed task was the selected one (E).
+        let was_selected = self.selected_task().as_deref() == Some(id);
         let cmd = Command::item_close(id);
         let uuid = cmd.uuid.clone();
         // Held back while the Undo toast shows (see `push_undo`).
@@ -1167,7 +1200,7 @@ impl TickWindow {
         };
         self.after_local_change(&changes);
         if let Some(pos) = focus_pos {
-            self.focus_task_near(pos);
+            self.focus_task_near(pos, was_selected);
         }
         self.push_undo(UndoEntry {
             id: id.to_owned(),
@@ -1424,14 +1457,30 @@ impl TickWindow {
                 w.quick_add(&text);
             }
         });
+        // Focus goes back where it was (a task row), else to the list, not to whatever
+        // header button GTK picks.
+        let before = gtk::prelude::GtkWindowExt::focus(self).map(|f| f.downgrade());
         let weak = self.downgrade();
         dialog.connect_closed(move |d| {
-            if let Some(w) = weak.upgrade()
-                && !d.was_submitted()
-            {
+            let Some(w) = weak.upgrade() else { return };
+            if !d.was_submitted() {
                 // Escape keeps the draft for the next opening in this session.
                 w.imp().draft.replace(d.text());
             }
+            let before = before.clone();
+            let weak = w.downgrade();
+            glib::idle_add_local_once(move || {
+                let Some(w) = weak.upgrade() else { return };
+                match before.and_then(|b| b.upgrade()) {
+                    Some(b) if b.is_mapped() && b.root().is_some() => {
+                        b.grab_focus();
+                    }
+                    _ => {
+                        let selected = w.selected_position();
+                        w.focus_task_near(selected.unwrap_or(0), selected.is_some());
+                    }
+                }
+            });
         });
         dialog.present(Some(self));
     }
@@ -1581,12 +1630,12 @@ impl TickWindow {
     }
 
     fn focus_first_task_now(&self) {
-        self.focus_task_near(0);
+        self.focus_task_near(0, true);
     }
 
-    /// Focus and select the first task row at or after position `from`, else the last one
-    /// before it.
-    fn focus_task_near(&self, from: u32) {
+    /// Focus (and select, if `select`) the first task row at or after position `from`,
+    /// else the last one before it.
+    fn focus_task_near(&self, from: u32, select: bool) {
         let imp = self.imp();
         let Some(store) = imp.rows.get() else { return };
         let is_task = |i: &u32| {
@@ -1600,11 +1649,11 @@ impl TickWindow {
             .find(is_task)
             .or_else(|| (0..from.min(n)).rev().find(is_task));
         if let Some(pos) = found {
-            imp.task_list.scroll_to(
-                pos,
-                gtk::ListScrollFlags::FOCUS | gtk::ListScrollFlags::SELECT,
-                None,
-            );
+            let mut flags = gtk::ListScrollFlags::FOCUS;
+            if select {
+                flags |= gtk::ListScrollFlags::SELECT;
+            }
+            imp.task_list.scroll_to(pos, flags, None);
             imp.task_list.grab_focus();
         }
     }

@@ -48,6 +48,11 @@ fn save_screenshot(window: &gtk::Window, path: &Path) -> Result<(), String> {
     let paintable = gtk::WidgetPaintable::new(Some(window));
     let snapshot = gtk::Snapshot::new();
     paintable.snapshot(&snapshot, f64::from(width), f64::from(height));
+    // Popovers, menus and tooltips are surfaces of their own: draw them on top, where the
+    // compositor shows them. Popup positions are relative to the parent surface, whose
+    // origin is the window's surface transform (the CSD shadow) away from the window.
+    let (wx, wy) = window.surface_transform();
+    add_popups(window.upcast_ref(), &snapshot, (-wx, -wy));
     let node = snapshot.to_node().ok_or("empty render node")?;
     let renderer = window.renderer().ok_or("window has no renderer")?;
     let viewport = graphene::Rect::new(0.0, 0.0, width as f32, height as f32);
@@ -55,6 +60,40 @@ fn save_screenshot(window: &gtk::Window, path: &Path) -> Result<(), String> {
     let tmp = path.with_extension("png.part");
     texture.save_to_png(&tmp).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+/// Draws the mapped popup natives (popovers, tooltip windows) below `widget` at their
+/// on-screen position. `origin` is where the parent surface's (0, 0) lies in window
+/// coordinates.
+fn add_popups(widget: &gtk::Widget, snapshot: &gtk::Snapshot, origin: (f64, f64)) {
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        let popup = c
+            .dynamic_cast_ref::<gtk::Native>()
+            .filter(|_| c.is_mapped())
+            .and_then(|n| Some((n.surface()?.downcast::<gtk::gdk::Popup>().ok()?, n)));
+        match popup {
+            Some((popup, native)) => {
+                let (tx, ty) = native.surface_transform();
+                let surface = (
+                    origin.0 + f64::from(popup.position_x()),
+                    origin.1 + f64::from(popup.position_y()),
+                );
+                let paintable = gtk::WidgetPaintable::new(Some(&c));
+                snapshot.save();
+                snapshot.translate(&graphene::Point::new(
+                    (surface.0 + tx) as f32,
+                    (surface.1 + ty) as f32,
+                ));
+                paintable.snapshot(snapshot, f64::from(c.width()), f64::from(c.height()));
+                snapshot.restore();
+                // Nested popups (a submenu) are relative to this surface.
+                add_popups(&c, snapshot, surface);
+            }
+            None => add_popups(&c, snapshot, origin),
+        }
+        child = c.next_sibling();
+    }
 }
 
 /// Prints `TICK_FIRST_DATA_FRAME_MS` after the first frame that shows cached tasks: the

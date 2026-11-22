@@ -295,11 +295,15 @@ fn inbox_label_and_filters() {
     )
     .unwrap();
     let c = build(&s, &ViewId::Filter("f2".into()), &UiState::default()).unwrap();
-    assert_eq!(keys(&c), ["header", "source:0", "task:w4"]);
-    let Row::SourceLine { text, .. } = &c.rows[1] else {
+    // A single group: the source line is part of the view header (4.22).
+    assert_eq!(keys(&c), ["header", "task:w4"]);
+    let Row::ViewHeader(h) = &c.rows[0] else {
         panic!()
     };
-    assert_eq!(text, "Results from Todoist, updated 09:00");
+    assert_eq!(
+        h.source,
+        Some(("Results from Todoist, updated 09:00".to_owned(), false))
+    );
 }
 
 #[test]

@@ -107,15 +107,20 @@ impl SyncIndicator {
         let popover = gtk::Popover::builder().child(&body).build();
         button.set_popover(Some(&popover));
 
-        let pop = popover.clone();
+        // Weak: the popover owns these buttons (no reference cycle).
+        let pop = popover.downgrade();
         sync_now.connect_clicked(move |_| {
             on_sync_now();
-            pop.popdown();
+            if let Some(p) = pop.upgrade() {
+                p.popdown();
+            }
         });
-        let pop = popover.clone();
+        let pop = popover.downgrade();
         dismiss.connect_clicked(move |_| {
             on_dismiss();
-            pop.popdown();
+            if let Some(p) = pop.upgrade() {
+                p.popdown();
+            }
         });
         Rc::new(SyncIndicator {
             button,

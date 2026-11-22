@@ -42,8 +42,17 @@ fn open_store() -> Store {
     match Store::open_default() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("tick: cannot open the cache, using a temporary one: {e}");
-            Store::open_in_memory().expect("in-memory store")
+            // A temporary file, not memory: the sync engine opens the same path with its own
+            // connection, so UI and engine must share a file.
+            let tmp = std::env::temp_dir().join(format!("tick-{}.sqlite3", std::process::id()));
+            eprintln!(
+                "tick: cannot open the cache, using {} for this session: {e}",
+                tmp.display()
+            );
+            Store::open(&tmp).unwrap_or_else(|e| {
+                eprintln!("tick: cannot open a temporary cache either, syncing is off: {e}");
+                Store::open_in_memory().expect("in-memory store")
+            })
         }
     }
 }
@@ -122,10 +131,10 @@ fn activate(app: &adw::Application) {
     }
     window.present();
 
-    // No network before the first frame: the token (keyring on a worker thread) and the
-    // sync engine start once the main loop is idle.
+    // No network before the first frame (docs/architecture.md, data flow 1): the token
+    // (keyring on a worker thread) and the sync engine start after the first paint.
     let weak = window.downgrade();
-    glib::idle_add_local_once(move || {
+    after_first_frame(&window, move || {
         let Some(window) = weak.upgrade() else { return };
         if let Some(token) = env_token {
             window.start_engine(token);
@@ -151,4 +160,33 @@ fn activate(app: &adw::Application) {
             }
         });
     });
+}
+
+/// Runs `f` once, after the window's first paint (an idle callback alone can run before it:
+/// on Wayland the first frame waits for the compositor's configure).
+fn after_first_frame(window: &TickWindow, f: impl FnOnce() + 'static) {
+    let f = std::rc::Rc::new(RefCell::new(Some(f)));
+    let Some(clock) = window.frame_clock() else {
+        glib::idle_add_local_once(move || {
+            if let Some(f) = f.borrow_mut().take() {
+                f();
+            }
+        });
+        return;
+    };
+    let handler = std::rc::Rc::new(std::cell::Cell::new(None));
+    let handler_in = handler.clone();
+    let id = clock.connect_after_paint(move |clock| {
+        if let Some(id) = handler_in.take() {
+            clock.disconnect(id);
+        }
+        // Not inside the paint cycle.
+        let f = f.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(f) = f.borrow_mut().take() {
+                f();
+            }
+        });
+    });
+    handler.set(Some(id));
 }

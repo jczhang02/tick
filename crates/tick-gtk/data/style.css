@@ -409,8 +409,9 @@ image.tick-failed { color: var(--tick-red); }
 /* view header (4.2): the 9 px gap after the dot is a widget spacing */
 .tick-view-header { margin-bottom: 24px; }
 
-/* Upcoming day header number: right-aligned in a 36 px column (4.7) */
-.tick-day-number { min-width: 36px; }
+/* Upcoming day header number: right-aligned in a 32 px column, so 32 + 12 puts the label at the
+   task title x of 44 (4.7) */
+.tick-day-number { min-width: 32px; }
 image.tick-overdue-icon { color: var(--tick-red); }
 
 /* empty state row (4.13): 36 px below the header */
@@ -422,9 +423,12 @@ entry.tick-quick-entry {
   min-height: 44px;
   background: none;
   box-shadow: none;
-  outline: none;
-  padding-left: 0;
-  padding-right: 0;
+  /* the focus ring (2.4.5) needs room around the text; the negative margin keeps the text on
+     the chips' x */
+  padding-left: 9px;
+  padding-right: 9px;
+  margin-left: -9px;
+  margin-right: -9px;
 }
 .tick-token-chip image.tick-warning { color: var(--tick-red); }
 .tick-token-chip .tick-chip-ring {
@@ -440,3 +444,41 @@ entry.tick-quick-entry {
 /* sync status (4.14) */
 image.tick-sync-error { color: var(--tick-red); }
 .tick-sync-popover { min-width: 296px; }
+
+/* technique 2 (2.7) draws the radius from the border box: with the 5 px transparent border, 9 px
+   would leave 4 px on the visible fill. 9 + 5 = 14 keeps radius-row (2.2) on what is seen. */
+.tick-hit:not(.pill):not(.circular),
+headerbar button:not(.circular),
+headerbar menubutton,
+headerbar splitbutton,
+toast button {
+  border-radius: 14px;
+}
+headerbar windowcontrols > button { border-radius: 9999px; }
+/* the ring hugs the visible 34 px button, not the 44 px hit area (7.4 pitfall 6) */
+headerbar button:focus:focus-visible,
+toast button:focus:focus-visible,
+.tick-hit:focus:focus-visible {
+  outline-offset: -7px;
+}
+/* a menu button's inner button has no transparent border */
+headerbar menubutton > button:focus:focus-visible,
+headerbar splitbutton > button:focus:focus-visible,
+headerbar splitbutton > menubutton > button:focus:focus-visible {
+  outline-offset: -2px;
+}
+
+/* the task list pane uses the view background (2.4.1) */
+.tick-list-pane {
+  background-color: var(--view-bg-color);
+  color: var(--view-fg-color);
+}
+
+/* quick add uses the dialog background (2.4.1); AdwDialog defaults to the window color */
+dialog.tick-quick-add sheet {
+  background-color: var(--dialog-bg-color);
+  color: var(--dialog-fg-color);
+}
+
+/* the first day group right under the view header needs no space of its own (4.7) */
+.tick-day-header.first { margin-top: 0; }

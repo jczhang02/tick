@@ -541,6 +541,58 @@ impl Store {
         Ok(out)
     }
 
+    /// How many active tasks each filter query shows (sum over its comma-separated groups;
+    /// completed-pending tasks are not counted). The tasks are loaded once for all queries,
+    /// unlike calling [`Store::filter_view`] per filter.
+    pub fn filter_counts(&self, queries: &[&str]) -> Result<Vec<usize>> {
+        let now = self.now();
+        let mut active: Option<(Vec<Task>, EvalContext)> = None;
+        let mut out = Vec::with_capacity(queries.len());
+        for query in queries {
+            let mut count = 0;
+            for g in filter::parse(query) {
+                match g {
+                    Group::Supported { expr, .. } => {
+                        if active.is_none() {
+                            let all = tasks(
+                                &self.conn,
+                                &format!("SELECT raw, local_pending FROM items WHERE {VISIBLE}"),
+                                [],
+                                &now,
+                            )?;
+                            active = Some((all, self.eval_context()?));
+                        }
+                        let Some((all, ctx)) = &active else {
+                            unreachable!()
+                        };
+                        count += all
+                            .iter()
+                            .filter(|t| !t.checked)
+                            .filter(|t| {
+                                filter::eval(
+                                    &expr,
+                                    &EvalTask {
+                                        item: &t.item,
+                                        due: t.due,
+                                    },
+                                    ctx,
+                                    &now,
+                                )
+                            })
+                            .count();
+                    }
+                    Group::Unsupported { text, .. } => {
+                        count += self
+                            .cached_filter_results(&text)?
+                            .map_or(0, |t| t.iter().filter(|t| !t.checked).count());
+                    }
+                }
+            }
+            out.push(count);
+        }
+        Ok(out)
+    }
+
     /// The last server result for a filter query, if cached.
     pub fn cached_filter_results(&self, query: &str) -> Result<Option<Vec<Task>>> {
         let now = self.now();

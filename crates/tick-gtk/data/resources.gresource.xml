@@ -8,9 +8,11 @@
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-app-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-comment-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-deadline-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-due-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-filter-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-inbox-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-label-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-overdue-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-project-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-subtasks-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-today-symbolic.svg</file>

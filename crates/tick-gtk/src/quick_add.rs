@@ -37,6 +37,8 @@ mod imp {
         pub offline: Cell<bool>,
         pub submit: RefCell<Option<SubmitFn>>,
         pub submitted: Cell<bool>,
+        /// Handlers on the global style manager, disconnected in `dispose`.
+        pub style_handlers: RefCell<Vec<glib::SignalHandlerId>>,
     }
 
     #[glib::object_subclass]
@@ -97,19 +99,46 @@ mod imp {
             });
             let style = adw::StyleManager::default();
             let weak = obj.downgrade();
-            style.connect_dark_notify(move |_| {
+            let dark = style.connect_dark_notify(move |_| {
                 if let Some(d) = weak.upgrade() {
                     d.refresh();
                 }
             });
             let weak = obj.downgrade();
-            style.connect_accent_color_notify(move |_| {
+            let accent = style.connect_accent_color_notify(move |_| {
                 if let Some(d) = weak.upgrade() {
                     d.refresh();
                 }
             });
+            self.style_handlers.replace(vec![dark, accent]);
+            obj.add_css_class("tick-quick-add");
             obj.set_focus(Some(&*self.entry));
+            // Focusing an entry selects its text, so a kept draft would be replaced by the
+            // first key (4.11 keeps it): put the cursor at the end instead.
+            let first_focus = Cell::new(true);
+            let focus = gtk::EventControllerFocus::new();
+            let weak = obj.downgrade();
+            focus.connect_enter(move |_| {
+                if !first_focus.replace(false) {
+                    return;
+                }
+                // After GtkText's own focus-in, which selects everything.
+                let weak = weak.clone();
+                glib::idle_add_local_once(move || {
+                    if let Some(d) = weak.upgrade() {
+                        d.imp().entry.set_position(-1);
+                    }
+                });
+            });
+            self.entry.add_controller(focus);
             obj.refresh();
+        }
+
+        fn dispose(&self) {
+            let style = adw::StyleManager::default();
+            for id in self.style_handlers.take() {
+                style.disconnect(id);
+            }
         }
     }
 

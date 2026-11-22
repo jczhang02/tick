@@ -219,10 +219,13 @@ fn view_header(h: &ViewHeader, ctx: &RenderCtx) -> gtk::Widget {
         ql.set_selectable(false);
         sub.append(&ql);
     }
-    sub.append(&label(
-        &ncount("{n} task", "{n} tasks", h.count),
-        &["body", "dimmed", "numeric"],
-    ));
+    // A zero count repeats the empty state below it (4.2).
+    if h.count > 0 {
+        sub.append(&label(
+            &ncount("{n} task", "{n} tasks", h.count),
+            &["body", "dimmed", "numeric"],
+        ));
+    }
     if !h.avatars.is_empty() {
         let avatars = gtk::Box::new(gtk::Orientation::Horizontal, 3);
         for name in &h.avatars {
@@ -233,7 +236,25 @@ fn view_header(h: &ViewHeader, ctx: &RenderCtx) -> gtk::Widget {
         }
         sub.append(&avatars);
     }
-    root.append(&sub);
+    if sub.first_child().is_some() {
+        root.append(&sub);
+    }
+    if let Some((text, spinner)) = &h.source {
+        // Where server filter results come from: part of the header, 6 px under the
+        // subtitle (4.21, 4.22).
+        let line = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .margin_top(6)
+            .build();
+        if *spinner {
+            let s = adw::Spinner::new();
+            s.set_size_request(16, 16);
+            line.append(&s);
+        }
+        line.append(&label(text, &["caption", "dimmed"]));
+        root.append(&line);
+    }
     let height = ctx.header_height.clone();
     root.connect_map(move |w| {
         let w = w.clone();
@@ -277,14 +298,28 @@ fn section_header(s: &SectionHeader, ctx: &RenderCtx) -> gtk::Widget {
     let id = s.id.clone();
     chevron.connect_clicked(move |_| dispatch(RowAction::ToggleSection(id.clone())));
     line.append(&chevron);
+    // The hairline hangs 6 px under the name's ink (2 px under its label box, which
+    // includes the descender space; 4.5), inside the 44 px header line: the name column
+    // is centered as if the rule (3 px with its gap) were not there.
+    let column = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .valign(gtk::Align::Center)
+        .margin_top(3)
+        .hexpand(true)
+        .build();
+    let name_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     let title = label(&s.name, &["heading"]);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    line.append(&title);
+    name_row.append(&title);
     let count = label(&s.count.to_string(), &["caption", "dimmed", "numeric"]);
     count.set_margin_start(9);
-    line.append(&count);
+    name_row.append(&count);
+    column.append(&name_row);
+    let rule = hairline(0);
+    rule.set_margin_top(2);
+    column.append(&rule);
+    line.append(&column);
     root.append(&line);
-    root.append(&hairline(44));
     root.upcast()
 }
 
@@ -308,6 +343,9 @@ fn day_header(d: &DayHeader) -> gtk::Widget {
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["tick-day-header"])
         .build();
+    if d.first {
+        root.add_css_class("first");
+    }
     let line = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .spacing(12)
@@ -321,7 +359,7 @@ fn day_header(d: &DayHeader) -> gtk::Widget {
             line.append(&num);
         }
         None => {
-            let i = icon("task-past-due-symbolic", &["tick-overdue-icon"]);
+            let i = icon("tick-overdue-symbolic", &["tick-overdue-icon"]);
             i.set_pixel_size(20);
             i.set_halign(gtk::Align::End);
             i.set_valign(gtk::Align::Center);
@@ -345,7 +383,8 @@ fn day_header(d: &DayHeader) -> gtk::Widget {
     }
     line.append(&text);
     root.append(&line);
-    root.append(&hairline(0));
+    // From the day number (right-aligned in its 32 px column), not from the row edge.
+    root.append(&hairline(6));
     root.upcast()
 }
 
@@ -448,7 +487,7 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
         let icon_name = if d.recurring {
             "media-playlist-repeat-symbolic"
         } else {
-            "task-due-symbolic"
+            "tick-due-symbolic"
         };
         meta.append(&meta_item(Some(icon_name), &d.text, due_classes(d)));
         has_meta = true;
@@ -540,6 +579,13 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
         let id = t.id.clone();
         chevron.connect_clicked(move |_| dispatch(RowAction::ToggleSubtasks(id.clone())));
         trailing.append(&chevron);
+    } else if t.chevron_slot {
+        // Keep the chevron column so avatars line up with the parents' (4.4).
+        let slot = gtk::Box::builder()
+            .width_request(44)
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .build();
+        trailing.append(&slot);
     }
     if trailing.first_child().is_some() {
         root.append(&trailing);

@@ -77,6 +77,9 @@ pub struct ViewHeader {
     pub icon: Option<&'static str>,
     /// Member names of a shared project (up to 3 avatars).
     pub avatars: Vec<String>,
+    /// Where server filter results come from, and whether they are loading (4.22). Shown
+    /// under the subtitle, as part of the header.
+    pub source: Option<(String, bool)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,6 +99,8 @@ pub struct DayHeader {
     pub label: String,
     /// Dimmed text after the label: weekday (Today, Tomorrow) or the count (Overdue).
     pub dim: Option<String>,
+    /// Directly under the view header: no space above (the header has its own).
+    pub first: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -137,6 +142,8 @@ pub struct TaskRow {
     pub p: u8,
     pub depth: usize,
     pub has_children: bool,
+    /// The view has parents: keep an empty 44 px chevron slot so trailing avatars align.
+    pub chevron_slot: bool,
     pub collapsed: bool,
     /// Ring filled: completing (hold) or completed-pending (recurring, waiting for sync).
     pub checked: bool,
@@ -479,6 +486,7 @@ impl<'s> Lookup<'s> {
             p: t.item.p(),
             depth: depth.min(MAX_DEPTH),
             has_children,
+            chevron_slot: false,
             collapsed: has_children && t.is_collapsed,
             checked: completed_pending || completing,
             completing: completing && !completed_pending,
@@ -589,6 +597,7 @@ fn header(title: &str, count: usize) -> ViewHeader {
         color: None,
         icon: None,
         avatars: Vec::new(),
+        source: None,
     }
 }
 
@@ -599,7 +608,7 @@ fn iso(d: NaiveDate) -> String {
 /// Build the rows of `view`.
 pub fn build(store: &Store, view: &ViewId, ui: &UiState) -> Result<Content> {
     let lk = Lookup::new(store)?;
-    match view {
+    let content = match view {
         ViewId::Inbox => match store.inbox_project_id()? {
             Some(id) => project(&lk, &id, true, ui),
             None => Ok(Content {
@@ -616,7 +625,34 @@ pub fn build(store: &Store, view: &ViewId, ui: &UiState) -> Result<Content> {
         ViewId::Project(id) => project(&lk, id, false, ui),
         ViewId::Label(id) => label(&lk, id, ui),
         ViewId::Filter(id) => filter(&lk, id, ui),
+    }?;
+    Ok(finish(content))
+}
+
+/// Layout details that depend on neighbouring rows.
+fn finish(mut c: Content) -> Content {
+    // A source line right under the header belongs to the header (4.21, 4.22).
+    if let Some(Row::SourceLine { .. }) = c.rows.get(1)
+        && let Row::SourceLine { text, spinner, .. } = c.rows.remove(1)
+        && let Some(Row::ViewHeader(h)) = c.rows.first_mut()
+    {
+        h.source = Some((text, spinner));
     }
+    if let Some(Row::DayHeader(d)) = c.rows.get_mut(1) {
+        d.first = true;
+    }
+    // Trailing avatars line up when some rows have a sub-task chevron (4.4).
+    let parents = c
+        .rows
+        .iter()
+        .any(|r| matches!(r, Row::Task(t) if t.has_children));
+    for r in &mut c.rows {
+        if let Row::Task(t) = r {
+            t.chevron_slot =
+                parents && !t.has_children && (t.assignee.is_some() || t.failed.is_some());
+        }
+    }
+    c
 }
 
 fn inbox_empty() -> Row {
@@ -764,6 +800,7 @@ fn day_header(lk: &Lookup<'_>, date: NaiveDate) -> DayHeader {
         number: Some(date.day()),
         label,
         dim,
+        first: false,
     }
 }
 
@@ -773,6 +810,7 @@ fn overdue_header(count: usize) -> DayHeader {
         number: None,
         label: gettext("Overdue"),
         dim: Some(count.to_string()),
+        first: false,
     }
 }
 
@@ -914,7 +952,10 @@ fn label(lk: &Lookup<'_>, id: &str, ui: &UiState) -> Result<Content> {
         group: None,
     };
     for t in &tasks {
-        rows.push(Row::Task(Box::new(lk.task_row(t, 0, false, mode, ui))));
+        let mut row = lk.task_row(t, 0, false, mode, ui);
+        // The view already names the label (4.4): show only the others.
+        row.labels.retain(|l| *l != name);
+        rows.push(Row::Task(Box::new(row)));
     }
     Ok(Content {
         title: name.clone(),
@@ -1078,18 +1119,6 @@ pub struct SidebarData {
     pub filters: Vec<SidebarEntry>,
 }
 
-/// Number of tasks a filter shows (local evaluation plus cached server results).
-fn filter_count(store: &Store, query: &str) -> Result<usize> {
-    Ok(store
-        .filter_view(query)?
-        .iter()
-        .map(|g| match &g.result {
-            FilterGroupResult::Local(t) => t.len(),
-            FilterGroupResult::Server { cached, .. } => cached.as_ref().map_or(0, Vec::len),
-        })
-        .sum())
-}
-
 /// Sidebar contents with counts (4.1). Counts exclude completed-pending tasks.
 pub fn sidebar(store: &Store) -> Result<SidebarData> {
     let tree = store.projects_tree()?;
@@ -1148,11 +1177,15 @@ pub fn sidebar(store: &Store) -> Result<SidebarData> {
         labels.push(e);
     }
     let mut filters = Vec::new();
-    for f in store.filters()? {
+    let saved = store.filters()?;
+    let queries: Vec<&str> = saved.iter().map(|f| f.query.as_str()).collect();
+    // One pass over the tasks for every filter.
+    let counts = store.filter_counts(&queries)?;
+    for (f, count) in saved.iter().zip(counts) {
         let e = SidebarEntry {
             view: ViewId::Filter(f.id.clone()),
             name: f.name.clone(),
-            count: filter_count(store, &f.query)?,
+            count,
             color: None,
         };
         if f.is_favorite {

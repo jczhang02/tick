@@ -31,6 +31,8 @@ template $TickWindow: Adw.ApplicationWindow {
             child: Adw.ToolbarView {
               [top]
               Adw.HeaderBar {
+                show-title: false;
+
                 [start]
                 Gtk.Button sidebar_add_button {
                   visible: false;
@@ -119,6 +121,10 @@ template $TickWindow: Adw.ApplicationWindow {
                 content: Gtk.ScrolledWindow list_scroller {
                   hscrollbar-policy: never;
                   focusable: false;
+
+                  styles [
+                    "tick-list-pane",
+                  ]
 
                   child: Adw.ClampScrollable {
                     maximum-size: 720;
