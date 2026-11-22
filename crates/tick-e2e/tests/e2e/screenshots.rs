@@ -34,19 +34,19 @@ fn png_size(path: &Path, png: &[u8]) -> (u32, u32) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn empty_state_light_and_dark() {
+async fn login_light_and_dark() {
     let light = Session::builder().color_scheme(ColorScheme::Light);
     let dark = Session::builder().color_scheme(ColorScheme::Dark);
-    let (light_path, light) = shoot(light, "empty-wide-light").await;
-    let (dark_path, dark) = shoot(dark, "empty-wide-dark").await;
+    let (light_path, light) = shoot(light, "login-wide-light").await;
+    let (dark_path, dark) = shoot(dark, "login-wide-dark").await;
     assert_eq!(png_size(&light_path, &light), (1280, 800));
     assert_eq!(png_size(&dark_path, &dark), (1280, 800));
     assert_ne!(light, dark, "light and dark screenshots are identical");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn empty_state_narrow() {
+async fn login_narrow() {
     let narrow = Session::builder().narrow().color_scheme(ColorScheme::Light);
-    let (path, png) = shoot(narrow, "empty-narrow-light").await;
+    let (path, png) = shoot(narrow, "login-narrow-light").await;
     assert_eq!(png_size(&path, &png), (600, 800));
 }

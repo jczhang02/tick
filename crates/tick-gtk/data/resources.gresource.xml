@@ -2,5 +2,17 @@
 <gresources>
   <gresource prefix="/dev/chengrui/Tick/">
     <file compressed="true" preprocess="xml-stripblanks">ui/window.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">ui/login.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">ui/quick_add.ui</file>
+    <file compressed="true">style.css</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-app-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-comment-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-deadline-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-filter-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-inbox-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-label-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-project-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-subtasks-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-today-symbolic.svg</file>
   </gresource>
 </gresources>

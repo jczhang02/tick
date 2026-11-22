@@ -8,6 +8,8 @@ use std::path::Path;
 use adw::prelude::*;
 use gtk::{gio, glib, graphene};
 
+use crate::window::TickWindow;
+
 /// True when the app runs under the E2E harness.
 pub fn enabled() -> bool {
     std::env::var("TICK_TEST_MODE").is_ok_and(|v| v == "1")
@@ -55,18 +57,21 @@ fn save_screenshot(window: &gtk::Window, path: &Path) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
-/// Prints `TICK_FIRST_DATA_FRAME_MS` after the window paints its first frame.
-///
-/// For now this is the first frame of any content. Once the cache is wired up it must be
-/// the first frame that shows cached data.
-pub fn report_first_frame(window: &impl IsA<gtk::Widget>) {
-    window.connect_realize(|widget| {
-        let Some(clock) = widget.frame_clock() else {
+/// Prints `TICK_FIRST_DATA_FRAME_MS` after the first frame that shows cached tasks: the
+/// first paint after a task row of the open view was built, or the first paint at all when
+/// the view (or the login page) has no tasks.
+pub fn report_first_frame(window: &TickWindow) {
+    window.connect_realize(|window| {
+        let Some(clock) = window.frame_clock() else {
             return;
         };
         let handler = std::rc::Rc::new(std::cell::Cell::new(None));
         let handler_in = handler.clone();
+        let weak = window.downgrade();
         let id = clock.connect_after_paint(move |clock| {
+            if !weak.upgrade().is_some_and(|w| w.data_frame_ready()) {
+                return;
+            }
             if let Some(ms) = ms_since_process_start() {
                 eprintln!("TICK_FIRST_DATA_FRAME_MS={ms}");
             }

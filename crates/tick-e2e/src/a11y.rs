@@ -240,6 +240,17 @@ impl Node {
         Ok(self.accessible().await?.name().await?)
     }
 
+    /// Accessible description.
+    pub async fn description(&self) -> Result<String> {
+        Ok(self.accessible().await?.description().await?)
+    }
+
+    /// The accessible parent, if any.
+    pub async fn parent(&self) -> Result<Option<Node>> {
+        let r = self.accessible().await?.parent().await?;
+        Ok(self.child_from_ref(&r))
+    }
+
     /// Accessible role.
     pub async fn role(&self) -> Result<Role> {
         Ok(self.accessible().await?.get_role().await?)

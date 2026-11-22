@@ -1,0 +1,148 @@
+using Gtk 4.0;
+using Adw 1;
+
+translation-domain "tick";
+
+// DESIGN.md 4.16: the window content when there is no token.
+template $TickLoginPage: Adw.Bin {
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      show-title: false;
+    }
+
+    content: Gtk.ScrolledWindow {
+      hscrollbar-policy: never;
+
+      child: Gtk.Box {
+        orientation: vertical;
+
+        Adw.Clamp {
+          maximum-size: 400;
+          vexpand: true;
+          valign: center;
+
+          child: Gtk.Box {
+            orientation: vertical;
+            margin-start: 24;
+            margin-end: 24;
+            margin-top: 24;
+            margin-bottom: 24;
+
+            Gtk.Image {
+              icon-name: "tick-app-symbolic";
+              pixel-size: 96;
+              accessible-role: presentation;
+            }
+
+            Gtk.Label {
+              label: _("Welcome to Tick");
+              margin-top: 24;
+              wrap: true;
+              justify: center;
+
+              styles [
+                "title-1",
+              ]
+            }
+
+            Gtk.Label {
+              label: _("Paste your Todoist API token to sign in.");
+              margin-top: 6;
+              wrap: true;
+              justify: center;
+
+              styles [
+                "body",
+                "dimmed",
+              ]
+            }
+
+            Gtk.ListBox {
+              margin-top: 24;
+              selection-mode: none;
+
+              styles [
+                "boxed-list",
+              ]
+
+              Adw.PasswordEntryRow token_row {
+                title: _("API Token");
+              }
+            }
+
+            Gtk.Label error_label {
+              visible: false;
+              margin-top: 6;
+              wrap: true;
+              xalign: 0;
+
+              styles [
+                "body",
+                "error",
+              ]
+            }
+
+            Gtk.Button login_button {
+              margin-top: 12;
+              halign: center;
+              sensitive: false;
+
+              styles [
+                "suggested-action",
+                "pill",
+              ]
+
+              child: Gtk.Stack login_button_stack {
+                transition-type: none;
+
+                Gtk.StackPage {
+                  name: "label";
+
+                  child: Gtk.Label {
+                    label: _("Log In");
+                  };
+                }
+
+                Gtk.StackPage {
+                  name: "spinner";
+
+                  child: Adw.Spinner {};
+                }
+              };
+
+              accessibility {
+                label: _("Log In");
+              }
+            }
+
+            Gtk.LinkButton {
+              margin-top: 18;
+              halign: center;
+              label: _("Find your token in Todoist settings");
+              uri: "https://app.todoist.com/app/settings/integrations";
+
+              styles [
+                "tick-link-44",
+              ]
+            }
+          };
+        }
+
+        Gtk.Label {
+          label: _("Your token is stored in the GNOME keyring.");
+          margin-bottom: 24;
+          margin-start: 24;
+          margin-end: 24;
+          wrap: true;
+          justify: center;
+
+          styles [
+            "caption",
+            "dimmed",
+          ]
+        }
+      };
+    };
+  };
+}

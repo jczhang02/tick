@@ -1,0 +1,83 @@
+using Gtk 4.0;
+using Adw 1;
+
+translation-domain "tick";
+
+// DESIGN.md 4.11: no visible title, padding 18, a bottom sheet on narrow windows.
+template $TickQuickAdd: Adw.Dialog {
+  content-width: 560;
+  title: _("Add Task");
+
+  child: Gtk.Box {
+    orientation: vertical;
+    margin-start: 18;
+    margin-end: 18;
+    margin-top: 18;
+    margin-bottom: 18;
+    spacing: 6;
+
+    Gtk.Entry entry {
+      has-frame: false;
+      placeholder-text: _("e.g. Call Mom tomorrow 6pm p2 #Family");
+      activates-default: false;
+
+      styles [
+        "title-4",
+        "tick-quick-entry",
+        "tick-entry",
+      ]
+
+      accessibility {
+        label: _("Task");
+      }
+    }
+
+    Adw.WrapBox chips {
+      child-spacing: 6;
+      line-spacing: 6;
+      visible: false;
+      accessible-role: presentation;
+    }
+
+    Gtk.Separator {
+      margin-top: 6;
+    }
+
+    Gtk.Box {
+      spacing: 12;
+      margin-top: 6;
+
+      Gtk.Label hint {
+        hexpand: true;
+        xalign: 0;
+        wrap: true;
+
+        styles [
+          "caption",
+          "dimmed",
+        ]
+      }
+
+      Gtk.Button cancel_button {
+        label: _("Cancel");
+        valign: center;
+
+        styles [
+          "flat",
+          "tick-hit",
+        ]
+      }
+
+      Gtk.Button add_button {
+        label: _("Add Task");
+        valign: center;
+        sensitive: false;
+
+        styles [
+          "suggested-action",
+          "tick-hit",
+        ]
+      }
+    }
+  };
+}
