@@ -421,3 +421,348 @@ async fn assign_and_unassign() {
     .await;
     assert!(update_sent(&server, "t1", "responsible_uid").contains(&Value::Null));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subtasks_add_complete_and_open() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Work").await;
+    open_task(&s, &window, "Plan the deck").await;
+    let add = window
+        .wait_for(
+            &Query::role(Role::Button).name("Add sub-task").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&add).await.unwrap();
+    let entry = window
+        .wait_for(
+            &Query::role(Role::Text).name("Sub-task name").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    tick_e2e::poll(WAIT, "sub-task entry focused", || async {
+        entry
+            .has_state(tick_e2e::State::Focused)
+            .await
+            .ok()
+            .filter(|f| *f)
+    })
+    .await
+    .unwrap();
+    s.type_text("Book a room").await.unwrap();
+    s.key(keysym::RETURN).await.unwrap();
+    let added = tick_e2e::poll(
+        Duration::from_secs(15),
+        "sub-task on the server",
+        || async {
+            let st = server.state();
+            st.find("items", "content", "Book a room").cloned()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(added["parent_id"], "w1", "{added}");
+    // The list shows it under its parent.
+    app::wait_tasks(
+        &window,
+        &[
+            "Book the venue",
+            "Plan the deck",
+            "Collect metrics",
+            "Book a room",
+            "Clean up flags",
+        ],
+    )
+    .await;
+
+    // Complete a sub-task from the pane.
+    let open = window
+        .wait_for(
+            &Query::role(Role::Button)
+                .name("Open Collect metrics")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let r = open.extents().await.unwrap();
+    // Its ring sits right before the open button.
+    s.input()
+        .await
+        .unwrap()
+        .click(r.x - 22, r.y + 22)
+        .await
+        .unwrap();
+    let closed = tick_e2e::poll(Duration::from_secs(20), "item_close w2", || async {
+        let c = app::commands_sent(&server, "item_close");
+        (!c.is_empty()).then_some(c)
+    })
+    .await
+    .unwrap();
+    assert_eq!(closed[0]["args"]["id"], "w2");
+
+    // Open a sub-task.
+    let open = window
+        .wait_for(
+            &Query::role(Role::Button).name("Open Book a room").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&open).await.unwrap();
+    pane_title(&window, "Book a room").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn comments_add_edit_delete() {
+    let (server, s, window) = open_in_inbox("Read the article").await;
+    let composer = window
+        .wait_for(
+            &Query::role(Role::Text).name("Write a comment").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&composer).await.unwrap();
+    s.type_text("First note").await.unwrap();
+    s.key(keysym::RETURN).await.unwrap();
+    let note = tick_e2e::poll(Duration::from_secs(15), "note_add", || async {
+        let st = server.state();
+        st.find("notes", "content", "First note").cloned()
+    })
+    .await
+    .unwrap();
+    assert_eq!(note["item_id"], "i3");
+    let id = note["id"].as_str().unwrap().to_owned();
+    window
+        .wait_for(&Query::role(Role::Label).name("First note").showing(), WAIT)
+        .await
+        .unwrap();
+    // The row's meta line counts it.
+    let row = app::task_row(&window, "Read the article").await;
+    tick_e2e::poll(WAIT, "comment count", || async {
+        row.description()
+            .await
+            .ok()
+            .filter(|d| d.contains("1 comment"))
+    })
+    .await
+    .unwrap();
+
+    // Edit.
+    let actions = window
+        .wait_for(
+            &Query::role(Role::Button).name("Comment Actions").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&actions).await.unwrap();
+    menu_choose(&s, &window, 0).await;
+    let editor = window
+        .wait_for(
+            &Query::role(Role::Text).name("Edit comment").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    tick_e2e::poll(WAIT, "comment editor focused", || async {
+        editor
+            .has_state(tick_e2e::State::Focused)
+            .await
+            .ok()
+            .filter(|f| *f)
+    })
+    .await
+    .unwrap();
+    s.chord(&[keysym::CONTROL_L, u32::from(b'a')])
+        .await
+        .unwrap();
+    s.type_text("Edited note").await.unwrap();
+    s.key(keysym::RETURN).await.unwrap();
+    tick_e2e::poll(Duration::from_secs(15), "note_update", || async {
+        let st = server.state();
+        (st.get("notes", &id)?["content"] == "Edited note").then_some(())
+    })
+    .await
+    .unwrap();
+    window
+        .wait_for(
+            &Query::role(Role::Label).name("Edited note").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+
+    // Delete, after the confirmation.
+    let actions = window
+        .wait_for(
+            &Query::role(Role::Button).name("Comment Actions").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&actions).await.unwrap();
+    menu_choose(&s, &window, 1).await;
+    let confirm = window
+        .wait_for(
+            &Query::role(Role::Button).name("Delete Comment").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&confirm).await.unwrap();
+    tick_e2e::poll(Duration::from_secs(15), "note_delete", || async {
+        let st = server.state();
+        (st.get("notes", &id).is_none()).then_some(())
+    })
+    .await
+    .unwrap();
+    window
+        .wait_gone(
+            &Query::role(Role::Label).name("Edited note").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+}
+
+/// Activate the `index`-th item of the menu that just opened, by keyboard. GTK 4.22 does
+/// not name `popover.menu` items on AT-SPI (their label is not exposed), so tests cannot
+/// find them by name; the first item has focus when the menu opens.
+pub async fn menu_choose(s: &Session, window: &Node, index: usize) {
+    let app = window.parent().await.unwrap().unwrap();
+    app.wait_for(
+        &Query::role(Role::MenuItem)
+            .state(tick_e2e::State::Focused)
+            .showing(),
+        WAIT,
+    )
+    .await
+    .unwrap();
+    for _ in 0..index {
+        s.key(keysym::DOWN).await.unwrap();
+    }
+    s.key(keysym::RETURN).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attachments_open() {
+    let mut f = app::fixture();
+    f["notes"] = serde_json::json!([
+        {"id": "n1", "item_id": "i3", "content": "See the scan.", "posted_uid": "u9",
+         "file_attachment": {"file_name": "scan.pdf", "file_type": "application/pdf",
+                             "file_url": "https://example.com/scan.pdf"}}
+    ]);
+    f["collaborators"] = serde_json::json!([{"id": "u9", "full_name": "Ana Silva"}]);
+    let server = app::server_with(f).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Inbox").await;
+    open_task(&s, &window, "Read the article").await;
+    let button = window
+        .wait_for(
+            &Query::role(Role::Button)
+                .name("Open attachment scan.pdf")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let r = button.extents().await.unwrap();
+    assert!(r.height >= 44, "{r:?}");
+    s.click(&button).await.unwrap();
+    let uri = s.wait_for_log_value("TICK_OPEN_URI", WAIT).await.unwrap();
+    assert_eq!(uri, "https://example.com/scan.pdf");
+    // Someone else's comment has no actions menu.
+    assert!(
+        window
+            .find(&Query::role(Role::Button).name("Comment Actions").showing())
+            .await
+            .is_none()
+    );
+}
+
+/// Edits made offline queue and replay in order when the server is back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn offline_edits_queue_and_replay() {
+    let (server, s, window) = open_in_inbox("Read the article").await;
+    server.set_offline(true);
+    // Wait for the app to notice.
+    window
+        .wait_for(
+            &Query::role(Role::Button).name("Sync Status").showing(),
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+    s.click(&field(&window, "Priority").await).await.unwrap();
+    s.click(&picker_row(&window, "Priority 2").await)
+        .await
+        .unwrap();
+    s.click(&field(&window, "Deadline").await).await.unwrap();
+    s.click(&picker_row(&window, "Tomorrow").await)
+        .await
+        .unwrap();
+    // Shown at once, from the queue.
+    field(&window, "Priority: Priority 2").await;
+    field(&window, "Deadline: Tomorrow").await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(server.state().get("items", "i3").unwrap()["priority"], 1);
+    server.set_offline(false);
+    wait_item(&server, "i3", "replayed", |v| {
+        v["priority"] == 3 && v["deadline"]["date"] == "2026-11-23"
+    })
+    .await;
+}
+
+/// A change the server rejects rolls back and says so.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejected_edit_rolls_back() {
+    let (server, s, window) = open_in_inbox("Read the article").await;
+    server.inject(tick_fake_server::Failure::CommandError {
+        command_type: "item_update".into(),
+        args_contain: Some("Never saved".into()),
+        error: None,
+        count: 1,
+    });
+    let title = pane_title(&window, "Read the article").await;
+    s.click(&title).await.unwrap();
+    s.chord(&[keysym::CONTROL_L, u32::from(b'a')])
+        .await
+        .unwrap();
+    s.type_text("Never saved").await.unwrap();
+    s.key(keysym::RETURN).await.unwrap();
+    // The error toast names the task; the list and the pane show the server's title again.
+    window
+        .wait_for(
+            &Query::role(Role::Label)
+                .name_contains("Couldn't save")
+                .showing(),
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    pane_title(&window, "Read the article").await;
+    let row = app::task_row(&window, "Read the article").await;
+    assert!(
+        row.description().await.unwrap().contains("Not saved"),
+        "{:?}",
+        row.description().await
+    );
+    assert_eq!(
+        server.state().get("items", "i3").unwrap()["content"],
+        "Read the article"
+    );
+}

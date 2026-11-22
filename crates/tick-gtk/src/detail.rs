@@ -828,7 +828,13 @@ impl TaskDetail {
         ]);
 
         // Title: never under the user's cursor.
-        let editing_title = self.title.has_focus() && same_task;
+        // Being edited: focused with uncommitted text (after Enter the buffer equals the
+        // committed title, so a rollback from the server still shows).
+        let editing_title = same_task
+            && self.title.has_focus()
+            && old
+                .as_ref()
+                .is_some_and(|o| buffer_text(&self.title) != o.title);
         if !editing_title && buffer_text(&self.title) != data.title {
             self.title.buffer().set_text(&data.title);
         }
