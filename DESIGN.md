@@ -564,7 +564,7 @@ appear only on the floating surface and on the drag icon.
 
 | Name | Value | Use |
 |---|---|---|
-| floating | `0 1px 5px 1px rgb(0 0 0 / 9%), 0 2px 14px 3px rgb(0 0 0 / 5%)` | popovers, menus, toasts, tooltips, the drag icon (libadwaita's popover shadow) |
+| floating | `0 1px 5px 1px rgb(0 0 0 / 9%), 0 2px 14px 3px rgb(0 0 0 / 5%)` | popovers, menus, toasts, the drag icon (libadwaita's popover shadow); not tooltips, whose surface would cut it off (7.4 pitfall 7) |
 | none | | everything else, including task rows and section headers |
 
 ### 2.6 The floating surface (hard rule)
@@ -2372,7 +2372,7 @@ A "no" blocks the PR unless the item is marked as a known gap in the PR body.
 
 **Floating surfaces**
 
-- [ ] Popovers, menus, tooltips and toasts share background, border, 15 px radius and shadow.
+- [ ] Popovers, menus, tooltips and toasts share background, border and 15 px radius; all but tooltips also share the shadow (7.4 pitfall 7).
 - [ ] Menu items and picker rows are 44 px tall.
 
 **Targets, focus, motion**
