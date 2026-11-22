@@ -131,10 +131,29 @@ async fn quits_on_ctrl_q() {
 tests on a random port) and a binary (for manual runs). The app points at it with
 `TICK_API_BASE=http://127.0.0.1:<port>`. Control endpoints under `/__test/` let tests seed
 state, read state and the request log, and inject failures (offline, 429, 500, command errors).
+Like the real API (`docs/api/pages/request-limits.md`), POST bodies over 1 MiB are refused; the fake
+answers `413` with the usual error body (the real status is not documented).
 
 The fake server and the client are written from the same docs, so a green E2E suite can still be
 wrong about real Todoist. The live smoke tests are the only check against reality. Model the fake
 on `docs/api/` (OpenAPI spec and doc pages), not on the client's assumptions.
+
+Control endpoints (JSON bodies):
+
+| Endpoint | Effect |
+|---|---|
+| `POST /__test/seed` | `{"preset": "demo" \| "empty" \| "bulk", "count": N}` or a fixture `{"token"?, "now"?, "user"?, "projects": [...], "items": [...], ..., "collaborator_states": [...], "completed": [...]}` (missing fields get documented defaults) |
+| `GET /__test/state` | the whole account as JSON (including deleted objects and completion records) |
+| `GET /__test/requests`, `DELETE /__test/requests` | request log (method, path, query, decoded body, status, `at_ms`: arrival time in ms since the server state was created) |
+| `POST /__test/fail` | inject one failure or a list: `{"kind": "offline"}` / `{"kind": "online"}` (API connections are dropped), `{"kind": "status", "status": 429, "retry_after": 2, "count": 1, "path"?, "body_contains"?}` (`body_contains`: only requests whose decoded body contains the text), `{"kind": "error_after_commit", "status": 503}` (commands run, the response is an error), `{"kind": "command_error", "command_type": "item_add", "args_contain"?, "error"?}` |
+| `DELETE /__test/fail` | clear injected failures and go online |
+| `POST /__test/reset` | empty account (token and clock kept) |
+| `POST /__test/now` | `{"now": "<RFC 3339>"}` fixes the server clock (`null` = system clock) |
+
+The binary: `tick-fake-server [--port P] [--seed demo|empty|bulk:N] [--token T] [--launch]`
+(default token `test-token`). `--launch` starts `target/debug/tick` (or `$TICK_BIN`) with
+`TICK_API_BASE` and `TICK_TOKEN` set. The server honors `TICK_NOW` for its clock, and the
+demo seed places due dates relative to it.
 
 ## Startup budget
 
