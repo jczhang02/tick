@@ -109,6 +109,17 @@ template $TickWindow: Adw.ApplicationWindow {
                   }
 
                   [end]
+                  Gtk.MenuButton view_menu_button {
+                    visible: false;
+                    icon-name: "view-more-symbolic";
+                    tooltip-text: _("View Menu");
+
+                    accessibility {
+                      label: _("View Menu");
+                    }
+                  }
+
+                  [end]
                   Gtk.MenuButton sync_button {
                     visible: false;
 
@@ -143,7 +154,7 @@ template $TickWindow: Adw.ApplicationWindow {
                 };
               };
 
-              sidebar: Adw.ToolbarView {
+              sidebar: Adw.ToolbarView detail_view {
                 [top]
                 Adw.HeaderBar {
                   show-title: false;
@@ -170,9 +181,20 @@ template $TickWindow: Adw.ApplicationWindow {
                       label: _("Close Task");
                     }
                   }
+
+                  [end]
+                  Gtk.MenuButton detail_menu_button {
+                    icon-name: "view-more-symbolic";
+                    menu-model: task_menu;
+                    tooltip-text: _("Task Menu");
+
+                    accessibility {
+                      label: _("Task Menu");
+                    }
+                  }
                 }
 
-                content: Adw.Bin {};
+                content: Adw.Bin detail_bin {};
               };
             };
           };
@@ -186,6 +208,17 @@ template $TickWindow: Adw.ApplicationWindow {
       }
     };
   };
+}
+
+menu task_menu {
+  section {
+    item (_("Complete"), "win.detail-complete")
+    item (_("Move to..."), "win.detail-move")
+  }
+
+  section {
+    item (_("Delete Task"), "win.detail-delete")
+  }
 }
 
 menu main_menu {

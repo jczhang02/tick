@@ -37,7 +37,7 @@ const PENDING_GRACE: Duration = Duration::from_secs(2);
 const UNDO_HOLD: Duration = Duration::from_secs(60);
 
 /// [`UNDO_HOLD`], or `TICK_TEST_UNDO_HOLD_MS` in test mode (E2E: Undo after the close left).
-fn undo_hold() -> Duration {
+pub(crate) fn undo_hold() -> Duration {
     test_mode::enabled()
         .then(|| std::env::var("TICK_TEST_UNDO_HOLD_MS").ok()?.parse().ok())
         .flatten()
@@ -89,6 +89,12 @@ mod imp {
         #[template_child]
         pub task_list: TemplateChild<gtk::ListView>,
         #[template_child]
+        pub view_menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub detail_view: TemplateChild<adw::ToolbarView>,
+        #[template_child]
+        pub detail_bin: TemplateChild<adw::Bin>,
+        #[template_child]
         pub detail_back_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub detail_close_button: TemplateChild<gtk::Button>,
@@ -125,6 +131,11 @@ mod imp {
         pub pending_since: Cell<Option<Instant>>,
         /// The previously focused widget (see `setup_focus_guard`).
         pub last_focus: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
+        /// The detail pane (4.8) and the task it shows.
+        pub detail: OnceCell<Rc<crate::detail::TaskDetail>>,
+        pub open_task: RefCell<Option<String>>,
+        /// The visible toast's Undo for moves, deletes and archives.
+        pub undo_action: RefCell<Option<crate::edit::UndoAction>>,
     }
 
     impl TickWindow {
@@ -192,6 +203,7 @@ impl TickWindow {
         win.imp().store.replace(Some(store));
         win.setup_breakpoints();
         win.setup_lists();
+        win.setup_detail();
         win.setup_actions();
         win.setup_keys();
         win.setup_focus_guard();
@@ -212,17 +224,17 @@ impl TickWindow {
         win
     }
 
-    fn store(&self) -> std::cell::RefMut<'_, Store> {
+    pub(crate) fn store(&self) -> std::cell::RefMut<'_, Store> {
         std::cell::RefMut::map(self.imp().store.borrow_mut(), |s| {
             s.as_mut().expect("store")
         })
     }
 
-    fn setting(&self, key: &str) -> Option<String> {
+    pub(crate) fn setting(&self, key: &str) -> Option<String> {
         self.store().setting(key).ok().flatten()
     }
 
-    fn save_setting(&self, key: &str, value: &str) {
+    pub(crate) fn save_setting(&self, key: &str, value: &str) {
         if let Err(e) = self.store().set_setting(key, value) {
             eprintln!("tick: saving setting {key}: {e}");
         }
@@ -326,6 +338,18 @@ impl TickWindow {
             ) {
                 return glib::Propagation::Proceed;
             }
+            // Space on a focused task row completes it (4.4), like E.
+            if matches!(key, Key::space | Key::KP_Space) {
+                let focus = gtk::prelude::GtkWindowExt::focus(&w);
+                let on_row = focus.as_ref().is_some_and(|f| {
+                    f.parent().as_ref() == Some(w.imp().task_list.upcast_ref::<gtk::Widget>())
+                });
+                if on_row && w.focused_row_is_task() {
+                    w.complete_focused();
+                    return glib::Propagation::Stop;
+                }
+                return glib::Propagation::Proceed;
+            }
             let down = match key {
                 Key::Down | Key::KP_Down | Key::j => true,
                 Key::Up | Key::KP_Up | Key::k => false,
@@ -380,7 +404,7 @@ impl TickWindow {
             .activate(|w: &TickWindow, _, _| w.undo())
             .build();
         let close_task = gio::ActionEntry::builder("close-task")
-            .activate(|w: &TickWindow, _, _| w.imp().detail_split.set_show_sidebar(false))
+            .activate(|w: &TickWindow, _, _| w.close_task(true))
             .build();
         self.add_action_entries([quick_add, undo, close_task]);
 
@@ -788,7 +812,7 @@ impl TickWindow {
         }
     }
 
-    fn current_view(&self) -> ViewId {
+    pub(crate) fn current_view(&self) -> ViewId {
         self.imp().view.borrow().clone().unwrap_or(ViewId::Today)
     }
 
@@ -811,23 +835,23 @@ impl TickWindow {
         self.refresh_rows();
     }
 
-    fn refresh(&self) {
+    pub(crate) fn refresh(&self) {
         self.refresh_rows();
         self.refresh_sidebar();
         self.refresh_sync();
     }
 
-    fn refresh_rows(&self) {
+    pub(crate) fn refresh_rows(&self) {
         self.refresh_rows_with(&[]);
     }
 
-    fn selected_position(&self) -> Option<u32> {
+    pub(crate) fn selected_position(&self) -> Option<u32> {
         let sel = self.imp().selection.get()?;
         let pos = sel.selected();
         (pos != gtk::INVALID_LIST_POSITION).then_some(pos)
     }
 
-    fn selected_task(&self) -> Option<String> {
+    pub(crate) fn selected_task(&self) -> Option<String> {
         self.imp()
             .selection
             .get()?
@@ -902,6 +926,7 @@ impl TickWindow {
             }
         }
         imp.content.replace(Some(content));
+        self.refresh_detail();
     }
 
     fn update_failed_map(&self) {
@@ -925,7 +950,7 @@ impl TickWindow {
         self.imp().ui.borrow_mut().failed = map;
     }
 
-    fn refresh_sidebar(&self) {
+    pub(crate) fn refresh_sidebar(&self) {
         let imp = self.imp();
         let data = {
             let store = imp.store.borrow();
@@ -987,7 +1012,7 @@ impl TickWindow {
         None
     }
 
-    fn refresh_sync(&self) {
+    pub(crate) fn refresh_sync(&self) {
         let imp = self.imp();
         let (pending, failed) = {
             let store = self.store();
@@ -1070,7 +1095,7 @@ impl TickWindow {
         match r {
             Row::SectionHeader(s) => self.toggle_section(&s.id),
             Row::Ghost { prefill, .. } => self.open_quick_add(Some(prefill)),
-            // Opening the detail pane is milestone 3; activation only selects for now.
+            Row::Task(t) => self.open_task(&t.id, false),
             _ => {}
         }
     }
@@ -1087,6 +1112,21 @@ impl TickWindow {
             RowAction::ToggleSubtasks(id) => self.toggle_subtasks(&id),
             RowAction::ToggleSection(id) => self.toggle_section(&id),
             RowAction::Ghost(prefill) => self.open_quick_add(Some(prefill)),
+            RowAction::Open(id) => self.open_task(&id, false),
+            RowAction::Menu { key, x, y } => {
+                if let Some(store) = self.imp().rows.get()
+                    && let Some(pos) = (0..store.n_items()).find(|i| {
+                        store
+                            .item(*i)
+                            .and_downcast::<TickRow>()
+                            .is_some_and(|r| r.key() == key)
+                    })
+                    && let Some(sel) = self.imp().selection.get()
+                {
+                    sel.set_selected(pos);
+                    self.task_menu(gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1));
+                }
+            }
         }
     }
 
@@ -1119,7 +1159,7 @@ impl TickWindow {
         )]);
     }
 
-    fn enqueue(&self, commands: Vec<Command>) {
+    pub(crate) fn enqueue(&self, commands: Vec<Command>) {
         let result = self.store().enqueue_many(commands);
         match result {
             Ok(c) => self.after_local_change(&c),
@@ -1127,7 +1167,7 @@ impl TickWindow {
         }
     }
 
-    fn after_local_change(&self, c: &Changes) {
+    pub(crate) fn after_local_change(&self, c: &Changes) {
         self.remap_ids(&c.id_map);
         self.refresh_rows_with(&c.id_map);
         self.refresh_sidebar();
@@ -1139,7 +1179,7 @@ impl TickWindow {
 
     /// The id a task has now: a temp id the server already replaced resolves to the real
     /// one (a hold timer or the Undo group may still hold the temp id).
-    fn live_id(&self, id: &str) -> String {
+    pub(crate) fn live_id(&self, id: &str) -> String {
         self.store()
             .resolve_id(id)
             .unwrap_or_else(|_| id.to_owned())
@@ -1334,8 +1374,9 @@ impl TickWindow {
     }
 
     /// Undo the completions of the visible toast (its button or Ctrl+Z).
-    fn undo(&self) {
+    pub(crate) fn undo(&self) {
         let Some(group) = self.imp().undo.take() else {
+            self.run_undo_action();
             return;
         };
         group.toast.dismiss();
@@ -1381,7 +1422,7 @@ impl TickWindow {
         }
     }
 
-    fn uncheck(&self, id: &str) {
+    pub(crate) fn uncheck(&self, id: &str) {
         let id = self.live_id(id);
         let cancelled = {
             let mut ui = self.imp().ui.borrow_mut();
@@ -1416,7 +1457,7 @@ impl TickWindow {
     }
 
     /// Position of task `id` in the task list.
-    fn row_position(&self, id: &str) -> Option<u32> {
+    pub(crate) fn row_position(&self, id: &str) -> Option<u32> {
         let store = self.imp().rows.get()?;
         (0..store.n_items()).find(|i| {
             store
@@ -1430,7 +1471,7 @@ impl TickWindow {
 
     /// Rebuild the row of task `id` from unchanged data (undo a ring toggle that had no
     /// effect).
-    fn touch_task_row(&self, id: &str) {
+    pub(crate) fn touch_task_row(&self, id: &str) {
         let Some(store) = self.imp().rows.get() else {
             return;
         };
@@ -1443,7 +1484,7 @@ impl TickWindow {
         }
     }
 
-    fn complete_selected(&self) {
+    pub(crate) fn complete_selected(&self) {
         let Some(row) = self
             .imp()
             .selection
@@ -1464,7 +1505,7 @@ impl TickWindow {
     // ---- toasts ----
 
     /// Toasts never stack (4.12): dismiss the visible one first.
-    fn show_toast(&self, toast: &adw::Toast) {
+    pub(crate) fn show_toast(&self, toast: &adw::Toast) {
         if let Some(prev) = self.imp().last_toast.replace(Some(toast.clone())) {
             prev.dismiss();
         }
@@ -1597,9 +1638,18 @@ impl TickWindow {
         {
             return false;
         }
-        if gtk::prelude::GtkWindowExt::focus(self).is_some_and(|f| f.is::<gtk::Text>()) {
+        let focus = gtk::prelude::GtkWindowExt::focus(self);
+        if focus
+            .as_ref()
+            .is_some_and(|f| f.is::<gtk::Text>() || f.is::<gtk::TextView>())
+        {
             return false;
         }
+        // Task shortcuts act on the selected row only while the list (or nothing) has focus:
+        // never from the detail pane, the sidebar or a picker.
+        let in_list = focus
+            .as_ref()
+            .is_none_or(|f| f.is_ancestor(&*imp.task_list));
         let pending_g = imp
             .g_pending
             .take()
@@ -1621,11 +1671,77 @@ impl TickWindow {
             Key::i if pending_g => goto(ViewId::Inbox),
             Key::t if pending_g => goto(ViewId::Today),
             Key::u if pending_g => goto(ViewId::Upcoming),
-            Key::e => {
+            Key::e if in_list => {
                 self.complete_selected();
                 true
             }
+            Key::Escape if imp.open_task.borrow().is_some() => {
+                self.close_task(true);
+                true
+            }
+            Key::_1 | Key::_2 | Key::_3 | Key::_4 if in_list => {
+                let p = match key {
+                    Key::_1 => 1,
+                    Key::_2 => 2,
+                    Key::_3 => 3,
+                    _ => 4,
+                };
+                if let Some(id) = self.selected_task() {
+                    self.set_priority(&id, p);
+                }
+                true
+            }
+            Key::t if in_list => WidgetExt::activate_action(self, "win.task-date", None).is_ok(),
+            Key::l if in_list => WidgetExt::activate_action(self, "win.task-labels", None).is_ok(),
+            Key::v if in_list => WidgetExt::activate_action(self, "win.task-move", None).is_ok(),
+            Key::Delete | Key::KP_Delete
+                if in_list && mods.contains(gtk::gdk::ModifierType::SHIFT_MASK) =>
+            {
+                if let Some(id) = self.selected_task() {
+                    self.delete_task(&id);
+                }
+                true
+            }
+            Key::Menu | Key::F10
+                if in_list
+                    && (key == Key::Menu || mods.contains(gtk::gdk::ModifierType::SHIFT_MASK)) =>
+            {
+                self.selected_task_menu();
+                true
+            }
             _ => false,
+        }
+    }
+
+    /// The model row of the focused list row widget.
+    fn focused_row(&self) -> Option<TickRow> {
+        let list: gtk::Widget = self.imp().task_list.get().upcast();
+        let mut w = gtk::prelude::GtkWindowExt::focus(self)?;
+        while w.parent().as_ref() != Some(&list) {
+            w = w.parent()?;
+        }
+        let key = w
+            .first_child()
+            .and_downcast::<adw::Bin>()
+            .and_then(|b| b.child())
+            .map(|c| c.widget_name().to_string())?;
+        let store = self.imp().rows.get()?;
+        (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast::<TickRow>())
+            .find(|r| r.key() == key)
+    }
+
+    fn focused_row_is_task(&self) -> bool {
+        self.focused_row()
+            .is_some_and(|r| matches!(&*r.row(), Row::Task(_)))
+    }
+
+    fn complete_focused(&self) {
+        let task = self.focused_row().and_then(|r| r.row().task().cloned());
+        if let Some(t) = task
+            && !t.checked
+        {
+            self.begin_complete(&t.id);
         }
     }
 
@@ -1702,7 +1818,7 @@ impl TickWindow {
     /// is left, an "Add task" row or section header, else no focus at all. Never the toast
     /// (GTK moves focus there when the focused row goes away, and a focused toast never
     /// times out).
-    fn keep_focus_in_list(&self, from: u32, select: bool) {
+    pub(crate) fn keep_focus_in_list(&self, from: u32, select: bool) {
         if self.focus_task_near(from, select) {
             return;
         }

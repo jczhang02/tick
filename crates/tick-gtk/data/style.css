@@ -499,3 +499,87 @@ dialog.tick-quick-add sheet {
 /* a tooltip surface is exactly its border box: the floating shadow would be cut off, leaving
    grey corners outside the 15 px radius (7.4 pitfall 7). Background, border and radius stay. */
 tooltip.background { box-shadow: none; }
+
+/* ---------- detail pane (4.8) ---------- */
+/* the detail pane uses the view background, like the list (2.4.1) */
+.tick-detail-pane {
+  background-color: var(--view-bg-color);
+  color: var(--view-fg-color);
+}
+/* project crumb: a flat 44 px button */
+button.tick-crumb { min-height: 34px; }
+/* title and description editors: no frame, the pane background */
+textview.tick-title-edit,
+textview.tick-title-edit > text,
+textview.tick-description-edit,
+textview.tick-description-edit > text {
+  background: none;
+}
+textview.tick-title-edit,
+textview.tick-description-edit {
+  border-radius: 9px;
+}
+textview.tick-title-edit:focus-within,
+textview.tick-description-edit:focus-within {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+label.tick-description {
+  padding: 6px 0;
+  border-radius: 9px;
+}
+label.tick-description:focus:focus-visible { outline-offset: 2px; }
+/* field rows: hover 4 %, pressed 8 %, focus ring inside (4.8) */
+button.tick-field-row {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 9px;
+}
+button.tick-field-row:hover { background-color: color-mix(in srgb, currentColor 4%, transparent); }
+button.tick-field-row:active { background-color: color-mix(in srgb, currentColor 8%, transparent); }
+/* secondary row actions show on hover and keyboard focus; AT always sees them (P9) */
+.tick-field .tick-reveal,
+.tick-comment .tick-reveal { opacity: 0; }
+.tick-field:hover .tick-reveal,
+.tick-field:focus-within .tick-reveal,
+.tick-comment:hover .tick-reveal,
+.tick-comment:focus-within .tick-reveal,
+.tick-narrow .tick-reveal { opacity: 1; }
+button.tick-subtask-open,
+button.tick-ghost-button {
+  min-height: 34px;
+  padding-left: 0;
+  border-radius: 9px;
+}
+button.tick-ghost-button { padding: 0; }
+button.tick-subtask-open { padding-top: 7px; padding-bottom: 7px; }
+/* the composer bar */
+.tick-composer entry { min-height: 44px; }
+
+/* ---------- pickers (4.9, 4.10) ---------- */
+popover.tick-picker > contents { padding: 12px; }
+popover.tick-picker label { font-weight: normal; }
+list.tick-picker-list,
+list.tick-picker-list > row { background: none; }
+list.tick-picker-list > row {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 9px;
+}
+list.tick-picker-list > row:hover { background-color: color-mix(in srgb, currentColor 7%, transparent); }
+list.tick-picker-list > row:active { background-color: color-mix(in srgb, currentColor 16%, transparent); }
+/* a 16 px priority ring (priority picker, detail field row) */
+.tick-ring-16 {
+  min-width: 12px;
+  min-height: 12px;
+  border-radius: 9999px;
+  border: 2px solid var(--tick-p4);
+}
+image.tick-ring-16 { -gtk-icon-size: 0; }
+.tick-ring-16.p1 { border-color: var(--tick-red); }
+.tick-ring-16.p2 { border-color: var(--tick-orange); }
+.tick-ring-16.p3 { border-color: var(--tick-blue); }
+.tick-ring-16.current { background-color: var(--tick-p4); }
+.tick-ring-16.current.p1 { background-color: var(--tick-red); }
+.tick-ring-16.current.p2 { background-color: var(--tick-orange); }
+.tick-ring-16.current.p3 { background-color: var(--tick-blue); }

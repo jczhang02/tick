@@ -16,5 +16,8 @@
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-project-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-subtasks-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/tick-today-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-attachment-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-send-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/tick-weekend-symbolic.svg</file>
   </gresource>
 </gresources>

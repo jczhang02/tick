@@ -5,6 +5,7 @@
 
 mod a11y;
 mod app;
+mod detail;
 mod fixture;
 mod flows;
 mod harness;

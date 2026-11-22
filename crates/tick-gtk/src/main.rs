@@ -1,7 +1,10 @@
+mod detail;
+mod edit;
 mod format;
 mod i18n;
 mod login;
 mod markdown;
+mod pickers;
 mod quick_add;
 mod row_object;
 mod rows;

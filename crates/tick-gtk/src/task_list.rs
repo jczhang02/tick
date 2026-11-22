@@ -26,6 +26,80 @@ pub enum RowAction {
     ToggleSection(String),
     /// An "Add task" ghost row: open quick add with this text.
     Ghost(String),
+    /// A click on a task row: open it in the detail pane.
+    Open(String),
+    /// Right-click or long-press on a row: its context menu at (x, y) in list coordinates.
+    Menu {
+        key: String,
+        x: f64,
+        y: f64,
+    },
+}
+
+/// Whether `w` (picked under the pointer) is inside a button of the row (ring, chevron).
+fn in_button(w: Option<gtk::Widget>, row: &gtk::Widget) -> bool {
+    let mut cur = w;
+    while let Some(c) = cur {
+        if &c == row {
+            return false;
+        }
+        if c.is::<gtk::Button>() || c.is::<gtk::CheckButton>() {
+            return true;
+        }
+        cur = c.parent();
+    }
+    false
+}
+
+/// Open on click, context menu on right-click and long-press (4.4).
+fn row_gestures(root: &gtk::Box, id: &str, key: &str, ctx: &RenderCtx) {
+    let click = gtk::GestureClick::new();
+    click.set_button(gtk::gdk::BUTTON_PRIMARY);
+    let dispatch = ctx.dispatch.clone();
+    let id_c = id.to_owned();
+    click.connect_released(move |g, n, x, y| {
+        let Some(w) = g.widget() else { return };
+        if n != 1 || in_button(w.pick(x, y, gtk::PickFlags::DEFAULT), &w) {
+            return;
+        }
+        dispatch(RowAction::Open(id_c.clone()));
+    });
+    root.add_controller(click);
+    let menu_at = {
+        let dispatch = ctx.dispatch.clone();
+        let key = key.to_owned();
+        move |w: &gtk::Widget, x: f64, y: f64| {
+            let Some(list) = w.ancestor(gtk::ListView::static_type()) else {
+                return;
+            };
+            if let Some(p) = w.compute_point(&list, &gtk::graphene::Point::new(x as f32, y as f32))
+            {
+                dispatch(RowAction::Menu {
+                    key: key.clone(),
+                    x: f64::from(p.x()),
+                    y: f64::from(p.y()),
+                });
+            }
+        }
+    };
+    let right = gtk::GestureClick::new();
+    right.set_button(gtk::gdk::BUTTON_SECONDARY);
+    let m = menu_at.clone();
+    right.connect_pressed(move |g, _, x, y| {
+        g.set_state(gtk::EventSequenceState::Claimed);
+        if let Some(w) = g.widget() {
+            m(&w, x, y);
+        }
+    });
+    root.add_controller(right);
+    let long = gtk::GestureLongPress::new();
+    long.set_touch_only(true);
+    long.connect_pressed(move |g, x, y| {
+        if let Some(w) = g.widget() {
+            menu_at(&w, x, y);
+        }
+    });
+    root.add_controller(long);
 }
 
 pub type Dispatch = Rc<dyn Fn(RowAction)>;
@@ -113,7 +187,11 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
         Row::MonthHeader { title, .. } => month_header(title),
         Row::Task(t) => {
             ctx.task_bound.set(true);
-            task_row(t, ctx)
+            let w = task_row(t, ctx);
+            if let Some(b) = w.downcast_ref::<gtk::Box>() {
+                row_gestures(b, &t.id, &t.key, ctx);
+            }
+            w
         }
         Row::Ghost { prefill, .. } => ghost_row(prefill, ctx),
         Row::Empty(e) => empty_row(e),
