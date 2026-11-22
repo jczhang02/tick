@@ -557,3 +557,32 @@ fn filter_view_with_huge_day_counts_does_not_panic() {
         assert_eq!(ids(huge), ids(base), "{q}");
     }
 }
+
+/// A cache written by schema v1 upgrades in place and keeps its queue.
+#[test]
+fn v1_caches_upgrade_to_v2() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.sqlite3");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(&super::schema::v1()).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute(
+            "INSERT INTO queue (uuid, kind, args, created_at)
+             VALUES ('u1', 'item_close', '{\"id\":\"a\"}', '2026-03-10T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    let v: i64 = s
+        .connection()
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(v, 2);
+    let queued = s.pending_commands().unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].not_before, None);
+    assert!(queued[0].is_due(0));
+    assert_eq!(s.resolve_id("a").unwrap(), "a");
+}

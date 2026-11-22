@@ -7,7 +7,7 @@ use super::Result;
 const COMMON: &str = "raw TEXT NOT NULL, server_raw TEXT,
     local_pending INTEGER NOT NULL DEFAULT 0, local_deleted INTEGER NOT NULL DEFAULT 0";
 
-fn v1() -> String {
+pub(super) fn v1() -> String {
     format!(
         "
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
