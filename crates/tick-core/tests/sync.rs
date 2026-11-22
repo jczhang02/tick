@@ -891,3 +891,91 @@ async fn background_engine_emits_events() {
     handle.sync_now();
     handle.shutdown();
 }
+
+#[tokio::test]
+async fn background_engine_honors_retry_after() {
+    let e = env().await;
+    let dir = tempfile::tempdir().unwrap();
+    let config = tick_core::EngineConfig {
+        api_base: e.server.base_url(),
+        token: e.server.token(),
+        db_path: dir.path().join("bg.sqlite3"),
+        foreground_interval: Duration::from_millis(100),
+        background_interval: Duration::from_secs(60),
+        clock: Some(fixed_clock()),
+    };
+    let (handle, events) = tick_core::Engine::spawn(config).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(Instant::now() < deadline, "no first sync");
+        if let Ok(Ok(tick_core::EngineEvent::Status(s))) =
+            tokio::time::timeout(Duration::from_secs(5), events.recv()).await
+            && s.state == ConnState::Online
+        {
+            break;
+        }
+    }
+    e.server.inject(Failure::Status {
+        status: 429,
+        retry_after: Some(2),
+        count: 1,
+        path: Some("/api/v1/sync".into()),
+    });
+    handle.sync_now();
+    let sync_log = || e.server.requests_to("/api/v1/sync");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !sync_log().iter().any(|r| r.status == 429) {
+        assert!(Instant::now() < deadline, "the 429 never happened");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let limited_at = Instant::now();
+    let count = sync_log().len();
+    // Neither user triggers nor the 100 ms timer may sync inside the retry_after window.
+    for _ in 0..6 {
+        handle.sync_now();
+        handle.set_foreground(false);
+        handle.set_foreground(true);
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert_eq!(sync_log().len(), count, "synced during the backoff window");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while sync_log().len() == count {
+        assert!(
+            Instant::now() < deadline,
+            "sync did not resume after retry_after"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(limited_at.elapsed() >= Duration::from_millis(1900));
+    assert_eq!(sync_log().last().unwrap().status, 200);
+    handle.shutdown();
+}
+
+#[tokio::test]
+async fn rejected_quick_add_does_not_block_the_queue() {
+    let mut e = env().await;
+    e.engine.sync_once().await.unwrap();
+    e.server.inject(Failure::Status {
+        status: 403,
+        retry_after: None,
+        count: 1,
+        path: Some("/api/v1/tasks/quick".into()),
+    });
+    let q = Command::quick_add("Forbidden task");
+    let temp = q.temp_id.clone().unwrap();
+    e.enqueue(q);
+    e.enqueue(Command::item_update(
+        "6Xtask00000000007",
+        json!({"content": "Still sent"}),
+    ));
+    let report = e.engine.sync_once().await.unwrap();
+    assert_eq!(report.failed.len(), 1);
+    assert!(e.task(&temp).is_none());
+    assert_eq!(e.store().pending_count().unwrap(), 0);
+    assert_eq!(
+        e.server_item("6Xtask00000000007").unwrap()["content"],
+        "Still sent"
+    );
+    let quick = e.server.requests_to("/api/v1/tasks/quick");
+    assert_eq!(quick.len(), 1);
+}

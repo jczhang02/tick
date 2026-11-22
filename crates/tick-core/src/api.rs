@@ -152,11 +152,16 @@ impl Client {
     }
 
     /// `POST /api/v1/tasks/quick`; returns the created task object.
-    pub async fn quick_add(&self, text: &str) -> Result<Value, ApiError> {
+    ///
+    /// `request_id` is sent as `X-Request-Id`. The docs use that header in a REST example
+    /// (`comments.md`) without documenting its semantics, so retries after a lost response
+    /// may still create a duplicate task.
+    pub async fn quick_add(&self, text: &str, request_id: &str) -> Result<Value, ApiError> {
         let req = self
             .http
             .post(self.url("/api/v1/tasks/quick"))
             .bearer_auth(&self.token)
+            .header("X-Request-Id", request_id)
             .json(&serde_json::json!({ "text": text }));
         send(req).await
     }

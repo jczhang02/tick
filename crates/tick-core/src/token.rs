@@ -19,6 +19,8 @@ pub enum TokenError {
     Keyring(#[from] oo7::Error),
     #[error("the stored token is not valid UTF-8")]
     Encoding,
+    #[error("cannot start the keyring runtime: {0}")]
+    Runtime(std::io::Error),
 }
 
 /// Token from `TICK_TOKEN`, when set and non-empty.
@@ -64,6 +66,34 @@ pub async fn store_in(keyring: &oo7::Keyring, token: &str) -> Result<(), TokenEr
         .create_item(LABEL, &attributes(), token.trim(), true)
         .await?;
     Ok(())
+}
+
+fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+}
+
+/// Blocking [`load`] for callers outside a tokio runtime (the GTK main thread). `oo7`'s
+/// D-Bus backend needs tokio, so this runs a short-lived current-thread runtime. Do not
+/// call it from inside a tokio runtime.
+pub fn load_blocking() -> Result<Option<String>, TokenError> {
+    if let Some(t) = env_token() {
+        return Ok(Some(t));
+    }
+    runtime().map_err(TokenError::Runtime)?.block_on(load())
+}
+
+/// Blocking [`store`], see [`load_blocking`].
+pub fn store_blocking(token: &str) -> Result<(), TokenError> {
+    runtime()
+        .map_err(TokenError::Runtime)?
+        .block_on(store(token))
+}
+
+/// Blocking [`delete`], see [`load_blocking`].
+pub fn delete_blocking() -> Result<(), TokenError> {
+    runtime().map_err(TokenError::Runtime)?.block_on(delete())
 }
 
 /// Remove the token from the keyring (logout).

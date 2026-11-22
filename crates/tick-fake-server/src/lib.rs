@@ -716,6 +716,16 @@ fn run_sync(st: &mut State, form: &HashMap<String, String>) -> Result<Value, Res
         out.insert("temp_id_mapping".into(), Value::Object(mapping));
     }
 
+    // Read semantics. Where the docs are silent, the choices are:
+    // - A token we did not issue (or from before a reset) gets a full sync.
+    // - Full sync ("all active resource data") leaves out deleted objects, completed tasks
+    //   and archived projects and sections; the docs do not say whether archived objects are
+    //   part of it.
+    // - Incremental sync returns every object changed since the token, including deleted
+    //   ones (`is_deleted: true`) and tasks completed since (`checked: true`).
+    // - Collaborator states are returned under `collaborator_states` (the overview example);
+    //   its property table calls them `collaborators_states`. They come with `collaborators`.
+    // - `completed_info` is computed per project from the completion records.
     let since = parse_token(token).filter(|r| *r <= st.rev);
     let full = since.is_none();
     let since = since.unwrap_or(0);

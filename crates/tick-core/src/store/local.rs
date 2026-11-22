@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use super::{Changes, Kind, Origin, Result, delete_local, load_raw, meta_get, put_object};
 use crate::clock::Now;
 use crate::command::{Command, QUICK_ADD};
+use crate::order_key;
 
 fn str_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key)
@@ -70,6 +71,76 @@ fn next_child_order(
             r.get(0)
         })?;
     Ok(max.unwrap_or(0) + 1)
+}
+
+/// A key placing an item last among its siblings, or `None` when the siblings have no keys
+/// (then `child_order` decides the position).
+fn last_item_key(
+    tx: &Transaction<'_>,
+    project_id: &str,
+    section_id: Option<&str>,
+    parent_id: Option<&str>,
+    exclude: &str,
+) -> Result<Option<String>> {
+    let max: Option<String> = tx
+        .prepare_cached(
+            "SELECT MAX(order_key) FROM items WHERE project_id = ?1
+             AND section_id IS ?2 AND parent_id IS ?3 AND local_deleted = 0 AND checked = 0
+             AND id != ?4",
+        )?
+        .query_row(
+            rusqlite::params![project_id, section_id, parent_id, exclude],
+            |r| r.get(0),
+        )?;
+    Ok(max.map(|m| order_key::key_between(Some(&m), None)))
+}
+
+fn last_project_key(
+    tx: &Transaction<'_>,
+    parent_id: Option<&str>,
+    exclude: &str,
+) -> Result<Option<String>> {
+    let max: Option<String> = tx
+        .prepare_cached(
+            "SELECT MAX(order_key) FROM projects WHERE parent_id IS ?1 AND local_deleted = 0
+             AND id != ?2",
+        )?
+        .query_row(rusqlite::params![parent_id, exclude], |r| r.get(0))?;
+    Ok(max.map(|m| order_key::key_between(Some(&m), None)))
+}
+
+/// After a `child_order` change, give the sibling group fresh local keys in `child_order`
+/// order so views (which sort by `order_key` first) show the new order until the server's
+/// keys arrive.
+fn rekey_item_group(tx: &Transaction<'_>, id: &str, now: &Now, ch: &mut Changes) -> Result<()> {
+    let Some(v) = load_raw(tx, Kind::Item, id)? else {
+        return Ok(());
+    };
+    let mut stmt = tx.prepare_cached(
+        "SELECT id, child_order, order_key FROM items WHERE project_id = ?1
+         AND section_id IS ?2 AND parent_id IS ?3 AND local_deleted = 0 AND checked = 0",
+    )?;
+    let mut sibs: Vec<(String, i64, Option<String>)> = stmt
+        .query_map(
+            rusqlite::params![
+                v["project_id"].as_str().unwrap_or(""),
+                v["section_id"].as_str(),
+                v["parent_id"].as_str()
+            ],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?
+        .collect::<std::result::Result<_, _>>()?;
+    if sibs.iter().all(|(_, _, k)| k.is_none()) {
+        return Ok(());
+    }
+    sibs.sort_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)));
+    let keys = order_key::keys_after(None, sibs.len());
+    for ((sid, _, old), key) in sibs.into_iter().zip(keys) {
+        if old.as_deref() != Some(key.as_str()) {
+            set_fields(tx, Kind::Item, &sid, &[("order_key", json!(key))], now, ch)?;
+        }
+    }
+    Ok(())
 }
 
 fn ids_where(tx: &Transaction<'_>, sql: &str, param: &str) -> Result<Vec<String>> {
@@ -271,6 +342,16 @@ pub(crate) fn apply_command(
                 )?;
                 v["child_order"] = json!(order);
             }
+            if a.get("order_key").is_none() {
+                let key = last_item_key(
+                    tx,
+                    v["project_id"].as_str().unwrap_or(""),
+                    v["section_id"].as_str(),
+                    v["parent_id"].as_str(),
+                    temp_id,
+                )?;
+                v["order_key"] = json!(key);
+            }
             put(tx, Kind::Item, &v, now, ch)?;
         }
         "item_update" => update(tx, Kind::Item, a, now, ch)?,
@@ -304,6 +385,8 @@ pub(crate) fn apply_command(
                 };
             let project = project.unwrap_or_default();
             let order = next_child_order(tx, &project, section.as_deref(), parent.as_deref())?;
+            // Docs: the task becomes the last one of its new siblings.
+            let key = last_item_key(tx, &project, section.as_deref(), parent.as_deref(), id)?;
             set_fields(
                 tx,
                 Kind::Item,
@@ -313,6 +396,7 @@ pub(crate) fn apply_command(
                     ("section_id", json!(section)),
                     ("parent_id", json!(parent)),
                     ("child_order", json!(order)),
+                    ("order_key", json!(key)),
                 ],
                 now,
                 ch,
@@ -414,6 +498,7 @@ pub(crate) fn apply_command(
         }
         "item_reorder" => {
             if let Some(items) = a.get("items").and_then(Value::as_array) {
+                let mut groups = std::collections::BTreeMap::new();
                 for it in items {
                     if let (Some(id), Some(order)) = (str_arg(it, "id"), it.get("child_order")) {
                         set_fields(
@@ -424,7 +509,19 @@ pub(crate) fn apply_command(
                             now,
                             ch,
                         )?;
+                        if let Some(v) = load_raw(tx, Kind::Item, id)? {
+                            let key = format!(
+                                "{}|{}|{}",
+                                v["project_id"].as_str().unwrap_or(""),
+                                v["section_id"].as_str().unwrap_or(""),
+                                v["parent_id"].as_str().unwrap_or("")
+                            );
+                            groups.entry(key).or_insert_with(|| id.to_owned());
+                        }
                     }
+                }
+                for id in groups.into_values() {
+                    rekey_item_group(tx, &id, now, ch)?;
                 }
             }
         }
@@ -464,11 +561,12 @@ pub(crate) fn apply_command(
                     "SELECT MAX(child_order) FROM projects WHERE parent_id IS ?1 AND local_deleted = 0",
                 )?
                 .query_row([parent], |r| r.get(0))?;
+            let key = last_project_key(tx, parent, cmd.temp_id.as_deref().unwrap_or(""))?;
             add_object(
                 tx,
                 Kind::Project,
                 cmd,
-                json!({"name": "", "color": "charcoal", "parent_id": null,
+                json!({"name": "", "color": "charcoal", "parent_id": null, "order_key": key,
                        "child_order": max.unwrap_or(0) + 1, "is_collapsed": false, "shared": false,
                        "can_assign_tasks": false, "is_deleted": false, "is_archived": false,
                        "is_favorite": false, "view_style": "list", "created_at": ts,
@@ -482,7 +580,15 @@ pub(crate) fn apply_command(
         "project_move" => {
             if let Some(id) = str_arg(a, "id") {
                 let parent = a.get("parent_id").cloned().unwrap_or(Value::Null);
-                set_fields(tx, Kind::Project, id, &[("parent_id", parent)], now, ch)?;
+                let key = last_project_key(tx, parent.as_str(), id)?;
+                set_fields(
+                    tx,
+                    Kind::Project,
+                    id,
+                    &[("parent_id", parent), ("order_key", json!(key))],
+                    now,
+                    ch,
+                )?;
             }
         }
         "project_archive" => {
@@ -501,12 +607,18 @@ pub(crate) fn apply_command(
         }
         "project_unarchive" => {
             if let Some(id) = str_arg(a, "id") {
-                // Docs: the project is unarchived alone and becomes a root project.
+                // Docs: the project is unarchived alone, becomes a root project and is placed
+                // at the end of the other root projects.
+                let key = last_project_key(tx, None, id)?;
                 set_fields(
                     tx,
                     Kind::Project,
                     id,
-                    &[("is_archived", json!(false)), ("parent_id", Value::Null)],
+                    &[
+                        ("is_archived", json!(false)),
+                        ("parent_id", Value::Null),
+                        ("order_key", json!(key)),
+                    ],
                     now,
                     ch,
                 )?;

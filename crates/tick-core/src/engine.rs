@@ -327,7 +327,7 @@ impl SyncEngine {
             .get("text")
             .and_then(Value::as_str)
             .unwrap_or("");
-        match self.client.quick_add(text).await {
+        match self.client.quick_add(text, &q.command.uuid).await {
             Ok(item) => {
                 let changes = self.store.apply_quick_add_result(&q, &item)?;
                 report.acknowledged += 1;
@@ -335,20 +335,20 @@ impl SyncEngine {
                 report.changes.merge(changes);
                 Ok(())
             }
-            Err(ApiError::Request { status, message }) => {
-                // The server rejected the text for good (400 and similar).
-                let msg = format!("quick add failed ({status}): {message}");
+            Err(e) if e.is_transient() => {
+                let _ = self.store.note_attempt(&q.command.uuid, &e.to_string());
+                Err(e.into())
+            }
+            Err(ApiError::Unauthorized) => Err(ApiError::Unauthorized.into()),
+            Err(e) => {
+                // Rejected for good (400, 403, an unreadable response, ...): drop it so it
+                // does not block the rest of the queue.
+                let msg = format!("quick add failed: {e}");
                 let changes = self.store.fail_command(&q, &msg, None)?;
                 report.failed.push(msg);
                 self.emit_changes(&changes);
                 report.changes.merge(changes);
                 Ok(())
-            }
-            Err(e) => {
-                if e.is_transient() {
-                    let _ = self.store.note_attempt(&q.command.uuid, &e.to_string());
-                }
-                Err(e.into())
             }
         }
     }
@@ -585,23 +585,31 @@ async fn run(
     rx: async_channel::Receiver<Request>,
     events: async_channel::Sender<EngineEvent>,
 ) {
+    use tokio::time::Instant;
     let client = Client::new(config.api_base.clone(), config.token.clone());
     let mut engine = SyncEngine::new(store, client).with_events(events.clone());
     let mut foreground = true;
     let mut attempt = 0u32;
-    let mut delay = Duration::ZERO; // first sync right away
+    // When the next periodic sync is due (the first one right away).
+    let mut next_sync = Instant::now();
+    // Backoff after 429/5xx: no sync starts before this instant, whatever triggers it, and
+    // the server's `retry_after` is never shortened.
+    let mut not_before: Option<Instant> = None;
     loop {
-        let req = tokio::time::timeout(delay, rx.recv()).await;
-        let mut do_sync = false;
-        match req {
-            Err(_) => do_sync = true, // timer
-            Ok(Err(_)) => return,     // all handles dropped
+        let wait = next_sync.saturating_duration_since(Instant::now());
+        let mut want_sync = false;
+        match tokio::time::timeout(wait, rx.recv()).await {
+            Err(_) => want_sync = true, // timer
+            Ok(Err(_)) => return,       // all handles dropped
             Ok(Ok(Request::Shutdown)) => return,
-            Ok(Ok(Request::SyncNow)) => do_sync = true,
+            Ok(Ok(Request::SyncNow)) => want_sync = true,
             Ok(Ok(Request::Foreground(f))) => {
                 let was = foreground;
                 foreground = f;
-                do_sync = f && !was;
+                want_sync = f && !was;
+                if !f {
+                    next_sync = Instant::now() + config.background_interval;
+                }
             }
             Ok(Ok(Request::LoadCompleted { restart })) => {
                 if let Err(e) = engine.fetch_completed(restart).await {
@@ -615,36 +623,46 @@ async fn run(
             }
             Ok(Ok(Request::SetToken(t))) => {
                 engine.set_client(Client::new(config.api_base.clone(), t));
-                do_sync = true;
+                not_before = None;
+                want_sync = true;
             }
+        }
+        if !want_sync {
+            continue;
         }
         let interval = if foreground {
             config.foreground_interval
         } else {
             config.background_interval
         };
-        if do_sync {
-            if engine.status().state == ConnState::Unauthorized {
-                delay = interval;
-                continue;
+        let now = Instant::now();
+        if let Some(nb) = not_before
+            && now < nb
+        {
+            next_sync = nb;
+            continue;
+        }
+        if engine.status().state == ConnState::Unauthorized {
+            next_sync = now + interval;
+            continue;
+        }
+        match engine.sync_once().await {
+            Ok(_) => {
+                attempt = 0;
+                not_before = None;
+                next_sync = Instant::now() + interval;
             }
-            match engine.sync_once().await {
-                Ok(_) => {
-                    attempt = 0;
-                    delay = interval;
-                }
-                Err(e) if e.is_transient() => {
-                    attempt += 1;
-                    delay = backoff_delay(&e, attempt, Duration::from_secs(2))
-                        .min(interval.max(Duration::from_secs(60)));
-                    if matches!(e, EngineError::Api(ApiError::Network(_))) {
-                        delay = interval.min(Duration::from_secs(30));
-                    }
-                }
-                Err(_) => delay = interval,
+            Err(EngineError::Api(ApiError::Network(_))) => {
+                // Offline: retry periodically; a user action may try earlier.
+                next_sync = Instant::now() + interval.min(Duration::from_secs(30));
             }
-        } else if delay.is_zero() {
-            delay = interval;
+            Err(e) if e.is_transient() => {
+                attempt += 1;
+                let delay = backoff_delay(&e, attempt, Duration::from_secs(2));
+                not_before = Some(Instant::now() + delay);
+                next_sync = Instant::now() + delay;
+            }
+            Err(_) => next_sync = Instant::now() + interval,
         }
     }
 }

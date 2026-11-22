@@ -462,16 +462,60 @@ fn complete_and_uncomplete_locally() {
 }
 
 #[test]
-fn reorder_and_order_keys() {
+fn reorder_and_move_show_in_views() {
     let mut s = seeded();
-    s.enqueue(Command::item_update("c", json!({"order_key": "a0V"})))
+    let order = |s: &Store, project: &str, section: usize| -> Vec<String> {
+        let view = s.project_view(project).unwrap().unwrap();
+        let nodes = if section == 0 {
+            &view.tasks
+        } else {
+            &view.sections[section - 1].tasks
+        };
+        nodes.iter().map(|n| n.task.id.clone()).collect()
+    };
+    assert_eq!(order(&s, "work", 1), vec!["d", "c"]);
+    // Keys present: one item_update with a key before "d".
+    let cmd = s.reorder_command("c", None).unwrap().unwrap();
+    assert_eq!(cmd.kind, "item_update");
+    s.enqueue(cmd).unwrap();
+    assert_eq!(order(&s, "work", 1), vec!["c", "d"]);
+    // The deprecated item_reorder also shows, even though siblings have keys.
+    s.enqueue(Command::item_reorder(&[("d".into(), 1), ("c".into(), 2)]))
         .unwrap();
-    let view = s.project_view("work").unwrap().unwrap();
-    let first = &view.sections[0].tasks[0].task;
-    assert_eq!(first.id, "c");
-    s.enqueue(Command::item_reorder(&[("f".into(), 5)]))
-        .unwrap();
-    assert_eq!(s.task("f").unwrap().unwrap().child_order, 5);
+    assert_eq!(order(&s, "work", 1), vec!["d", "c"]);
+
+    // No keys in the Inbox: the helper falls back to item_reorder.
+    assert_eq!(order(&s, "inbox", 0), vec!["a", "b"]);
+    let cmd = s.reorder_command("a", Some("b")).unwrap().unwrap();
+    assert_eq!(cmd.kind, "item_reorder");
+    s.enqueue(cmd).unwrap();
+    assert_eq!(order(&s, "inbox", 0), vec!["b", "a"]);
+    assert!(s.reorder_command("a", Some("zzz")).unwrap().is_none());
+
+    // A moved task lands last among keyed siblings, not at its old key's position.
+    s.apply_sync_response(
+        &[],
+        &resp(json!({"sync_token": "t5", "items": [
+            item("x1", "work", "Later one", json!({"section_id": "s2", "order_key": "a5"})),
+            item("x2", "work", "Later two", json!({"section_id": "s2", "order_key": "a6"}))
+        ]})),
+    )
+    .unwrap();
+    s.enqueue(Command::item_move(
+        "d",
+        crate::MoveTarget::Section("s2".into()),
+    ))
+    .unwrap();
+    assert_eq!(order(&s, "work", 2), vec!["x1", "x2", "d"]);
+    // Projects too.
+    s.enqueue(Command::project_move("sub", None)).unwrap();
+    let names: Vec<String> = s
+        .projects_tree()
+        .unwrap()
+        .into_iter()
+        .map(|p| p.project.name)
+        .collect();
+    assert_eq!(names, vec!["Inbox", "Work", "Home", "Sub"]);
 }
 
 #[test]

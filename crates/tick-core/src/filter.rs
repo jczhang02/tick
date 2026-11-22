@@ -231,6 +231,13 @@ fn collapse_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// ASCII case-insensitive `strip_prefix` that slices the original string (lowercasing can
+/// change byte lengths, for example `İ`).
+fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let n = prefix.len();
+    (s.len() >= n && s.is_char_boundary(n) && s[..n].eq_ignore_ascii_case(prefix)).then(|| &s[n..])
+}
+
 fn parse_atom(word: &str) -> Result<Atom, String> {
     let w = collapse_ws(word);
     let lower = w.to_lowercase();
@@ -272,17 +279,15 @@ fn parse_atom(word: &str) -> Result<Atom, String> {
         }
         return Ok(Atom::Section(name.to_owned()));
     }
-    if let Some(rest) = lower.strip_prefix("search:") {
-        let start = w.len() - rest.len();
-        let text = w[start..].trim();
+    if let Some(rest) = strip_prefix_ci(&w, "search:") {
+        let text = rest.trim();
         if text.is_empty() {
             return unsupported();
         }
         return Ok(Atom::Search(text.to_owned()));
     }
-    if let Some(rest) = lower.strip_prefix("assigned to") {
-        let start = w.len() - rest.len();
-        let who = w[start..].trim().trim_start_matches(':').trim();
+    if let Some(rest) = strip_prefix_ci(&w, "assigned to") {
+        let who = rest.trim().trim_start_matches(':').trim();
         return match who.to_lowercase().as_str() {
             "" => unsupported(),
             "me" => Ok(Atom::AssignedToMe),
@@ -353,7 +358,6 @@ fn eval_atom(atom: &Atom, t: &EvalTask<'_>, ctx: &EvalContext, now: &Now) -> boo
         } => {
             let name = name.to_lowercase();
             let mut cur = Some(item.project_id.clone());
-            let mut first = true;
             let mut guard = 0;
             while let Some(pid) = cur {
                 let Some((pname, parent)) = ctx.projects.get(&pid) else {
@@ -365,8 +369,6 @@ fn eval_atom(atom: &Atom, t: &EvalTask<'_>, ctx: &EvalContext, now: &Now) -> boo
                 if !with_subprojects || guard > 64 {
                     return false;
                 }
-                let _ = first;
-                first = false;
                 guard += 1;
                 cur = parent.clone();
             }
@@ -470,6 +472,13 @@ mod tests {
         assert_eq!(atom("3 days"), Atom::NextDays(3));
         assert_eq!(atom("search: Buy milk"), Atom::Search("Buy milk".into()));
         assert_eq!(atom("Search:meeting"), Atom::Search("meeting".into()));
+        // Lowercasing changes the byte length of some characters; slicing must not panic.
+        assert_eq!(
+            atom("search: İstanbul trip"),
+            Atom::Search("İstanbul trip".into())
+        );
+        assert!(unsupported("İİİİ search: x"));
+        assert_eq!(atom("assigned to: İlker"), Atom::AssignedTo("İlker".into()));
         assert_eq!(atom("assigned to: me"), Atom::AssignedToMe);
         assert_eq!(atom("assigned to me"), Atom::AssignedToMe);
         assert_eq!(atom("assigned to: others"), Atom::AssignedToOthers);

@@ -154,7 +154,11 @@ fn tasks(conn: &Connection, sql: &str, p: impl rusqlite::Params, now: &Now) -> R
     let mut out = Vec::new();
     for row in rows {
         let (raw, pending) = row?;
-        out.push(to_task(&raw, pending != 0, now)?);
+        // One malformed row must not blank a whole view.
+        match to_task(&raw, pending != 0, now) {
+            Ok(t) => out.push(t),
+            Err(e) => eprintln!("tick-core: skipping unreadable task row: {e}"),
+        }
     }
     Ok(out)
 }
@@ -168,7 +172,10 @@ fn objects<T: serde::de::DeserializeOwned>(
     let rows = stmt.query_map(p, |r| r.get::<_, String>(0))?;
     let mut out = Vec::new();
     for raw in rows {
-        out.push(parse(&raw?)?);
+        match parse(&raw?) {
+            Ok(v) => out.push(v),
+            Err(e) => eprintln!("tick-core: skipping unreadable row: {e}"),
+        }
     }
     Ok(out)
 }
@@ -819,6 +826,60 @@ impl Store {
             )
             .optional()?
             .unwrap_or(0))
+    }
+
+    /// The command that moves task `id` right after its sibling `after` (`None` = first)
+    /// within its current list (same project, section and parent).
+    ///
+    /// When the siblings carry `order_key`s this is one `item_update` with a key between
+    /// the new neighbors (what the docs recommend); otherwise it is the deprecated
+    /// `item_reorder` renumbering `child_order` for the whole list. Returns `None` when `id`
+    /// or `after` is not in the list.
+    pub fn reorder_command(
+        &self,
+        id: &str,
+        after: Option<&str>,
+    ) -> Result<Option<crate::command::Command>> {
+        let now = self.now();
+        let Some(task) = self.task(id)? else {
+            return Ok(None);
+        };
+        let siblings: Vec<Task> = tasks(
+            &self.conn,
+            &format!(
+                "SELECT raw, local_pending FROM items WHERE project_id = ?1 AND section_id IS ?2
+                 AND parent_id IS ?3 AND id != ?4 AND {ACTIVE} ORDER BY {SIBLING_ORDER}"
+            ),
+            params![task.project_id, task.section_id, task.parent_id, id],
+            &now,
+        )?;
+        let pos = match after {
+            None => 0,
+            Some(a) => match siblings.iter().position(|t| t.id == a) {
+                Some(i) => i + 1,
+                None => return Ok(None),
+            },
+        };
+        if siblings.iter().all(|t| t.order_key.is_some()) {
+            let prev = pos
+                .checked_sub(1)
+                .and_then(|i| siblings.get(i))
+                .and_then(|t| t.order_key.as_deref());
+            let next = siblings.get(pos).and_then(|t| t.order_key.as_deref());
+            let key = crate::order_key::key_between(prev, next);
+            return Ok(Some(crate::command::Command::item_update(
+                id,
+                serde_json::json!({ "order_key": key }),
+            )));
+        }
+        let mut ids: Vec<String> = siblings.into_iter().map(|t| t.item.id).collect();
+        ids.insert(pos, id.to_owned());
+        let orders: Vec<(String, i64)> = ids
+            .into_iter()
+            .enumerate()
+            .map(|(i, id)| (id, i as i64 + 1))
+            .collect();
+        Ok(Some(crate::command::Command::item_reorder(&orders)))
     }
 
     /// Raw JSON of any cached object (debugging and forward compatibility).

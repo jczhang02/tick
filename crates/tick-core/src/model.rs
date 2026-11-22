@@ -55,6 +55,21 @@ fn de_string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     Ok(de_opt_string(d)?.unwrap_or_default())
 }
 
+fn de_strings<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    let v = Option::<Value>::deserialize(d)?;
+    Ok(match v {
+        Some(Value::Array(a)) => a
+            .into_iter()
+            .filter_map(|x| match x {
+                Value::String(s) => Some(s),
+                Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    })
+}
+
 fn default_priority() -> i64 {
     1
 }
@@ -151,7 +166,7 @@ pub struct Item {
     pub day_order: i64,
     #[serde(default, deserialize_with = "de_bool")]
     pub is_collapsed: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_strings")]
     pub labels: Vec<String>,
     #[serde(default, deserialize_with = "de_opt_id")]
     pub added_by_uid: Option<String>,
@@ -683,7 +698,8 @@ mod tests {
         assert_eq!(p.id, "12");
         assert_eq!(p.workspace_id.as_deref(), Some("12345"));
         assert!(!p.inbox_project);
-        let item: Item = serde_json::from_value(json!({"id": "1"})).unwrap();
+        let item: Item = serde_json::from_value(json!({"id": "1", "labels": null})).unwrap();
+        assert!(item.labels.is_empty());
         assert_eq!(item.priority, 1);
         assert_eq!(item.p(), 4);
     }
