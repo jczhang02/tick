@@ -106,9 +106,10 @@ The owner should confirm or reject each item; until then they are binding as wri
    color in place, nothing appears, disappears or moves.
 6. **The clear icon inside text entries** (`GtkSearchEntry`, the quick-add entry) is an entry
    icon, not a button. Tick sizes it with `entry.tick-entry > image { min-width: 44px; }` inside
-   a 44 px entry (7.2). If the first screenshot run shows that GTK does not honor that size for
-   the icon's click area, this item becomes an exemption: the action is redundant (Escape or
-   deleting the text clears the entry) and must not be the only way to clear it.
+   a 44 px entry (7.2); the icon widget then measures 44 x 44 (checked on GTK 4.22.5). Not yet
+   checked: that a click anywhere in those 44 px clears. If it does not, this item becomes an
+   exemption: the action is redundant (Escape or deleting the text clears the entry) and must
+   not be the only way to clear it.
 
 ### 1.3 References: what Tick adopts and rejects
 
@@ -470,7 +471,9 @@ Ring geometry stays libadwaita's: 2 px wide; offset -2 px on rows, buttons and c
 (inside the widget), -2 px on entries, -1 px on entry rows. On an accent or destructive fill
 (suggested and destructive buttons, the selected calendar day) a ring inside the fill in
 `--accent-color` would vanish, so there the ring is `--tick-on-accent`; it measures the same as
-the text on that fill (4.64:1 or better, 2.4.4).
+the text on that fill (4.64:1 or better, 2.4.4). Filled buttons that carry technique 2's 5 px
+transparent border (`.tick-hit`, header bar buttons) use `outline-offset: -7px`, because the
+offset counts from the border box: -2 px would put the ring on the surface outside the fill.
 
 First screenshot run: focus an entry and the login entry row through AT-SPI and sample the ring
 pixels; they must equal the tabled `--accent-color`, not a 50 % mix.
@@ -1774,10 +1777,15 @@ them on GTK 4.22.5 / libadwaita 1.9.4 in headless mutter:
   21 px left and right of its center.
 - A `GtkListView` row with `activatable = false` has no `.activatable` class; an activatable row
   has it.
+- Swatches: grouped `GtkCheckButton`s draw a `radio` indicator node (ungrouped ones `check`);
+  with the rule below each swatch measures 44 x 44, the dot shows its color and the checked ring
+  renders in the text color.
+- A focused `.suggested-action .tick-hit` button draws its `--tick-on-accent` ring on the
+  outermost 2 px of the fill (`outline-offset: -7px`); at libadwaita's -2 px it would sit in the
+  transparent border, on the surface, invisible.
 
 Not yet seen: focus rings on entries, entry rows and calendar days, the selected calendar day,
-destructive buttons, swatches, and every popover rule. The first screenshot run must check
-them.
+destructive buttons, and every popover rule. The first screenshot run must check them.
 
 ```css
 /* ---------- tokens ---------- */
@@ -1844,6 +1852,14 @@ button.suggested-action:focus:focus-visible,
 button.destructive-action:focus:focus-visible,
 popover calendar > grid > label.day-number:selected:focus {
   outline-color: var(--tick-on-accent);
+}
+/* the outline is placed from the border box: with technique 2's 5 px transparent border, -2 px
+   would put it on the surface, outside the fill. Move it 2 px inside the visible fill. */
+.tick-hit.suggested-action:focus:focus-visible,
+.tick-hit.destructive-action:focus:focus-visible,
+headerbar button.suggested-action:focus:focus-visible,
+headerbar button.destructive-action:focus:focus-visible {
+  outline-offset: -7px;
 }
 
 /* ---------- 44 px targets (2.7) ---------- */
@@ -2086,7 +2102,9 @@ checkbutton.tick-swatch {
   border-spacing: 0;
   border-radius: 9999px;
 }
-checkbutton.tick-swatch > check {
+/* grouped check buttons draw a "radio" indicator node, ungrouped ones a "check" node */
+checkbutton.tick-swatch > check,
+checkbutton.tick-swatch > radio {
   min-width: 0;
   min-height: 0;
   margin: 0;
@@ -2095,6 +2113,7 @@ checkbutton.tick-swatch > check {
   background: none;
   box-shadow: none;
   -gtk-icon-source: none;
+  -gtk-icon-size: 0;                        /* libadwaita sizes the indicator by icon size */
 }
 checkbutton.tick-swatch > .tick-dot {
   min-width: 24px;
