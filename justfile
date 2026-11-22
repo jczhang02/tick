@@ -8,14 +8,14 @@ check:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test --workspace --exclude tick-e2e
 
-# E2E tests against the real app in headless mutter
+# E2E tests against the real app in headless mutter (builds tick and the harness fixture)
 e2e:
-    cargo build -p tick-gtk
+    cargo build -p tick-gtk --bins --examples
     cargo test -p tick-e2e
 
 # Design-review screenshots into target/screenshots/
 screenshots:
-    cargo build -p tick-gtk
+    cargo build -p tick-gtk --bins --examples
     TICK_SCREENSHOTS=1 cargo test -p tick-e2e screenshots -- --nocapture
 
 # Run against the real Todoist API
