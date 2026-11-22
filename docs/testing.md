@@ -48,6 +48,8 @@ These were verified on the dev machine (mutter 50.5, GTK 4.22, libadwaita 1.9) a
    - A `GtkEntry` has role `Text` (not `Entry`) with the `editable` state.
    - A hidden window (hide-on-close) drops out of the application's children; it does not just
      lose `showing`.
+   - `Component.GrabFocus` returns `NotSupported` in GTK4: focus a widget with a real click.
+     Action names are capitalized (a button has one action, "Click").
 5. **Real input.** Use mutter's `org.gnome.Mutter.RemoteDesktop` on the private bus:
    `CreateSession` -> `Session.Start` -> `NotifyKeyboardKeysym(u keysym, b pressed)`,
    `NotifyPointerMotionRelative(d dx, d dy)`, `NotifyPointerButton(i button, b pressed)`
@@ -76,13 +78,13 @@ These were verified on the dev machine (mutter 50.5, GTK 4.22, libadwaita 1.9) a
 7. **Notifications.** The harness owns `org.gtk.Notifications` and
    `org.freedesktop.Notifications` on the private bus with a recording fake, so reminder tests
    can assert on sent notifications and invoke their actions.
-   - GLib 2.88 sends a non-sandboxed app's `GNotification` to `org.gtk.Notifications`
-     (`AddNotification`) when that name has an owner; the portal backend is only used inside
-     a sandbox. Without an `org.gtk.Notifications` owner it falls back to
-     `org.freedesktop.Notifications` (`Notify`).
+   - Observed with GLib 2.88 and a non-sandboxed app (portal not checked): `GNotification`
+     goes to `org.gtk.Notifications` (`AddNotification`) when that name has an owner, and to
+     `org.freedesktop.Notifications` (`Notify`) when it has none.
    - Invoking a button: for the gtk backend, call `org.freedesktop.Application.ActivateAction`
      on the app (what GNOME Shell does); for the freedesktop backend, emit `ActionInvoked`.
-     After one `ActionInvoked`, GLib forgets that notification id.
+     A second `ActionInvoked` for the same freedesktop id had no effect; send a new
+     notification for each invocation.
 8. **Secrets.** Tests must not use a Secret Service. In test mode the token comes from
    `TICK_TOKEN`; the keyring code path is unit-tested separately or tested with a fake
    `org.freedesktop.secrets` provided by the harness. (On a desktop machine gnome-keyring may

@@ -69,8 +69,8 @@ async fn notification_round_trip(s: &Session, backend: Backend) {
         .await
         .unwrap();
 
-    // A notification is done once one of its actions ran (GLib forgets a freedesktop id
-    // after ActionInvoked), so send another one for the default action.
+    // A second ActionInvoked for the same freedesktop id has no effect, so send another
+    // notification for the default action.
     s.click(&send).await.unwrap();
     let n = tick_e2e::poll(WAIT, "second notification", || async {
         s.notifications().sent().get(1).cloned()
@@ -84,8 +84,7 @@ async fn notification_round_trip(s: &Session, backend: Backend) {
         .unwrap();
 }
 
-/// GLib sends through `org.gtk.Notifications` when that name has an owner (a
-/// non-sandboxed app; the portal is only used inside a sandbox).
+/// GLib sends through `org.gtk.Notifications` when that name has an owner.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn notifications_use_gtk_backend() {
     let s = fixture().start().await.unwrap();
@@ -101,4 +100,41 @@ async fn notifications_freedesktop_fallback() {
         .await
         .unwrap();
     notification_round_trip(&s, Backend::Freedesktop).await;
+}
+
+/// AT-SPI actions, focus state and the remaining input calls against a real widget tree.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actions_focus_scroll_and_drag() {
+    let s = fixture().start().await.unwrap();
+    let window = s.window().await.unwrap();
+    let entry = entry(&s).await;
+    // GTK4 answers Component.GrabFocus with NotSupported: focus with a real click.
+    s.click(&entry).await.unwrap();
+    tick_e2e::poll(WAIT, "entry focused", || async {
+        entry
+            .has_state(tick_e2e::State::Focused)
+            .await
+            .ok()
+            .filter(|f| *f)
+    })
+    .await
+    .unwrap();
+
+    let send = window
+        .wait_for(&Query::role(Role::Button).name("Send notification"), WAIT)
+        .await
+        .unwrap();
+    send.do_action(Some("click")).await.unwrap();
+    s.notifications().wait_for(WAIT, |_| true).await.unwrap();
+
+    // No scrollable or draggable widget here: check that mutter accepts the calls and
+    // the app survives them.
+    let input = s.input().await.unwrap();
+    input.move_to(640, 400).await.unwrap();
+    input.scroll(1).await.unwrap();
+    input.drag((640, 400), (700, 450)).await.unwrap();
+    window
+        .wait_for(&Query::role(Role::Label).name("idle"), WAIT)
+        .await
+        .unwrap();
 }

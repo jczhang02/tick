@@ -25,7 +25,9 @@ pub const SPACE: u32 = 0x20;
 ///
 /// Printable Latin-1 maps to its code point (X11 keysyms match there), control keys to
 /// their function keysyms, and everything else to a Unicode keysym
-/// (`0x0100_0000 + code point`).
+/// (`0x0100_0000 + code point`). Mutter drops keysyms outside its US keymap, so only
+/// the ASCII results type anything; [`crate::Input::type_text`] enters other characters
+/// through GTK's Unicode hex input.
 pub fn from_char(c: char) -> u32 {
     match c {
         '\n' | '\r' => RETURN,

@@ -79,3 +79,23 @@ async fn narrow_session() {
     let rect = window.extents().await.unwrap();
     assert_eq!((rect.width, rect.height), (600, 800), "{rect:?}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn relaunch_after_quit() {
+    let mut s = Session::start_default().await.unwrap();
+    s.window().await.unwrap();
+    let first_pid = s.app_pid().unwrap();
+    s.activate_action("quit", None).await.unwrap();
+    s.wait_app_exit(WAIT).await.unwrap();
+
+    s.launch_app().unwrap();
+    assert_ne!(s.app_pid(), Some(first_pid));
+    let window = s.window().await.unwrap();
+    assert_eq!(window.name().await.unwrap(), "Tick");
+    // The log value comes from the new launch only.
+    s.first_frame_ms(WAIT).await.unwrap();
+    assert_eq!(s.app_log().matches("TICK_FIRST_DATA_FRAME_MS=").count(), 1);
+    // GTK apps register on AT-SPI under their binary name.
+    let a11y = s.a11y().await.unwrap();
+    a11y.wait_for_app_named("tick", WAIT).await.unwrap();
+}

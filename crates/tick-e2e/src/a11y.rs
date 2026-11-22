@@ -289,7 +289,8 @@ impl Node {
         })
     }
 
-    /// Runs an accessible action: the one named `name`, or the first one.
+    /// Runs an accessible action: the one named `name` (case-insensitive; GTK4 buttons
+    /// have "Click"), or the first one.
     /// A fallback for when real input is not the point of the test.
     pub async fn do_action(&self, name: Option<&str>) -> Result<()> {
         let action = ActionProxy::builder(&self.conn)
@@ -304,7 +305,7 @@ impl Node {
                 let actions = action.get_actions().await?;
                 let i = actions
                     .iter()
-                    .position(|a| a.name == name)
+                    .position(|a| a.name.eq_ignore_ascii_case(name))
                     .with_context(|| format!("no action {name:?} in {actions:?}"))?;
                 i32::try_from(i)?
             }
@@ -342,18 +343,6 @@ impl Node {
             .cache_properties(zbus::proxy::CacheProperties::No)
             .build()
             .await?)
-    }
-
-    /// Moves keyboard focus to this object (Component.GrabFocus).
-    pub async fn grab_focus(&self) -> Result<()> {
-        let component = ComponentProxy::builder(&self.conn)
-            .destination(self.dest.clone())?
-            .path(self.path.clone())?
-            .cache_properties(zbus::proxy::CacheProperties::No)
-            .build()
-            .await?;
-        anyhow::ensure!(component.grab_focus().await?, "GrabFocus failed");
-        Ok(())
     }
 
     /// All descendants matching `query`, depth-first in tree order. Objects that vanish
