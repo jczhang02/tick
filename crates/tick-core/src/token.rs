@@ -1,5 +1,8 @@
 //! API token storage: the GNOME keyring (Secret Service, via `oo7`), with a `TICK_TOKEN`
 //! environment override for tests and CI.
+//!
+//! Keyring calls can block for a long time (D-Bus, an unlock prompt), so none of these
+//! functions may run on the GTK main thread; see [`load_blocking`].
 
 use std::collections::HashMap;
 
@@ -74,9 +77,15 @@ fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
         .build()
 }
 
-/// Blocking [`load`] for callers outside a tokio runtime (the GTK main thread). `oo7`'s
-/// D-Bus backend needs tokio, so this runs a short-lived current-thread runtime. Do not
-/// call it from inside a tokio runtime.
+/// Blocking [`load`] for a worker thread outside any tokio runtime. `oo7`'s D-Bus backend
+/// needs tokio, so this runs a short-lived current-thread runtime.
+///
+/// Never call it on the GTK main thread: it makes D-Bus calls and `unlock()` may show a
+/// keyring unlock prompt and wait for the user indefinitely, which would freeze the UI
+/// (`docs/architecture.md`: the main thread never blocks). From GTK, run it with
+/// `gio::spawn_blocking` (or a `std::thread`) and await the result with
+/// `glib::spawn_future_local`. Do not call it from inside a tokio runtime either; there,
+/// await [`load`] directly.
 pub fn load_blocking() -> Result<Option<String>, TokenError> {
     if let Some(t) = env_token() {
         return Ok(Some(t));
@@ -84,14 +93,16 @@ pub fn load_blocking() -> Result<Option<String>, TokenError> {
     runtime().map_err(TokenError::Runtime)?.block_on(load())
 }
 
-/// Blocking [`store`], see [`load_blocking`].
+/// Blocking [`store`] for a worker thread; same rules as [`load_blocking`] (never on the GTK
+/// main thread).
 pub fn store_blocking(token: &str) -> Result<(), TokenError> {
     runtime()
         .map_err(TokenError::Runtime)?
         .block_on(store(token))
 }
 
-/// Blocking [`delete`], see [`load_blocking`].
+/// Blocking [`delete`] for a worker thread; same rules as [`load_blocking`] (never on the GTK
+/// main thread).
 pub fn delete_blocking() -> Result<(), TokenError> {
     runtime().map_err(TokenError::Runtime)?.block_on(delete())
 }

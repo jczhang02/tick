@@ -22,10 +22,20 @@
 4. Engine -> UI: after applying a sync response, the engine sends a change event (affected object
    kinds and ids) over an `async-channel`; the UI receives it with `glib::spawn_future_local` and
    refreshes the affected models.
-5. Sync request: push queued commands (batches of at most 100) together with the incremental read
-   (`sync_token`). Resolve `temp_id_mapping`. A `400` command error is terminal: drop the command,
-   roll back its optimistic change by re-reading server state, and surface the error. `429` and
-   `5xx`: back off and retry. Network failure: mark offline, keep the queue.
+5. Sync request: push queued commands (batches of at most 100 commands and about 900 KiB
+   form-encoded, below the documented 1 MiB body limit) together with the incremental read
+   (`sync_token`). Resolve `temp_id_mapping`: rewrite still-queued commands and remember the
+   mapping (`temp_ids` table), so a command enqueued later with the old temp id is rewritten
+   too; change events carry the mapping (`Changes::id_map`) so views can switch ids. A `400`
+   command error is terminal: drop the command, roll back its optimistic change by re-reading
+   server state, and surface the error. `429` and `5xx`: back off and retry; a command still
+   failing after 10 answered attempts is dropped the same way. A request refused as a whole
+   (`400`/`403`/`413`): if a request without commands passes, bisect the batch and drop the one
+   command refused on its own; otherwise keep the queue and back off. Network failure: mark
+   offline, keep the queue. Inside a backoff window no request goes out (history and filter
+   requests wait for the window to end).
+   Completing or deleting a task is enqueued with a 5 s send delay (`Store::enqueue_deferred`),
+   so "Undo" can still discard it; commands behind it wait to keep the order.
 6. Server wins on conflict: incremental read results overwrite local rows, then still-queued
    commands are re-applied on top.
 
@@ -37,6 +47,11 @@
 - Keep raw server JSON per object alongside the indexed columns, so unknown fields survive and
   future features need no migration.
 - Schema migrations are versioned with `PRAGMA user_version`.
+- Write transactions are `BEGIN IMMEDIATE`: under WAL a deferred transaction that reads first and
+  writes later fails with `SQLITE_BUSY` (no busy wait) when the other connection committed in
+  between. Both connections wait up to 5 s for the write lock (`Store::set_busy_timeout`).
+- The API token comes from the keyring on a worker thread, never on the main thread (an unlock
+  prompt can block indefinitely).
 
 ## Configuration through the environment
 
