@@ -108,13 +108,18 @@ async fn every_view_has_named_44px_targets() {
         ("Work", "Work"),
         ("phone", "phone"),
         ("Urgent", "Urgent"),
-        // The source line of server results is part of the view header.
-        ("Before Monday", "Before Monday"),
+        // The source line of server results is a label in the view header.
+        ("Before Monday", "Results from Todoist, updated 09:00"),
     ] {
         app::open_view(&s, &window, view).await;
+        let role = if first_row.starts_with("Results") {
+            Role::Label
+        } else {
+            Role::ListItem
+        };
         app::task_list(&window)
             .await
-            .wait_for(&Query::role(Role::ListItem).name(first_row), WAIT)
+            .wait_for(&Query::role(role).name(first_row), WAIT)
             .await
             .unwrap();
         check(&window, view).await;

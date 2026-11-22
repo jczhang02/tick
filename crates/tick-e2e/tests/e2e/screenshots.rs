@@ -405,8 +405,14 @@ async fn narrow_dark() {
     }
 }
 
-/// Compiles `po/zh_CN.po` into a locale tree for `TICK_LOCALEDIR`.
+/// Compiles `po/zh_CN.po` into a locale tree for `TICK_LOCALEDIR`, once per test process
+/// (the wide sessions run in parallel and must not rewrite a catalog an app is reading).
 fn zh_catalog() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(compile_zh_catalog).clone()
+}
+
+fn compile_zh_catalog() -> PathBuf {
     let po = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../po/zh_CN.po");
     let dir = std::env::temp_dir().join(format!("tick-e2e-locale-{}", std::process::id()));
     let out = dir.join("zh_CN/LC_MESSAGES");

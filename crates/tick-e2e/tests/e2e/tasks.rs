@@ -538,3 +538,99 @@ async fn completing_a_task_that_is_still_being_added() {
     )
     .await;
 }
+
+/// Completing every task of a view: with no task row left, keyboard focus must not land
+/// on the toast (a focused toast never times out), so the closes go out after 5 s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn completing_the_last_task_lets_the_toast_go() {
+    let (server, s, window) = start_in_inbox().await;
+    complete(&s, &window, "Call the dentist").await;
+    app::wait_tasks(&window, &["Renew passport", "Read the article"]).await;
+    complete(&s, &window, "Renew passport").await;
+    app::wait_tasks(&window, &["Read the article"]).await;
+    complete(&s, &window, "Read the article").await;
+    app::wait_tasks(&window, &[]).await;
+    let closes = tick_e2e::poll(Duration::from_secs(15), "three closes", || async {
+        let c = app::commands_sent(&server, "item_close");
+        (c.len() == 3).then_some(c)
+    })
+    .await
+    .unwrap();
+    let mut ids: Vec<&str> = closes
+        .iter()
+        .filter_map(|c| c["args"]["id"].as_str())
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["i1", "i2", "i3"]);
+}
+
+/// Undo after the close already went out (the toast stayed up past the hold, here 1 s
+/// with the pointer on it): the task is reopened with `item_uncomplete`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn undo_after_the_close_was_sent_reopens_the_task() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server)
+        .env("TICK_TEST_UNDO_HOLD_MS", "1000")
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Inbox").await;
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    complete(&s, &window, "Read the article").await;
+    app::wait_tasks(&window, &["Call the dentist", "Renew passport"]).await;
+    let undo = toast_button(&window, "Undo").await;
+    // The pointer on the toast pauses its timeout.
+    let (x, y) = undo.extents().await.unwrap().center();
+    s.input().await.unwrap().move_to(x, y).await.unwrap();
+    tick_e2e::poll(Duration::from_secs(15), "item_close", || async {
+        (!app::commands_sent(&server, "item_close").is_empty()).then_some(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(server.state().get("items", "i3").unwrap()["checked"], true);
+    s.click(&undo).await.unwrap();
+    let reopened = tick_e2e::poll(Duration::from_secs(15), "item_uncomplete", || async {
+        let c = app::commands_sent(&server, "item_uncomplete");
+        (!c.is_empty()).then_some(c)
+    })
+    .await
+    .unwrap();
+    assert_eq!(reopened[0]["args"]["id"], "i3");
+    assert_eq!(server.state().get("items", "i3").unwrap()["checked"], false);
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+}
+
+/// Unchecking a completed-pending recurring task while its toast shows takes the close
+/// back: nothing is sent and the ring empties.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unchecking_a_recurring_completion_takes_it_back() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Home").await;
+    app::wait_tasks(&window, &["Water the plants", "Plant bulbs"]).await;
+    complete(&s, &window, "Water the plants").await;
+    let row = app::task_row(&window, "Water the plants").await;
+    let ring = app::inside(&row, Query::role(Role::CheckBox).name("Mark as not done")).await;
+    s.click(&ring).await.unwrap();
+    app::inside(
+        &app::task_row(&window, "Water the plants").await,
+        Query::role(Role::CheckBox).name("Complete task"),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    assert!(app::commands_sent(&server, "item_close").is_empty());
+    let st = server.state();
+    assert_eq!(st.get("items", "h1").unwrap()["due"]["date"], "2026-11-23");
+}

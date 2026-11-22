@@ -348,6 +348,13 @@ async fn deleted_view_falls_back_to_today() {
         v["is_deleted"] = serde_json::json!(true);
     });
     wait_view(&window, "Today").await;
+
+    app::open_view(&s, &window, "Urgent").await;
+    wait_view(&window, "Urgent").await;
+    server.state().update("filters", "f1", |v| {
+        v["is_deleted"] = serde_json::json!(true);
+    });
+    wait_view(&window, "Today").await;
 }
 
 /// J and K move between tasks like Down and Up.
