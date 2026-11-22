@@ -34,8 +34,13 @@
    command refused on its own; otherwise keep the queue and back off. Network failure: mark
    offline, keep the queue. Inside a backoff window no request goes out (history and filter
    requests wait for the window to end).
-   Completing or deleting a task is enqueued with a 5 s send delay (`Store::enqueue_deferred`),
-   so "Undo" can still discard it; commands behind it wait to keep the order.
+   Completing a task is enqueued with a send delay (`Store::enqueue_deferred`), so "Undo" can
+   still discard it; commands behind it wait to keep the order. The UI holds every completion
+   its visible "Undo" toast covers (`Store::defer_queued`, at most 60 s, renewed when the toast
+   grows) and releases them when the toast goes away. `Store::discard_queued` returns `None`
+   for a command that already left; Undo then queues `item_uncomplete`. A close discarded while
+   its request was on the wire is answered "ok" with no queue row left: the store queues
+   `item_uncomplete` for it (non-recurring tasks).
 6. Server wins on conflict: incremental read results overwrite local rows, then still-queued
    commands are re-applied on top.
 
@@ -43,7 +48,9 @@
 
 - SQLite via `rusqlite` (bundled feature off; system SQLite with FTS5).
 - Path: `$XDG_DATA_HOME/tick/cache.sqlite3`. Settings (theme choice, run at login, last view) live
-  in a `settings` table so they are available before the first paint.
+  in a `settings` table so they are available before the first paint. Keys: `color-scheme`
+  (`system`, `light` or `dark`), `last-view` (`today`, `inbox`, `upcoming`, `project:<id>`,
+  `label:<id>`, `filter:<id>`), `sidebar-collapsed` and `collapsed-sections` (comma-separated).
 - Keep raw server JSON per object alongside the indexed columns, so unknown fields survive and
   future features need no migration.
 - Schema migrations are versioned with `PRAGMA user_version`.
@@ -63,6 +70,7 @@
 | `TICK_NOW` | Fixed "now" (RFC 3339) for deterministic Today/Upcoming and screenshots. |
 | `TICK_SYNC_INTERVAL_MS` | Override the 15 s foreground sync interval (tests use a short one). |
 | `TICK_COLOR_SCHEME` | `light` or `dark`, overrides the saved theme (screenshots). |
+| `TICK_LOCALEDIR` | Where the `tick.mo` catalogs are found at run time (default: the build-time `TICK_LOCALEDIR`, else `/usr/share/locale`). |
 
 ## UI structure (tick-gtk)
 

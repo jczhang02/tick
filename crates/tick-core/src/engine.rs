@@ -138,8 +138,50 @@ pub enum EngineEvent {
     FilterLoaded {
         query: String,
     },
-    /// A background request failed (shown as a toast).
-    Error(String),
+    /// A history or filter request failed (shown as a toast or an error state).
+    Error(RequestFailure),
+}
+
+/// Which background request a [`RequestFailure`] belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FailedRequest {
+    /// A page of completed history.
+    Completed,
+    /// Server results for a filter query (the full query passed to
+    /// [`EngineHandle::fetch_filter`]).
+    Filter(String),
+}
+
+/// A failed history or filter request, structured so the UI can choose between "offline",
+/// "the server rejected this" and "try again".
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequestFailure {
+    pub request: FailedRequest,
+    pub message: String,
+    /// No connection (or the token was rejected): the request can work later unchanged.
+    pub offline: bool,
+    /// The server refused the request itself (`4xx` other than `401` and `429`), for
+    /// example a filter query it cannot parse. Retrying the same request will not help.
+    pub rejected: bool,
+}
+
+impl RequestFailure {
+    fn new(req: &SideRequest, e: &EngineError) -> RequestFailure {
+        let (offline, rejected) = match e {
+            EngineError::Api(ApiError::Network(_) | ApiError::Unauthorized) => (true, false),
+            EngineError::Api(ApiError::Request { .. } | ApiError::Forbidden(_)) => (false, true),
+            _ => (false, false),
+        };
+        RequestFailure {
+            request: match req {
+                SideRequest::Completed { .. } => FailedRequest::Completed,
+                SideRequest::Filter(q) => FailedRequest::Filter(q.clone()),
+            },
+            message: e.to_string(),
+            offline,
+            rejected,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -800,7 +842,7 @@ async fn run(
         if let Some(req) = side {
             if engine.status().state == ConnState::Unauthorized {
                 let e = EngineError::Api(ApiError::Unauthorized);
-                let _ = events.try_send(EngineEvent::Error(e.to_string()));
+                let _ = events.try_send(EngineEvent::Error(RequestFailure::new(&req, &e)));
             } else if let Some(nb) = backoff.active() {
                 // Inside a 429/5xx window: run it when the window ends.
                 if !deferred.contains(&req) {
@@ -811,7 +853,7 @@ async fn run(
                 if e.is_transient() && !matches!(e, EngineError::Api(ApiError::Network(_))) {
                     next_sync = next_sync.max(backoff.after(&e));
                 }
-                let _ = events.try_send(EngineEvent::Error(e.to_string()));
+                let _ = events.try_send(EngineEvent::Error(RequestFailure::new(&req, &e)));
             }
             continue;
         }
@@ -846,7 +888,7 @@ async fn run(
                     deferred.push(req);
                     continue;
                 }
-                let _ = events.try_send(EngineEvent::Error(e.to_string()));
+                let _ = events.try_send(EngineEvent::Error(RequestFailure::new(&req, &e)));
             }
         }
         if limited {

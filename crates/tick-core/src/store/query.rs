@@ -20,6 +20,12 @@ const SIBLING_ORDER: &str = "order_key IS NULL, order_key, child_order, id";
 
 const ACTIVE: &str = "local_deleted = 0 AND checked = 0";
 
+/// Rows a view shows: active tasks plus recurring tasks closed locally whose `item_close` the
+/// server has not answered yet ("completed-pending", `DESIGN.md` 4.3). The server moves such a
+/// task to its next date and reopens it, so hiding it would make the row blink out and back.
+const VISIBLE: &str =
+    "local_deleted = 0 AND (checked = 0 OR (local_pending = 1 AND due_recurring = 1))";
+
 /// A task as the UI sees it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Task {
@@ -307,7 +313,7 @@ impl Store {
             &self.conn,
             &format!(
                 "SELECT raw, local_pending FROM items
-                 WHERE {ACTIVE} AND due_day IS NOT NULL AND due_day <= ?1"
+                 WHERE {VISIBLE} AND due_day IS NOT NULL AND due_day <= ?1"
             ),
             [&limit],
             &now,
@@ -320,6 +326,22 @@ impl Store {
         Ok(TodayView { overdue, today })
     }
 
+    /// Number of active tasks in Today (overdue included), for a sidebar count. Uses the
+    /// stored local due day, so a fixed-zone task can be off by a day after the offset
+    /// changed; [`Store::today`] decides exactly.
+    pub fn today_count(&self) -> Result<usize> {
+        let today = self.now().today().format("%Y-%m-%d").to_string();
+        let n: i64 = self.conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM items
+                 WHERE {ACTIVE} AND due_day IS NOT NULL AND due_day <= ?1"
+            ),
+            [today],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
     /// Upcoming: overdue tasks, then `days` day groups starting today.
     pub fn upcoming(&self, days: u32) -> Result<UpcomingView> {
         let now = self.now();
@@ -329,7 +351,7 @@ impl Store {
             &self.conn,
             &format!(
                 "SELECT raw, local_pending FROM items
-                 WHERE {ACTIVE} AND due_day IS NOT NULL AND due_day < ?1"
+                 WHERE {VISIBLE} AND due_day IS NOT NULL AND due_day < ?1"
             ),
             // One day wider, see `today`.
             [(end + Duration::days(1)).format("%Y-%m-%d").to_string()],
@@ -376,7 +398,7 @@ impl Store {
         let all = tasks(
             &self.conn,
             &format!(
-                "SELECT raw, local_pending FROM items WHERE project_id = ?1 AND {ACTIVE}
+                "SELECT raw, local_pending FROM items WHERE project_id = ?1 AND {VISIBLE}
                  ORDER BY {SIBLING_ORDER}"
             ),
             [project_id],
@@ -412,7 +434,7 @@ impl Store {
         let mut list = tasks(
             &self.conn,
             &format!(
-                "SELECT raw, local_pending FROM items WHERE {ACTIVE} AND id IN
+                "SELECT raw, local_pending FROM items WHERE {VISIBLE} AND id IN
                  (SELECT item_id FROM item_labels WHERE name = ?1 COLLATE NOCASE)"
             ),
             [name],
@@ -477,7 +499,7 @@ impl Store {
                     if active.is_none() {
                         active = Some(tasks(
                             &self.conn,
-                            &format!("SELECT raw, local_pending FROM items WHERE {ACTIVE}"),
+                            &format!("SELECT raw, local_pending FROM items WHERE {VISIBLE}"),
                             [],
                             &now,
                         )?);
@@ -519,6 +541,58 @@ impl Store {
         Ok(out)
     }
 
+    /// How many active tasks each filter query shows (sum over its comma-separated groups;
+    /// completed-pending tasks are not counted). The tasks are loaded once for all queries,
+    /// unlike calling [`Store::filter_view`] per filter.
+    pub fn filter_counts(&self, queries: &[&str]) -> Result<Vec<usize>> {
+        let now = self.now();
+        let mut active: Option<(Vec<Task>, EvalContext)> = None;
+        let mut out = Vec::with_capacity(queries.len());
+        for query in queries {
+            let mut count = 0;
+            for g in filter::parse(query) {
+                match g {
+                    Group::Supported { expr, .. } => {
+                        if active.is_none() {
+                            let all = tasks(
+                                &self.conn,
+                                &format!("SELECT raw, local_pending FROM items WHERE {VISIBLE}"),
+                                [],
+                                &now,
+                            )?;
+                            active = Some((all, self.eval_context()?));
+                        }
+                        let Some((all, ctx)) = &active else {
+                            unreachable!()
+                        };
+                        count += all
+                            .iter()
+                            .filter(|t| !t.checked)
+                            .filter(|t| {
+                                filter::eval(
+                                    &expr,
+                                    &EvalTask {
+                                        item: &t.item,
+                                        due: t.due,
+                                    },
+                                    ctx,
+                                    &now,
+                                )
+                            })
+                            .count();
+                    }
+                    Group::Unsupported { text, .. } => {
+                        count += self
+                            .cached_filter_results(&text)?
+                            .map_or(0, |t| t.iter().filter(|t| !t.checked).count());
+                    }
+                }
+            }
+            out.push(count);
+        }
+        Ok(out)
+    }
+
     /// The last server result for a filter query, if cached.
     pub fn cached_filter_results(&self, query: &str) -> Result<Option<Vec<Task>>> {
         let now = self.now();
@@ -536,7 +610,7 @@ impl Store {
         for id in ids {
             if let Some(t) = tasks(
                 &self.conn,
-                &format!("SELECT raw, local_pending FROM items WHERE id = ?1 AND {ACTIVE}"),
+                &format!("SELECT raw, local_pending FROM items WHERE id = ?1 AND {VISIBLE}"),
                 [&id],
                 &now,
             )?
@@ -546,6 +620,19 @@ impl Store {
             }
         }
         Ok(Some(out))
+    }
+
+    /// When the cached server result of a filter query was fetched (UTC, as stored by
+    /// [`Store::cache_filter_results`]), if it is cached.
+    pub fn filter_fetched_at(&self, query: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT fetched_at FROM filter_cache WHERE query = ?1",
+                [query],
+                |r| r.get(0),
+            )
+            .optional()?)
     }
 
     /// Search active task titles and descriptions. Terms are ANDed; each matches as a
@@ -783,6 +870,36 @@ impl Store {
         for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
             let (id, n) = row?;
             out.insert(id, n as usize);
+        }
+        Ok(out)
+    }
+
+    /// Sub-task counts per parent task id: `(open, done)`. `open` counts active direct
+    /// sub-tasks; `done` is the server's `completed_info` count for the parent plus sub-tasks
+    /// completed locally that the server has not confirmed yet.
+    pub fn subtask_counts(&self) -> Result<HashMap<String, (usize, usize)>> {
+        let mut out: HashMap<String, (usize, usize)> = HashMap::new();
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT parent_id, SUM(checked = 0), SUM(checked = 1 AND local_pending = 1)
+             FROM items WHERE local_deleted = 0 AND parent_id IS NOT NULL GROUP BY parent_id",
+        )?;
+        for row in stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })? {
+            let (id, open, done) = row?;
+            out.insert(id, (open as usize, done as usize));
+        }
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT id, completed_items FROM completed_info WHERE kind = 'item'
+             AND completed_items > 0",
+        )?;
+        for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
+            let (id, n) = row?;
+            out.entry(id).or_default().1 += n as usize;
         }
         Ok(out)
     }

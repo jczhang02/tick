@@ -15,5 +15,8 @@ pub mod token;
 pub use api::{ApiError, Client};
 pub use clock::{Now, now};
 pub use command::{Command, MoveTarget};
-pub use engine::{Engine, EngineConfig, EngineEvent, EngineHandle, SyncEngine, SyncStatus};
+pub use engine::{
+    ConnState, Engine, EngineConfig, EngineEvent, EngineHandle, FailedRequest, RequestFailure,
+    SyncEngine, SyncStatus,
+};
 pub use store::{Changes, Kind, Store};

@@ -564,7 +564,7 @@ appear only on the floating surface and on the drag icon.
 
 | Name | Value | Use |
 |---|---|---|
-| floating | `0 1px 5px 1px rgb(0 0 0 / 9%), 0 2px 14px 3px rgb(0 0 0 / 5%)` | popovers, menus, toasts, tooltips, the drag icon (libadwaita's popover shadow) |
+| floating | `0 1px 5px 1px rgb(0 0 0 / 9%), 0 2px 14px 3px rgb(0 0 0 / 5%)` | popovers, menus, toasts, the drag icon (libadwaita's popover shadow); not tooltips, whose surface would cut it off (7.4 pitfall 7) |
 | none | | everything else, including task rows and section headers |
 
 ### 2.6 The floating surface (hard rule)
@@ -578,7 +578,7 @@ priority picker, sync status), menus (`popover.menu`), tooltips, toasts, and the
 | text | `--popover-fg-color` | `--popover-fg-color` |
 | border | 1 px `rgb(0 0 0 / 14%)` | 1 px `rgb(255 255 255 / 8%)` (the faint ring where shadows vanish) |
 | radius | 15 px | 15 px |
-| shadow | floating (2.5) | floating (2.5) |
+| shadow | floating (2.5); none on tooltips (7.4 pitfall 7) | same |
 | inner padding | 6 px (menus), 12 px (tooltips: 6 px x 12 px), 12 px (pickers) | same |
 
 Libadwaita's defaults differ for two of these and Tick overrides them (7.2):
@@ -614,6 +614,10 @@ Every pointer and touch target is at least 44 x 44 px. Three techniques, in orde
    `background-clip: padding-box` keeps hover and pressed backgrounds at the visual size.
    Stylesheet 7.2 applies this to every header bar button (including menu buttons and the window
    controls) and to toast buttons, and offers `.tick-hit` for any other small button.
+   `border-radius` is measured from the border box, so these buttons need 9 + 5 = 14 px to show
+   the 9 px `radius-row` on their visible fill (circular ones keep 9999 px), and their focus ring
+   needs `outline-offset: -7px` to hug the visible button (a menu button's inner button has no
+   such border and keeps -2 px). `style.css` adds both after the starter rules.
    Verified on GTK 4.22.5 / libadwaita 1.9.4 in headless mutter: a 34 px header bar button, a
    header bar `GtkMenuButton` and each window-control button report 44 x 44 bounds, and
    `Gtk.Widget.pick` hits the add and menu buttons 21 px left and right of their centers. Without
@@ -872,8 +876,12 @@ At the top of every list, scrolling with it. It is the first item of the list mo
 [dot 12 (projects only)][gap 9][title .title-1]
 [gap 3]
 [subtitle .body .dimmed: date or description][gap 12][count .body .dimmed .numeric]
+[server filter results only: gap 6, source line .caption .dimmed (4.22)]
 [bottom margin 24]
 ```
+
+The count is hidden when it is 0: the empty state below already says so ("Inbox is empty"),
+and "0 tasks" next to it reads mechanically. Today then shows only the date.
 
 | View | Title | Subtitle |
 |---|---|---|
@@ -882,7 +890,7 @@ At the top of every list, scrolling with it. It is the first item of the list mo
 | Upcoming | Upcoming | count only |
 | Project | project name + color dot | count; for shared projects also the member avatars (up to 3, 20 px) |
 | Label | label name with `tick-label-symbolic` | count |
-| Filter | filter name | the query in `.monospace .dimmed`, then count |
+| Filter | filter name | the query in `.monospace .dimmed`, then count, 24 px apart (12 would read as part of the query) |
 | Search | the search entry replaces the title (4.15) | result count |
 | Completed | Completed | "Last 30 days" |
 
@@ -944,11 +952,11 @@ icons and labels individually `.dimmed` unless colored:
 
 | Item | Icon | Text | Color | Hidden when |
 |---|---|---|---|---|
-| Due | `task-due-symbolic` (recurring: `media-playlist-repeat-symbolic`) | "Today", "Tomorrow", "Wed", "28 Nov", "28 Nov 2027", with time "14:00" when set | 2.4.3 states | no due date; in Today and Upcoming the date part is dropped and only a time remains (no time: item hidden, except overdue which always shows) |
+| Due | `tick-due-symbolic` (recurring: `media-playlist-repeat-symbolic`) | "Today", "Tomorrow", "Wed", "28 Nov", "28 Nov 2027", with time "14:00" when set | 2.4.3 states | no due date; in Today and Upcoming the date part is dropped and only a time remains (no time: item hidden, except overdue which always shows) |
 | Deadline | `tick-deadline-symbolic` (a target) | same date format, prefixed by nothing | red when overdue | no deadline |
 | Sub-tasks | `tick-subtasks-symbolic` | "1/3" (done/total, numeric) | dimmed | no sub-tasks |
 | Comments | `tick-comment-symbolic` | "2" | dimmed | 0 comments |
-| Labels | `tick-label-symbolic` once, then names | "travel, errands" (max 2, then "+2") | dimmed | no labels |
+| Labels | `tick-label-symbolic` once, then names | "travel, errands" (max 2, then "+2") | dimmed | no labels; in the label's own view that label is left out (the item is hidden when no other label remains), as the project item is in the project view |
 | Project | color dot 8 px | "Vacation" or "Vacation / Packing" (section after a slash) | dimmed | in the task's own project view |
 
 The project item is pushed to the end of the meta line (it wraps to the next line rather than
@@ -957,7 +965,9 @@ truncating other items).
 **Trailing.** Assignee `AdwAvatar` 20 px (shared projects only, accessible name "Assigned to
 Name"). For parents, a collapse button: `pan-down-symbolic` 16 px in a 44 x 44 flat button,
 rotated -90 degrees when collapsed, `.dimmed` at rest, accessible name "Collapse sub-tasks" /
-"Expand sub-tasks".
+"Expand sub-tasks". When any row of the view has a collapse button, rows with other trailing
+content (an avatar, the failed-change warning) keep an empty 44 px slot in its place, so the
+avatar column lines up.
 
 **States.**
 
@@ -1026,20 +1036,29 @@ The list is a sequence of day groups, starting with "Overdue" (if any) and then 
 The next 7 days always appear, even when empty; after that only days with tasks.
 
 ```
-Day header (a non-selectable header row, 7.4 pitfall 14; 56 px tall, top space 18, bottom 6):
-[day number .title-2 .numeric, min-width 36, right-aligned][gap 12][relative label .heading][gap 9][weekday/date .body .dimmed]
-[hairline below, from the day number's x]
+Day header (a non-selectable header row, 7.4 pitfall 14; 56 px tall, top space 18 (0 for the first
+group right under the view header, which has its own 24 px), bottom 6):
+[day number .title-2 .numeric, min-width 32, right-aligned][gap 12][relative label .heading][gap 9][weekday/date .body .dimmed]
+[hairline below, from the day number's x (6 px into the number column)]
 ```
+
+The number column is 32 wide so that 32 + 12 puts the relative label at 44, the x of the task
+titles below it.
 
 | Day | Number | Relative label | Dim text |
 |---|---|---|---|
-| Overdue group | none (`task-past-due-symbolic` 20 px in `--tick-red`) | "Overdue" | count |
+| Overdue group | none (`tick-overdue-symbolic` 20 px in `--tick-red`) | "Overdue" | count |
 | Today | 22 | "Today" | "Sunday" |
 | Tomorrow | 23 | "Tomorrow" | "Monday" |
 | Other | 26 | "Thursday" | none |
 
 Month change: a month header ("December", with the year when it is not the current year) in
-`.title-4`, 36 px above. An empty day shows only its header plus an "Add task" ghost row, which
+`.title-4`, 36 px above, 6 px below. The day group right under it is the month header's first
+entry: no top space and no minimum height (`.after-month`), so the month title sits with its
+days, not halfway between two groups (2.1).
+
+"Add task" ghost rows appear only under an empty day and under Today; a day with tasks has
+none, so the week reads as a calendar page. An empty day shows only its header plus an "Add task" ghost row, which
 prefills the quick-add text with the day as an ISO date (`2026-11-26 `), the same in every UI
 language. A weekday word would depend on the user's Todoist language setting (quick add parses
 dates in the account's language) and is ambiguous on the same weekday ("Sunday" typed on a Sunday).
@@ -1261,7 +1280,8 @@ the view menu). It is hidden when online with nothing pending (the normal case).
 | State | Icon (16, `.tick-hit`) | Label | Tooltip / accessible name |
 |---|---|---|---|
 | Offline, nothing pending | `network-offline-symbolic`, `.dimmed` | none | "Offline. Changes are saved on this computer." |
-| Pending changes (online or offline) | `network-offline-symbolic` (offline) or `network-transmit-symbolic` (online) | count, `.caption .numeric` | "3 changes waiting to sync" |
+| Pending changes, online | `network-transmit-symbolic` | count, `.caption .numeric` | "3 changes waiting to sync" |
+| Pending changes, offline | `network-offline-symbolic` | count, `.caption .numeric` | "Offline. 3 changes waiting to sync." |
 | A change failed | `dialog-warning-symbolic` in `--tick-red` | count of failures | "1 change could not be saved" |
 
 The tooltip is redundant (2.6): the same text is the button's accessible description (its
@@ -1270,9 +1290,15 @@ accessible name is "Sync Status"), and the popover's status line shows it as vis
 Clicking opens a floating-surface popover (width 320): status line (`.heading`, the tooltip text,
 for example "Offline. Changes are saved on this computer."), the list of pending and failed
 changes as 44 px rows ("Complete "Buy milk"", "Rename project "Home""), each failed row with the
-server message in `.caption .dimmed`; footer "Sync Now" (`.suggested-action .tick-hit` when
-online, insensitive offline) and "Dismiss Errors" (`.tick-hit`). Failed changes were already
-rolled back (server wins); the list explains what happened.
+server message in `.caption .dimmed`. With failed changes, the "Sync error detail" (6.4) sits under
+the status line in `.caption .dimmed`: failed changes were already rolled back (server wins), and
+the list explains what happened.
+
+Footer: "Dismiss Errors" (`.tick-hit`, only with failed changes) and "Sync Now" (`.tick-hit`).
+One primary action, placed last: "Sync Now" is `.suggested-action` when online and something waits
+(or nothing failed); with failed changes and nothing waiting it is `.flat` and "Dismiss Errors" is
+`.suggested-action`. Offline, "Sync Now" stays visible but insensitive and plain (no accent fill,
+which would not read as disabled in dark mode); the status line says why.
 
 No banner, no blocking dialog. Startup offline renders the cache with the indicator only.
 
@@ -1424,9 +1450,13 @@ evaluated locally: the view opens instantly and works offline, with no extra UI.
 unsupported syntax, the results come from `GET /api/v1/tasks/filter` and are cached.
 
 ```
-[view header: filter name; subtitle: the query in .monospace .dimmed, then the count]
-[source line, .caption .dimmed: "Results from Todoist, updated 14:05"]      server results only
+[view header: filter name; subtitle: the query in .monospace .dimmed, then the count 24 px after it]
+[  part of the header, 6 px under the subtitle: source line, .caption .dimmed:
+   "Results from Todoist, updated 14:05"]                                   server results only
 ```
+
+With several comma-separated groups, each server group has its own source line under its group
+heading instead.
 
 | State (server results) | Shown |
 |---|---|
@@ -1686,6 +1716,7 @@ Formats depend on the user's Todoist settings `date_format` (0 = day first, 1 = 
 | Toasts | Task completed / 3 tasks completed / Task deleted / Undo | 任务已完成 / 已完成 3 个任务 / 任务已删除 / 撤销 |
 | Sync tooltip, offline | Offline. Changes are saved on this computer. | 离线. 更改已保存在本机. |
 | Sync tooltip, pending | 3 changes waiting to sync | 3 项更改等待同步 |
+| Sync tooltip, offline and pending | Offline. 3 changes waiting to sync. | 离线. 3 项更改等待同步. |
 | Sync error toast | Couldn't save "Buy milk" | 无法保存 "Buy milk" |
 | Sync error detail | Todoist rejected the change. Your task shows the version on the server. | Todoist 拒绝了这项更改. 任务已恢复为服务器上的版本. |
 | Login title / body | Welcome to Tick / Paste your Todoist API token to sign in. | 欢迎使用 Tick / 粘贴你的 Todoist API 令牌以登录. |
@@ -1996,10 +2027,10 @@ checkbutton.tick-ring.p1,
 checkbutton.tick-ring.p2,
 checkbutton.tick-ring.p3 { --tick-ring-rest: color-mix(in srgb, var(--tick-ring) 12%, transparent); }
 checkbutton.tick-ring > check {
-  min-width: 18px;
-  min-height: 18px;
+  min-width: 12px;                          /* the icon fills the content box: 12 px check mark */
+  min-height: 12px;
   margin: 13px;
-  padding: 0;
+  padding: 3px;                             /* 13 + 3 + 12 + 3 + 13 = 44; the ring is the 18 px border box */
   border-radius: 9999px;
   border: none;
   background-image: none;
@@ -2177,6 +2208,9 @@ checkbutton.tick-swatch:focus:focus-visible { outline-offset: -2px; }
 Symbolic icons only, 16 px (12 px in the meta line). Use the Adwaita theme name when it exists;
 otherwise bundle an SVG from GNOME's Icon Library (`org.gnome.design.IconLibrary`) into the
 gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` name below.
+Symbolic icons stay one color: Adwaita's `task-due-symbolic` and `task-past-due-symbolic` carry a
+`warning` or `error` badge in a second hue, which would put an orange "warning" mark next to every
+plain date, so the due and overdue icons are Tick's own.
 
 | Role | Name | Source |
 |---|---|---|
@@ -2187,7 +2221,7 @@ gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` na
 | Project (empty state) | `tick-project-symbolic` (list with bullets) | Icon Library |
 | Label | `tick-label-symbolic` (tag) | Icon Library |
 | Filter | `tick-filter-symbolic` (funnel) | Icon Library |
-| Due date | `task-due-symbolic` | Adwaita |
+| Due date | `tick-due-symbolic` (calendar page) | Tick (the `tick-today-symbolic` page without the dot) |
 | Recurring | `media-playlist-repeat-symbolic` | Adwaita |
 | Deadline | `tick-deadline-symbolic` (target / flag) | Icon Library |
 | Sub-tasks | `tick-subtasks-symbolic` (indented list) | Icon Library |
@@ -2195,7 +2229,7 @@ gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` na
 | Attachment | `tick-attachment-symbolic` (paperclip) | Icon Library |
 | Send | `tick-send-symbolic` (paper plane) | Icon Library |
 | Weekend | `tick-weekend-symbolic` (sofa or sun-and-moon) | Icon Library |
-| Overdue group | `task-past-due-symbolic` | Adwaita |
+| Overdue group | `tick-overdue-symbolic` (calendar page with a cross) | Tick |
 | Offline / pending / error | `network-offline-symbolic`, `network-transmit-symbolic`, `dialog-warning-symbolic` | Adwaita |
 | Detail close | `sidebar-show-right-symbolic` | Adwaita |
 | Shared project | `system-users-symbolic` | Adwaita |
@@ -2338,7 +2372,7 @@ A "no" blocks the PR unless the item is marked as a known gap in the PR body.
 
 **Floating surfaces**
 
-- [ ] Popovers, menus, tooltips and toasts share background, border, 15 px radius and shadow.
+- [ ] Popovers, menus, tooltips and toasts share background, border and 15 px radius; all but tooltips also share the shadow (7.4 pitfall 7).
 - [ ] Menu items and picker rows are 44 px tall.
 
 **Targets, focus, motion**

@@ -26,10 +26,20 @@ run:
 run-fake:
     cargo run -p tick-fake-server -- --seed demo --launch
 
-# Install release build, desktop file and icon into ~/.local
+# Install release build, translations, desktop file and icon into ~/.local
 install:
-    cargo build --release -p tick-gtk
+    TICK_LOCALEDIR=$HOME/.local/share/locale cargo build --release -p tick-gtk
+    install -d ~/.local/share/locale/zh_CN/LC_MESSAGES
+    msgfmt -o ~/.local/share/locale/zh_CN/LC_MESSAGES/tick.mo po/zh_CN.po
     install -Dm755 target/release/tick ~/.local/bin/tick
     install -Dm644 crates/tick-gtk/data/dev.chengrui.Tick.desktop ~/.local/share/applications/dev.chengrui.Tick.desktop
     install -Dm644 crates/tick-gtk/data/icons/dev.chengrui.Tick.svg ~/.local/share/icons/hicolor/scalable/apps/dev.chengrui.Tick.svg
     install -Dm644 crates/tick-gtk/data/icons/dev.chengrui.Tick-symbolic.svg ~/.local/share/icons/hicolor/symbolic/apps/dev.chengrui.Tick-symbolic.svg
+
+# Regenerate po/tick.pot from the sources listed in po/POTFILES (gettext, textdomain "tick")
+pot:
+    xgettext --from-code=UTF-8 -L C --keyword=_ --keyword=gettext --keyword=ngettext:1,2 \
+        --keyword=pgettext:1c,2 --keyword=ncount:1,2 --add-comments=Translators \
+        --package-name=tick --msgid-bugs-address=https://github.com/jczhang02/tick/issues \
+        -f po/POTFILES -o po/tick.pot
+    msgmerge --update --backup=none po/zh_CN.po po/tick.pot

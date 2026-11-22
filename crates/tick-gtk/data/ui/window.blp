@@ -1,19 +1,199 @@
 using Gtk 4.0;
 using Adw 1;
 
+translation-domain "tick";
+
+// DESIGN.md 3.1: toast overlay > (login | navigation split view > overlay split view).
+// Breakpoints (3.3) are added in code, because B2 and B3 also set TickWindow:narrow.
 template $TickWindow: Adw.ApplicationWindow {
   title: _("Tick");
-  default-width: 900;
-  default-height: 640;
+  default-width: 1180;
+  default-height: 760;
+  width-request: 360;
+  height-request: 294;
 
-  content: Adw.ToolbarView {
-    [top]
-    Adw.HeaderBar {}
+  content: Adw.ToastOverlay toast_overlay {
+    child: Gtk.Stack stack {
+      transition-type: none;
 
-    content: Adw.StatusPage {
-      icon-name: "checkbox-checked-symbolic";
-      title: _("No Tasks Yet");
-      description: _("Sync is not implemented yet.");
+      Gtk.StackPage {
+        name: "main";
+
+        child: Adw.NavigationSplitView split_view {
+          min-sidebar-width: 240;
+          max-sidebar-width: 300;
+          sidebar-width-fraction: 0.22;
+
+          sidebar: Adw.NavigationPage sidebar_page {
+            title: _("Tick");
+            tag: "sidebar";
+
+            child: Adw.ToolbarView {
+              [top]
+              Adw.HeaderBar {
+                show-title: false;
+
+                [start]
+                Gtk.Button sidebar_add_button {
+                  visible: false;
+                  icon-name: "list-add-symbolic";
+                  tooltip-text: _("Add Task (Q)");
+                  action-name: "win.quick-add";
+
+                  accessibility {
+                    label: _("Add Task");
+                  }
+                }
+
+                [end]
+                Gtk.MenuButton main_menu_button {
+                  icon-name: "open-menu-symbolic";
+                  menu-model: main_menu;
+                  primary: true;
+                  tooltip-text: _("Main Menu");
+
+                  accessibility {
+                    label: _("Main Menu");
+                  }
+                }
+              }
+
+              content: Gtk.ScrolledWindow {
+                hscrollbar-policy: never;
+                focusable: false;
+
+                child: Gtk.ListView sidebar_list {
+                  styles [
+                    "navigation-sidebar",
+                  ]
+
+                  accessibility {
+                    label: _("Views");
+                  }
+                };
+              };
+            };
+          };
+
+          content: Adw.NavigationPage content_page {
+            title: _("Today");
+            tag: "content";
+
+            child: Adw.OverlaySplitView detail_split {
+              sidebar-position: end;
+              show-sidebar: false;
+              min-sidebar-width: 340;
+              max-sidebar-width: 420;
+              sidebar-width-fraction: 0.38;
+
+              content: Adw.ToolbarView {
+                styles [
+                  "tick-list-pane",
+                ]
+
+                [top]
+                Adw.HeaderBar list_header {
+                  title-widget: Adw.WindowTitle window_title {
+                    opacity: 0;
+                  };
+
+                  [start]
+                  Gtk.Button add_button {
+                    icon-name: "list-add-symbolic";
+                    tooltip-text: _("Add Task (Q)");
+                    action-name: "win.quick-add";
+
+                    accessibility {
+                      label: _("Add Task");
+                    }
+                  }
+
+                  [end]
+                  Gtk.MenuButton sync_button {
+                    visible: false;
+
+                    styles [
+                      "flat",
+                    ]
+
+                    accessibility {
+                      label: _("Sync Status");
+                    }
+                  }
+                }
+
+                content: Gtk.ScrolledWindow list_scroller {
+                  hscrollbar-policy: never;
+                  focusable: false;
+
+                  child: Adw.ClampScrollable {
+                    maximum-size: 720;
+                    tightening-threshold: 560;
+
+                    child: Gtk.ListView task_list {
+                      styles [
+                        "tick-task-list",
+                      ]
+
+                      accessibility {
+                        label: _("Tasks");
+                      }
+                    };
+                  };
+                };
+              };
+
+              sidebar: Adw.ToolbarView {
+                [top]
+                Adw.HeaderBar {
+                  show-title: false;
+
+                  [start]
+                  Gtk.Button detail_back_button {
+                    visible: false;
+                    icon-name: "go-previous-symbolic";
+                    tooltip-text: _("Close Task (Esc)");
+                    action-name: "win.close-task";
+
+                    accessibility {
+                      label: _("Close Task");
+                    }
+                  }
+
+                  [end]
+                  Gtk.Button detail_close_button {
+                    icon-name: "sidebar-show-right-symbolic";
+                    tooltip-text: _("Close Task (Esc)");
+                    action-name: "win.close-task";
+
+                    accessibility {
+                      label: _("Close Task");
+                    }
+                  }
+                }
+
+                content: Adw.Bin {};
+              };
+            };
+          };
+        };
+      }
+
+      Gtk.StackPage {
+        name: "login";
+
+        child: $TickLoginPage login_page {};
+      }
     };
   };
+}
+
+menu main_menu {
+  section {
+    item (_("About Tick"), "app.about")
+  }
+
+  section {
+    item (_("Quit"), "app.quit")
+  }
 }

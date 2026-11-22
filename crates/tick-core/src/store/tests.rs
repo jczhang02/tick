@@ -217,6 +217,61 @@ fn enqueue_applies_optimistically_and_persists() {
 }
 
 #[test]
+fn discarding_a_sent_command_reports_it() {
+    let mut s = seeded();
+    let close = Command::item_close("a");
+    s.enqueue_deferred(vec![close.clone()], std::time::Duration::from_secs(60))
+        .unwrap();
+    assert!(s.next_deferred_due().unwrap().is_some());
+    // Deferring again moves the send time; zero makes it due at once.
+    assert_eq!(
+        s.defer_queued(std::slice::from_ref(&close.uuid), std::time::Duration::ZERO)
+            .unwrap(),
+        1
+    );
+    assert!(s.next_deferred_due().unwrap().is_none());
+    let sent = s.pending_commands().unwrap();
+    s.apply_sync_response(
+        &sent,
+        &resp(
+            json!({"sync_token": "t2", "sync_status": {close.uuid.clone(): "ok"},
+                     "items": [item("a", "inbox", "Buy milk", json!({"checked": true}))]}),
+        ),
+    )
+    .unwrap();
+    // The close is gone from the queue: discarding it is not an undo.
+    assert!(s.discard_queued(&close.uuid).unwrap().is_none());
+    assert_eq!(
+        s.defer_queued(&[close.uuid], std::time::Duration::ZERO)
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn close_discarded_in_flight_is_taken_back() {
+    let mut s = seeded();
+    let close = Command::item_close("a");
+    s.enqueue(close.clone()).unwrap();
+    let sent = s.pending_commands().unwrap();
+    // "Undo" while the request is on its way.
+    assert!(s.discard_queued(&close.uuid).unwrap().is_some());
+    s.apply_sync_response(
+        &sent,
+        &resp(
+            json!({"sync_token": "t2", "sync_status": {close.uuid.clone(): "ok"},
+                     "items": [item("a", "inbox", "Buy milk", json!({"checked": true}))]}),
+        ),
+    )
+    .unwrap();
+    let queued = s.pending_commands().unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].command.kind, "item_uncomplete");
+    assert_eq!(queued[0].command.args["id"], "a");
+    assert!(!s.task("a").unwrap().unwrap().checked);
+}
+
+#[test]
 fn sync_response_settles_queue_and_maps_temp_ids() {
     let mut s = seeded();
     let add = Command::item_add(json!({"content": "Draft", "project_id": "inbox"}));
@@ -449,6 +504,20 @@ fn complete_and_uncomplete_locally() {
     s.enqueue(Command::item_close("r")).unwrap();
     let r = s.task("r").unwrap().unwrap();
     assert!(r.checked && r.pending);
+    // Views keep showing it (completed-pending) until the server moves its date.
+    let in_inbox = |s: &Store| {
+        s.project_view("inbox")
+            .unwrap()
+            .unwrap()
+            .tasks
+            .iter()
+            .any(|n| n.task.id == "r" && n.task.checked && n.task.pending)
+    };
+    assert!(in_inbox(&s));
+    assert!(s.today().unwrap().today.iter().any(|t| t.id == "r"));
+    // A completed non-recurring task leaves the views.
+    s.enqueue(Command::item_close("a")).unwrap();
+    assert!(!s.today().unwrap().today.iter().any(|t| t.id == "a"));
 
     // Reopening a task from the completed history cache.
     s.cache_completed(&[
@@ -585,4 +654,32 @@ fn v1_caches_upgrade_to_v2() {
     assert_eq!(queued[0].not_before, None);
     assert!(queued[0].is_due(0));
     assert_eq!(s.resolve_id("a").unwrap(), "a");
+}
+
+#[test]
+fn subtask_counts_and_filter_fetch_time() {
+    let mut s = seeded();
+    // "e" is the only (open) sub-task of "d".
+    assert_eq!(s.subtask_counts().unwrap().get("d"), Some(&(1, 0)));
+    s.enqueue(Command::item_close("e")).unwrap();
+    assert_eq!(s.subtask_counts().unwrap().get("d"), Some(&(0, 1)));
+
+    assert_eq!(s.filter_fetched_at("due after: today").unwrap(), None);
+    s.cache_filter_results("due after: today", &[]).unwrap();
+    assert_eq!(
+        s.filter_fetched_at("due after: today").unwrap().as_deref(),
+        Some("2026-03-10T01:00:00.000000Z")
+    );
+}
+
+#[test]
+fn today_count_matches_today() {
+    let mut s = seeded();
+    let count = |s: &Store| {
+        let t = s.today().unwrap();
+        t.overdue.len() + t.today.len()
+    };
+    assert_eq!(s.today_count().unwrap(), count(&s));
+    s.enqueue(Command::item_close("a")).unwrap();
+    assert_eq!(s.today_count().unwrap(), count(&s));
 }

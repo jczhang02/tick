@@ -162,11 +162,45 @@ The startup test measures from process start to the first frame that shows cache
 Budget: `TICK_STARTUP_BUDGET_MS`, default 300 locally (release build). CI sets 1500 because shared
 runners render in software.
 
+- `crates/tick-e2e/tests/e2e/startup.rs` seeds `bulk:1000`, launches once to fill the cache, then
+  relaunches three times with the fake server offline and compares the median with the budget
+  (single launches in headless mutter vary by about 25 ms).
+- Without `TICK_STARTUP_BUDGET_MS` the default follows the binary: 300 ms for a release binary
+  (`TICK_BIN=$PWD/target/release/tick`), 500 ms for a debug binary, so `just e2e` runs the same
+  path without failing on an unoptimized build.
+- Most of the time is GTK in headless mutter with software rendering: the first launch, whose
+  view has no cached tasks yet, already reports about 250 ms.
+
 ## Screenshots for design review
 
 `just screenshots` runs the E2E screenshot suite and writes PNGs to `target/screenshots/`:
 each key view in light and dark, at 1280x800 (wide) and 600x800 (narrow; the harness starts
 mutter with a 600x800 virtual monitor).
-The suite also captures the states `DESIGN.md` section 9 asks for explicitly: a p4 task at rest,
-hovered and checked; a focused text entry and the focused login entry row; the date picker with a
-selected and a focused day; a suggested and a destructive button; each with a non-blue accent.
+Files are named `<view>-<wide|narrow>-<light|dark>.png`, from the demo seed at the fixed clock
+(`2026-11-22T09:00:00+00:00`): `today`, `inbox` (with a title long enough to wrap to three
+lines and end in an ellipsis on narrow windows), `upcoming`, `upcoming-scrolled` (the header bar
+title hand-off), `upcoming-later` (the rest of the fixed week), `upcoming-month` (a month
+header), `project` (shared project with sections and sub-tasks), `project-cjk`, `label`,
+`filter` (local), `filter-server` (server results), `selected` (a keyboard-focused, selected
+row), `quick-add`, `quick-add-offline` (with a kept draft), `offline` (one queued change),
+`sync-popover` (offline), `login`, `empty-today`, `empty-inbox`, and `sidebar` (narrow only).
+Without `TICK_SCREENSHOTS=1` (`just e2e`) only the Today view is captured.
+
+Wide only, both schemes: `p4-hover` and `p4-checked` (a recurring p4 task in its
+completed-pending state), `completing` (the 800 ms hold, kept with `TICK_TEST_HOLD=1`),
+`failed-change` (a change the server rejected) and `sync-popover-failed`, `tooltip`, and
+`main-menu`. The Chinese UI is captured as `<view>-zh-wide-<scheme>.png` (`today`, `inbox`,
+`upcoming`, `quick-add-offline`, `empty-today`): the suite compiles `po/zh_CN.po` with
+`msgfmt` and runs the app in `zh_CN.UTF-8` (the locale must be generated; CI runs
+`locale-gen`).
+
+- Popovers, menus and tooltips are surfaces of their own. `app.test-screenshot` draws every
+  mapped popup native on top of the window at its compositor position (`gdk::Popup`
+  position plus the surface transform).
+- The pointer is parked in the middle of the header bar before each shot, away from rows
+  (no hover tint) and from the scrolled window's edge (where GTK shows the scrollbar).
+- The session's fontconfig maps `monospace` to Adwaita Mono, as on a GNOME desktop
+  (the session has no GNOME settings, so libadwaita falls back to fontconfig's `monospace`).
+
+Not yet captured: the date picker and destructive buttons (their components come later) and a
+non-blue accent (the session's accent cannot be set yet).

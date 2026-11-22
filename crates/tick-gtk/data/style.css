@@ -1,0 +1,501 @@
+/* Tick stylesheet. Sections up to "project colors" are the starter stylesheet from
+   DESIGN.md 7.2, verbatim; the rules after "Tick additions" implement the components
+   that 7.2 leaves to the widgets (DESIGN.md 4). Literal spacing values follow 2.1. */
+
+/* ---------- tokens ---------- */
+:root {
+  --dim-opacity: 72%;                       /* 2.4.2: AA for secondary text */
+  --tick-red: #bb2f28;
+  --tick-orange: #c36400;
+  --tick-blue: #246fe0;
+  --tick-green: #007335;
+  --tick-p4: rgb(0 0 6 / 58%);              /* p4 ring: a concrete color, never currentColor */
+  --tick-on-fill: #ffffff;                  /* check mark on a filled ring */
+  --tick-on-accent: #ffffff;                /* text on accent and destructive fills (2.4.4) */
+  --tick-float-border: rgb(0 0 0 / 14%);
+  --tick-float-shadow: 0 1px 5px 1px rgb(0 0 0 / 9%), 0 2px 14px 3px rgb(0 0 0 / 5%);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tick-red: #ff7f70;
+    --tick-orange: #eb8909;
+    --tick-blue: #55a0ff;
+    --tick-green: #78e9ab;
+    --tick-p4: rgb(255 255 255 / 72%);
+    --tick-on-fill: #1d1d20;
+    --tick-on-accent: #1d1d20;
+    --tick-float-border: rgb(255 255 255 / 8%);
+  }
+}
+@media (prefers-contrast: more) {
+  :root { --dim-opacity: 90%; }
+}
+
+/* ---------- solid focus ring (2.4.5) ---------- */
+*:focus:focus-visible,
+entry:focus-within,
+spinbutton:focus-within,
+row.entry.focused,
+row.spin.focused,
+calendar > grid > label:focus,
+expander-widget:focus:focus-visible > box > title {
+  outline-color: var(--accent-color);
+}
+
+/* ---------- text on accent and destructive fills (2.4.4) ---------- */
+/* libadwaita's white on --accent-bg-color fails AA; fill with the derived color instead.
+   Hover and pressed keep libadwaita's background-image overlays. */
+button.suggested-action,
+button.suggested-action:checked,
+menubutton.suggested-action,
+splitbutton.suggested-action {
+  background-color: var(--accent-color);
+  color: var(--tick-on-accent);
+}
+button.destructive-action,
+button.destructive-action:checked {
+  background-color: var(--destructive-color);
+  color: var(--tick-on-accent);
+}
+/* libadwaita 1.9.4 changes background-color on these states; use overlays like suggested */
+button.destructive-action:hover { background-image: image(color-mix(in srgb, currentColor 10%, transparent)); }
+button.destructive-action:active,
+button.destructive-action.keyboard-activating { background-image: image(rgb(0 0 6 / 20%)); }
+/* a ring inside an accent-colored fill would vanish */
+button.suggested-action:focus:focus-visible,
+button.destructive-action:focus:focus-visible,
+popover calendar > grid > label.day-number:selected:focus {
+  outline-color: var(--tick-on-accent);
+}
+/* the outline is placed from the border box: with technique 2's 5 px transparent border, -2 px
+   would put it on the surface, outside the fill. Move it 2 px inside the visible fill. */
+.tick-hit.suggested-action:focus:focus-visible,
+.tick-hit.destructive-action:focus:focus-visible,
+headerbar button.suggested-action:focus:focus-visible,
+headerbar button.destructive-action:focus:focus-visible {
+  outline-offset: -7px;
+}
+
+/* ---------- 44 px targets (2.7) ---------- */
+/* technique 2: transparent border + matching negative margin */
+.tick-hit,
+headerbar button,
+headerbar menubutton,
+headerbar splitbutton,
+toast button {
+  border: 5px solid transparent;
+  margin: -5px;
+  background-clip: padding-box;
+}
+/* the border belongs on the menubutton node, not its inner button */
+headerbar menubutton > button,
+headerbar splitbutton > button,
+headerbar splitbutton > menubutton {
+  border: none;
+  margin: 0;
+}
+/* technique 1: real 44 px widgets */
+.tick-icon-44 {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+.tick-entry { min-height: 44px; }
+.tick-picker-row { min-height: 44px; }
+/* min-height is the content box (7.4 pitfall 18): 34 + 2 x 5 px button padding = 44 */
+button.link.tick-link-44,
+button.tick-attachment { min-height: 34px; }
+popover calendar > header > button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+/* the short alert layout pads 8 px: 28 + 16 = 44 */
+dialog.alert.short .response-area > button { min-height: 28px; }
+/* entry icons and entry-row buttons (unverified node paths, 2.7) */
+entry.tick-entry > image { min-width: 44px; }
+row.entry button.image-button {
+  min-width: 34px;
+  min-height: 34px;
+}
+/* sidebar expander arrow: 16 px icon, 44 x 44 hit area (4.1). Horizontal only: the expander
+   already fills the 44 px row height; a vertical border would reach into the rows above and below */
+.navigation-sidebar treeexpander > expander {
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  margin-left: -14px;
+  margin-right: -14px;
+}
+
+/* ---------- one floating surface (2.6) ---------- */
+popover > contents,
+popover > arrow,
+tooltip.background,
+toast {
+  background-color: var(--popover-bg-color);
+  color: var(--popover-fg-color);
+  border: 1px solid var(--tick-float-border);
+  box-shadow: var(--tick-float-shadow);
+}
+popover > contents,
+tooltip.background,
+toast {
+  border-radius: 15px;
+}
+tooltip.background { padding: 6px 12px; }
+toast {
+  /* libadwaita gives toasts light-on-dark accent colors; undo that in light mode */
+  --standalone-color-oklab: min(l, 0.5) a b;
+}
+@media (prefers-color-scheme: dark) {
+  toast { --standalone-color-oklab: max(l, 0.85) a b; }
+}
+popover.menu modelbutton { min-height: 44px; }
+
+/* ---------- sidebar (4.1) ---------- */
+.navigation-sidebar > row {
+  min-height: 44px;
+  margin: 0 6px;                            /* libadwaita: 0 6px 2px */
+  padding: 0 12px;                          /* libadwaita: 0 8px */
+}
+.tick-sidebar-header { min-height: 44px; }
+/* row content starts 14 px after the expander arrow: 4 px border-spacing + 10
+   (GTK CSS has no logical margins; or set the widget's margin-start in code) */
+.tick-sidebar-row-content:dir(ltr) { margin-left: 10px; }
+.tick-sidebar-row-content:dir(rtl) { margin-right: 10px; }
+.navigation-sidebar .tick-count { font-variant-numeric: tabular-nums; }
+
+/* ---------- task list (4.4) ---------- */
+listview.tick-task-list { background: none; }
+listview.tick-task-list > row {
+  padding: 0 12px 0 0;
+  margin: 0 6px;
+  border-radius: 9px;
+}
+/* only activatable rows tint; view, day and month headers set activatable = false (pitfall 14) */
+listview.tick-task-list > row.activatable:hover { background-color: color-mix(in srgb, currentColor 4%, transparent); }
+listview.tick-task-list > row.activatable:active { background-color: color-mix(in srgb, currentColor 8%, transparent); }
+listview.tick-task-list > row:selected { background-color: color-mix(in srgb, currentColor 10%, transparent); }
+listview.tick-task-list > row:selected:hover { background-color: color-mix(in srgb, currentColor 13%, transparent); }
+listview.tick-task-list > row:focus:focus-visible { outline-offset: -2px; }
+listview.tick-task-list > row.tick-drag-source { opacity: 0.4; }
+
+.tick-drop-line {
+  min-height: 2px;
+  background-color: var(--accent-color);
+}
+.tick-drop-into { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.tick-drag-icon {
+  background-color: var(--popover-bg-color);
+  color: var(--popover-fg-color);
+  border: 1px solid var(--tick-float-border);
+  box-shadow: var(--tick-float-shadow);
+  border-radius: 15px;
+  opacity: 0.95;
+}
+
+/* ---------- priority ring (4.3) ---------- */
+checkbutton.tick-ring {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 9999px;
+  --tick-ring: var(--tick-p4);              /* never currentColor: see 7.4 pitfall 17 */
+  --tick-ring-rest: transparent;
+}
+checkbutton.tick-ring.p1 { --tick-ring: var(--tick-red); }
+checkbutton.tick-ring.p2 { --tick-ring: var(--tick-orange); }
+checkbutton.tick-ring.p3 { --tick-ring: var(--tick-blue); }
+checkbutton.tick-ring.p1,
+checkbutton.tick-ring.p2,
+checkbutton.tick-ring.p3 { --tick-ring-rest: color-mix(in srgb, var(--tick-ring) 12%, transparent); }
+checkbutton.tick-ring > check {
+  min-width: 12px;                          /* the icon fills the content box: 12 px check mark */
+  min-height: 12px;
+  margin: 13px;
+  padding: 3px;                             /* 13 + 3 + 12 + 3 + 13 = 44; the ring is the 18 px border box */
+  border-radius: 9999px;
+  border: none;
+  background-image: none;
+  background-color: var(--tick-ring-rest);
+  box-shadow: inset 0 0 0 2px var(--tick-ring);
+  color: var(--tick-ring);
+  -gtk-icon-source: none;
+  -gtk-icon-size: 12px;
+  transition: background-color 150ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+checkbutton.tick-ring:hover > check,
+checkbutton.tick-ring:focus-visible > check {
+  background-color: color-mix(in srgb, var(--tick-ring) 20%, transparent);
+  -gtk-icon-source: -gtk-icontheme("object-select-symbolic");
+}
+checkbutton.tick-ring:active > check {
+  background-color: color-mix(in srgb, var(--tick-ring) 30%, transparent);
+}
+checkbutton.tick-ring > check:checked {
+  background-color: var(--tick-ring);
+  color: var(--tick-on-fill);
+  -gtk-icon-source: -gtk-icontheme("object-select-symbolic");
+}
+
+/* ---------- meta line and due states (4.4, 2.4.3) ---------- */
+.tick-meta image { -gtk-icon-size: 12px; }
+.tick-due.overdue,
+.tick-deadline.overdue { color: var(--tick-red); }
+.tick-due.today { color: var(--tick-green); }
+.tick-dot {
+  min-width: 10px;
+  min-height: 10px;
+  border-radius: 9999px;
+}
+
+/* ---------- collapse chevrons (5.2, 5.3) ---------- */
+.tick-chevron image { transition: -gtk-icon-transform 150ms cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+.tick-chevron.collapsed image { -gtk-icon-transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .tick-chevron image { transition: none; }
+}
+
+/* ---------- task-list section and Upcoming headers (4.5, 4.7) ---------- */
+.tick-section-header {
+  margin-top: 24px;
+  min-height: 44px;
+}
+.tick-section-rule {
+  min-height: 1px;
+  background-color: var(--border-color);
+}
+.tick-day-header { margin-top: 18px; min-height: 56px; }
+.tick-month-header { margin-top: 36px; }
+
+/* ---------- detail field rows (4.8) ---------- */
+.tick-field-row {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 9px;
+}
+.tick-field-row:hover { background-color: color-mix(in srgb, currentColor 4%, transparent); }
+.tick-field-row:active { background-color: color-mix(in srgb, currentColor 8%, transparent); }
+
+/* ---------- quick-add chips (4.11) ---------- */
+.tick-token-chip {
+  padding: 3px 9px;
+  border-radius: 9999px;
+  background-color: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+/* ---------- date picker calendar (4.9) ---------- */
+popover calendar { border: none; background: none; }
+popover calendar > grid > label {
+  margin: 0;                                /* libadwaita: 3px top and right; 7 x 47 would not fit */
+}
+popover calendar > grid > label.day-number {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 9999px;
+}
+popover calendar > grid > label.day-number.other-month {
+  color: inherit;
+  opacity: var(--dim-opacity);
+}
+popover calendar > grid > label.today {
+  box-shadow: none;
+  color: var(--accent-color);
+  font-weight: 700;
+}
+popover calendar > grid > label.day-number:selected {
+  background-color: var(--accent-color);    /* not --accent-bg-color: 2.4.4 */
+  color: var(--tick-on-accent);
+}
+
+/* ---------- color picker swatches (4.23.1) ---------- */
+/* GtkCheckButton whose child is a 24 px .tick-dot.tick-color-<name> box; the indicator is hidden */
+checkbutton.tick-swatch {
+  padding: 10px;                            /* 24 + 2 x 10 = 44 */
+  border-spacing: 0;
+  border-radius: 9999px;
+}
+/* grouped check buttons draw a "radio" indicator node, ungrouped ones a "check" node */
+checkbutton.tick-swatch > check,
+checkbutton.tick-swatch > radio {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  -gtk-icon-source: none;
+  -gtk-icon-size: 0;                        /* libadwaita sizes the indicator by icon size */
+}
+checkbutton.tick-swatch > .tick-dot {
+  min-width: 24px;
+  min-height: 24px;
+}
+checkbutton.tick-swatch:hover > .tick-dot {
+  box-shadow: 0 0 0 2px var(--dialog-bg-color), 0 0 0 4px color-mix(in srgb, currentColor 72%, transparent);
+}
+checkbutton.tick-swatch:checked > .tick-dot {
+  box-shadow: 0 0 0 2px var(--dialog-bg-color), 0 0 0 4px currentColor;
+}
+checkbutton.tick-swatch:focus:focus-visible { outline-offset: -2px; }
+
+/* ---------- project colors (2.4.7); class = tick-color-<api name> ---------- */
+.tick-color-berry_red { background-color: #b8255f; }
+.tick-color-red { background-color: #dc4c3e; }
+.tick-color-orange { background-color: #c77100; }
+.tick-color-yellow { background-color: #a48300; }
+.tick-color-olive_green { background-color: #868d1d; }
+.tick-color-lime_green { background-color: #59962c; }
+.tick-color-green { background-color: #369307; }
+.tick-color-mint_green { background-color: #339686; }
+.tick-color-teal { background-color: #148fad; }
+.tick-color-sky_blue { background-color: #2292b5; }
+.tick-color-light_blue { background-color: #6988a4; }
+.tick-color-blue { background-color: #4180ff; }
+.tick-color-grape { background-color: #692ec2; }
+.tick-color-violet { background-color: #ca3fee; }
+.tick-color-lavender { background-color: #a4698c; }
+.tick-color-magenta { background-color: #e05095; }
+.tick-color-salmon { background-color: #c27069; }
+.tick-color-charcoal { background-color: #6f6f6f; }
+.tick-color-grey { background-color: #878787; }
+.tick-color-taupe { background-color: #8f7a69; }
+@media (prefers-color-scheme: dark) {
+  .tick-color-berry_red { background-color: #db497b; }
+  .tick-color-red { background-color: #de4e40; }
+  .tick-color-orange { background-color: #c77100; }
+  .tick-color-yellow { background-color: #b29104; }
+  .tick-color-olive_green { background-color: #949c31; }
+  .tick-color-lime_green { background-color: #65a33a; }
+  .tick-color-green { background-color: #369307; }
+  .tick-color-mint_green { background-color: #42a393; }
+  .tick-color-teal { background-color: #148fad; }
+  .tick-color-sky_blue { background-color: #319dc0; }
+  .tick-color-light_blue { background-color: #6988a4; }
+  .tick-color-blue { background-color: #4180ff; }
+  .tick-color-grape { background-color: #9361f5; }
+  .tick-color-violet { background-color: #ca3fee; }
+  .tick-color-lavender { background-color: #a86d90; }
+  .tick-color-magenta { background-color: #e05095; }
+  .tick-color-salmon { background-color: #c9766f; }
+  .tick-color-charcoal { background-color: #808080; }
+  .tick-color-grey { background-color: #999999; }
+  .tick-color-taupe { background-color: #917c6b; }
+}
+
+/* ---------- Tick additions ---------- */
+
+/* task list column: 6 px list padding + 6 px row margin = 12 px inside the clamp (3.2) */
+listview.tick-task-list { padding: 0 6px 24px 6px; }
+.tick-dot-8 {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 9999px;
+}
+.tick-dot-12 {
+  min-width: 12px;
+  min-height: 12px;
+  border-radius: 9999px;
+}
+
+/* completing (4.4): struck-through title; .dimmed is added on the label itself */
+label.tick-struck { text-decoration-line: line-through; }
+
+/* the trailing warning of a failed change (4.4) */
+image.tick-failed { color: var(--tick-red); }
+
+/* view header (4.2): the 9 px gap after the dot is a widget spacing */
+.tick-view-header { margin-bottom: 24px; }
+
+/* Upcoming day header number: right-aligned in a 32 px column, so 32 + 12 puts the label at the
+   task title x of 44 (4.7) */
+.tick-day-number { min-width: 32px; }
+image.tick-overdue-icon { color: var(--tick-red); }
+
+/* empty state row (4.13): 36 px below the header */
+.tick-empty-row { margin-top: 36px; }
+
+/* quick add (4.11): .title-4 size at weight 400, no frame, 44 px tall */
+entry.tick-quick-entry {
+  font-weight: 400;
+  min-height: 44px;
+  background: none;
+  box-shadow: none;
+  /* has-frame: false adds .flat, whose radius is 0: the focus ring would be square */
+  border-radius: 9px;
+  /* the focus ring (2.4.5) needs room around the text; the negative margin keeps the text on
+     the chips' x */
+  padding-left: 9px;
+  padding-right: 9px;
+  margin-left: -9px;
+  margin-right: -9px;
+}
+.tick-token-chip image.tick-warning { color: var(--tick-red); }
+.tick-token-chip .tick-chip-ring {
+  min-width: 10px;
+  min-height: 10px;
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 2px var(--tick-p4);
+}
+.tick-token-chip .tick-chip-ring.p1 { box-shadow: inset 0 0 0 2px var(--tick-red); }
+.tick-token-chip .tick-chip-ring.p2 { box-shadow: inset 0 0 0 2px var(--tick-orange); }
+.tick-token-chip .tick-chip-ring.p3 { box-shadow: inset 0 0 0 2px var(--tick-blue); }
+
+/* sync status (4.14) */
+image.tick-sync-error { color: var(--tick-red); }
+.tick-sync-popover { min-width: 296px; }
+
+/* technique 2 (2.7) draws the radius from the border box: with the 5 px transparent border, 9 px
+   would leave 4 px on the visible fill. 9 + 5 = 14 keeps radius-row (2.2) on what is seen. */
+.tick-hit:not(.pill):not(.circular),
+headerbar button:not(.circular),
+headerbar menubutton,
+headerbar splitbutton,
+toast button {
+  border-radius: 14px;
+}
+headerbar windowcontrols > button { border-radius: 9999px; }
+/* the ring hugs the visible 34 px button, not the 44 px hit area (7.4 pitfall 6) */
+headerbar button:focus:focus-visible,
+toast button:focus:focus-visible,
+.tick-hit:focus:focus-visible {
+  outline-offset: -7px;
+}
+/* a menu button's inner button has no transparent border */
+headerbar menubutton > button:focus:focus-visible,
+headerbar splitbutton > button:focus:focus-visible,
+headerbar splitbutton > menubutton > button:focus:focus-visible {
+  outline-offset: -2px;
+}
+
+/* the task list pane uses the view background (2.4.1) */
+.tick-list-pane {
+  background-color: var(--view-bg-color);
+  color: var(--view-fg-color);
+}
+
+/* quick add uses the dialog background (2.4.1); AdwDialog defaults to the window color */
+dialog.tick-quick-add sheet {
+  background-color: var(--dialog-bg-color);
+  color: var(--dialog-fg-color);
+}
+
+/* the first day group right under the view header needs no space of its own (4.7) */
+.tick-day-header.first { margin-top: 0; }
+
+/* a day group right under a month header: the month header is its heading, so the group has
+   no space of its own and no air above its line (natural height, not 56), keeping the month
+   title with its days: more space above the month header than below it (2.1, 4.7) */
+.tick-day-header.after-month {
+  margin-top: 0;
+  min-height: 0;
+}
+
+/* the last sidebar row keeps a gap to the window edge (2.1) */
+.navigation-sidebar { padding-bottom: 12px; }
+
+/* a tooltip surface is exactly its border box: the floating shadow would be cut off, leaving
+   grey corners outside the 15 px radius (7.4 pitfall 7). Background, border and radius stay. */
+tooltip.background { box-shadow: none; }

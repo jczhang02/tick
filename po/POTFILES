@@ -1,0 +1,15 @@
+crates/tick-gtk/data/ui/login.blp
+crates/tick-gtk/data/ui/quick_add.blp
+crates/tick-gtk/data/ui/window.blp
+crates/tick-gtk/src/format.rs
+crates/tick-gtk/src/i18n.rs
+crates/tick-gtk/src/login.rs
+crates/tick-gtk/src/main.rs
+crates/tick-gtk/src/quick_add.rs
+crates/tick-gtk/src/row_object.rs
+crates/tick-gtk/src/rows.rs
+crates/tick-gtk/src/sidebar.rs
+crates/tick-gtk/src/style.rs
+crates/tick-gtk/src/sync_status.rs
+crates/tick-gtk/src/task_list.rs
+crates/tick-gtk/src/window.rs

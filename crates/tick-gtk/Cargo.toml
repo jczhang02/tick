@@ -13,6 +13,9 @@ tick-core.workspace = true
 gtk = { package = "gtk4", version = "0.11", features = ["v4_22"] }
 adw = { package = "libadwaita", version = "0.9", features = ["v1_9"] }
 libc = "0.2.191"
+gettext-rs = { version = "0.7", features = ["gettext-system"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
 
 [build-dependencies]
 glib-build-tools = "0.22"

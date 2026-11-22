@@ -1,0 +1,700 @@
+//! The task list: one `GtkListView` over a flat model of [`TickRow`]s whose factory builds
+//! a widget per row kind (`DESIGN.md` 7.1, 7.4 pitfall 14). Only visible rows are built.
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use adw::prelude::*;
+use gtk::{gio, glib};
+
+use crate::i18n::{fill, gettext, ncount};
+use crate::row_object::TickRow;
+use crate::rows::{
+    DayHeader, DueState, EmptyState, MetaDue, Row, SectionHeader, TaskRow, ViewHeader, color_class,
+};
+
+/// What a row asks the window to do.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RowAction {
+    /// The priority ring was toggled.
+    Ring {
+        id: String,
+        active: bool,
+    },
+    ToggleSubtasks(String),
+    ToggleSection(String),
+    /// An "Add task" ghost row: open quick add with this text.
+    Ghost(String),
+}
+
+pub type Dispatch = Rc<dyn Fn(RowAction)>;
+
+/// Shared render options.
+#[derive(Clone)]
+pub struct RenderCtx {
+    pub dispatch: Dispatch,
+    /// `TickWindow:narrow` (B2 and B3): the view header's top margin is 24, not 48.
+    pub narrow: Rc<Cell<bool>>,
+    /// Set when the first task row is bound (first data frame, test mode).
+    pub task_bound: Rc<Cell<bool>>,
+    /// The view header's height, for the header bar title hand-off (4.2).
+    pub header_height: Rc<Cell<i32>>,
+}
+
+/// Connect the factory to `list` and return the model and its selection.
+pub fn setup(list: &gtk::ListView, ctx: RenderCtx) -> (gio::ListStore, gtk::SingleSelection) {
+    let store = gio::ListStore::new::<TickRow>();
+    let selection = gtk::SingleSelection::new(Some(store.clone()));
+    selection.set_autoselect(false);
+    selection.set_can_unselect(true);
+    list.set_model(Some(&selection));
+
+    let factory = gtk::SignalListItemFactory::new();
+    let handlers: Rc<RefCell<HashMap<usize, (TickRow, glib::SignalHandlerId)>>> = Rc::default();
+    factory.connect_setup(|_, item| {
+        let Some(li) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        li.set_child(Some(&adw::Bin::new()));
+    });
+    let bind_handlers = handlers.clone();
+    factory.connect_bind(move |_, item| {
+        let Some(li) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(obj) = li.item().and_downcast::<TickRow>() else {
+            return;
+        };
+        render(li, &obj, &ctx);
+        let weak = li.downgrade();
+        let ctx = ctx.clone();
+        let id = obj.connect_revision_notify(move |obj| {
+            if let Some(li) = weak.upgrade() {
+                render(&li, obj, &ctx);
+            }
+        });
+        let key = li.as_ptr() as usize;
+        if let Some((old, old_id)) = bind_handlers.borrow_mut().insert(key, (obj, id)) {
+            old.disconnect(old_id);
+        }
+    });
+    factory.connect_unbind(move |_, item| {
+        let key = item.as_ptr() as usize;
+        if let Some((obj, id)) = handlers.borrow_mut().remove(&key) {
+            obj.disconnect(id);
+        }
+    });
+    list.set_factory(Some(&factory));
+    (store, selection)
+}
+
+fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
+    let Some(bin) = li.child().and_downcast::<adw::Bin>() else {
+        return;
+    };
+    let row = obj.row().clone();
+    let (selectable, interactive) = match &row {
+        Row::Task(_) => (true, true),
+        Row::SectionHeader(_) | Row::Ghost { .. } => (false, true),
+        _ => (false, false),
+    };
+    li.set_selectable(selectable);
+    li.set_activatable(interactive);
+    li.set_focusable(interactive);
+    let (label, description) = accessible_text(&row);
+    li.set_accessible_label(&label);
+    li.set_accessible_description(&description);
+    let widget = match &row {
+        Row::ViewHeader(h) => view_header(h, ctx),
+        Row::SectionHeader(s) => section_header(s, ctx),
+        Row::GroupHeader { title, .. } => group_header(title),
+        Row::DayHeader(d) => day_header(d),
+        Row::MonthHeader { title, .. } => month_header(title),
+        Row::Task(t) => {
+            ctx.task_bound.set(true);
+            task_row(t, ctx)
+        }
+        Row::Ghost { prefill, .. } => ghost_row(prefill, ctx),
+        Row::Empty(e) => empty_row(e),
+        Row::Loading { text, .. } => loading_row(text),
+        Row::SourceLine { text, spinner, .. } => source_line(text, *spinner),
+    };
+    // The key lets keyboard navigation map the focused row back to its model position.
+    widget.set_widget_name(&obj.key());
+    bin.set_child(Some(&widget));
+}
+
+fn accessible_text(row: &Row) -> (String, String) {
+    match row {
+        Row::Task(t) => (t.title.clone(), t.meta_description()),
+        Row::SectionHeader(s) => {
+            let state = if s.collapsed {
+                gettext("collapsed")
+            } else {
+                gettext("expanded")
+            };
+            (
+                fill(
+                    &gettext("{name}, {count}, {state}"),
+                    &[
+                        ("name", &s.name),
+                        ("count", &ncount("{n} task", "{n} tasks", s.count)),
+                        ("state", &state),
+                    ],
+                ),
+                String::new(),
+            )
+        }
+        Row::Ghost { .. } => (gettext("Add task"), String::new()),
+        Row::ViewHeader(h) => (h.title.clone(), String::new()),
+        Row::GroupHeader { title, .. } | Row::MonthHeader { title, .. } => {
+            (title.clone(), String::new())
+        }
+        Row::DayHeader(d) => (d.label.clone(), d.dim.clone().unwrap_or_default()),
+        Row::Empty(e) => (e.title.clone(), e.description.clone()),
+        Row::Loading { text, .. } | Row::SourceLine { text, .. } => (text.clone(), String::new()),
+    }
+}
+
+fn label(text: &str, classes: &[&str]) -> gtk::Label {
+    gtk::Label::builder()
+        .label(text)
+        .xalign(0.0)
+        .css_classes(classes.iter().map(|c| c.to_string()).collect::<Vec<_>>())
+        .build()
+}
+
+fn icon(name: &str, classes: &[&str]) -> gtk::Image {
+    gtk::Image::builder()
+        .icon_name(name)
+        .accessible_role(gtk::AccessibleRole::Presentation)
+        .css_classes(classes.iter().map(|c| c.to_string()).collect::<Vec<_>>())
+        .build()
+}
+
+fn dot(color: &str, size_class: &str) -> gtk::Widget {
+    gtk::Box::builder()
+        .valign(gtk::Align::Center)
+        .halign(gtk::Align::Center)
+        .accessible_role(gtk::AccessibleRole::Presentation)
+        .css_classes([size_class.to_owned(), color_class(color)])
+        .build()
+        .upcast()
+}
+
+fn view_header(h: &ViewHeader, ctx: &RenderCtx) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .margin_top(if ctx.narrow.get() { 24 } else { 48 })
+        .margin_start(12)
+        .css_classes(["tick-view-header"])
+        .build();
+    let title_box = gtk::Box::new(gtk::Orientation::Horizontal, 9);
+    if let Some(c) = &h.color {
+        title_box.append(&dot(c, "tick-dot-12"));
+    }
+    if let Some(i) = h.icon {
+        let img = icon(i, &[]);
+        img.set_pixel_size(20);
+        title_box.append(&img);
+    }
+    let title = label(&h.title, &["title-1"]);
+    title.set_wrap(true);
+    title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    title_box.append(&title);
+    root.append(&title_box);
+
+    let sub = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .margin_top(3)
+        .build();
+    if let Some(s) = &h.subtitle {
+        sub.append(&label(s, &["body", "dimmed"]));
+    }
+    if let Some(q) = &h.query {
+        let ql = label(q, &["body", "monospace", "dimmed"]);
+        ql.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        ql.set_selectable(false);
+        sub.append(&ql);
+    }
+    // A zero count repeats the empty state below it (4.2).
+    if h.count > 0 {
+        let count = label(
+            &ncount("{n} task", "{n} tasks", h.count),
+            &["body", "dimmed", "numeric"],
+        );
+        // After a monospace query, 12 px reads as part of the query: 24 (space-5) parts them.
+        if h.query.is_some() {
+            count.set_margin_start(12);
+        }
+        sub.append(&count);
+    }
+    if !h.avatars.is_empty() {
+        let avatars = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+        for name in &h.avatars {
+            let a = adw::Avatar::new(20, Some(name), true);
+            a.upcast_ref::<gtk::Widget>()
+                .update_property(&[gtk::accessible::Property::Label(name)]);
+            avatars.append(&a);
+        }
+        sub.append(&avatars);
+    }
+    if sub.first_child().is_some() {
+        root.append(&sub);
+    }
+    if let Some((text, spinner)) = &h.source {
+        // Where server filter results come from: part of the header, 6 px under the
+        // subtitle (4.21, 4.22).
+        let line = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .margin_top(6)
+            .build();
+        if *spinner {
+            let s = adw::Spinner::new();
+            s.set_size_request(16, 16);
+            line.append(&s);
+        }
+        line.append(&label(text, &["caption", "dimmed"]));
+        root.append(&line);
+    }
+    let height = ctx.header_height.clone();
+    root.connect_map(move |w| {
+        let w = w.clone();
+        let height = height.clone();
+        glib::idle_add_local_once(move || height.set(w.height() + 48 + 24));
+    });
+    root.upcast()
+}
+
+fn hairline(margin_start: i32) -> gtk::Widget {
+    gtk::Box::builder()
+        .margin_start(margin_start)
+        .margin_top(6)
+        .css_classes(["tick-section-rule"])
+        .accessible_role(gtk::AccessibleRole::Presentation)
+        .build()
+        .upcast()
+}
+
+fn section_header(s: &SectionHeader, ctx: &RenderCtx) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["tick-section-header"])
+        .build();
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let chevron = gtk::Button::builder()
+        .icon_name("pan-down-symbolic")
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "tick-icon-44", "tick-chevron", "dimmed"])
+        .build();
+    if s.collapsed {
+        chevron.add_css_class("collapsed");
+    }
+    let name = if s.collapsed {
+        fill(&gettext("Expand {name}"), &[("name", &s.name)])
+    } else {
+        fill(&gettext("Collapse {name}"), &[("name", &s.name)])
+    };
+    chevron.update_property(&[gtk::accessible::Property::Label(&name)]);
+    let dispatch = ctx.dispatch.clone();
+    let id = s.id.clone();
+    chevron.connect_clicked(move |_| dispatch(RowAction::ToggleSection(id.clone())));
+    line.append(&chevron);
+    // The hairline hangs 6 px under the name's ink (2 px under its label box, which
+    // includes the descender space; 4.5), inside the 44 px header line: the name column
+    // is centered as if the rule (3 px with its gap) were not there.
+    let column = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .valign(gtk::Align::Center)
+        .margin_top(3)
+        .hexpand(true)
+        .build();
+    let name_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let title = label(&s.name, &["heading"]);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    name_row.append(&title);
+    let count = label(&s.count.to_string(), &["caption", "dimmed", "numeric"]);
+    count.set_margin_start(9);
+    name_row.append(&count);
+    column.append(&name_row);
+    let rule = hairline(0);
+    rule.set_margin_top(2);
+    column.append(&rule);
+    line.append(&column);
+    root.append(&line);
+    root.upcast()
+}
+
+fn group_header(title: &str) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["tick-section-header"])
+        .build();
+    let l = label(title, &["heading", "monospace"]);
+    l.set_margin_start(12);
+    l.set_valign(gtk::Align::End);
+    l.set_vexpand(true);
+    l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    root.append(&l);
+    root.append(&hairline(12));
+    root.upcast()
+}
+
+fn day_header(d: &DayHeader) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["tick-day-header"])
+        .build();
+    if d.first {
+        root.add_css_class("first");
+    }
+    if d.after_month {
+        root.add_css_class("after-month");
+    }
+    let line = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .vexpand(true)
+        .valign(gtk::Align::End)
+        .build();
+    match d.number {
+        Some(n) => {
+            let num = label(&n.to_string(), &["title-2", "numeric", "tick-day-number"]);
+            num.set_xalign(1.0);
+            line.append(&num);
+        }
+        None => {
+            let i = icon("tick-overdue-symbolic", &["tick-overdue-icon"]);
+            i.set_pixel_size(20);
+            i.set_halign(gtk::Align::End);
+            i.set_valign(gtk::Align::Center);
+            let holder = adw::Bin::builder()
+                .css_classes(["tick-day-number"])
+                .child(&i)
+                .build();
+            line.append(&holder);
+        }
+    }
+    let text = gtk::Box::new(gtk::Orientation::Horizontal, 9);
+    text.set_valign(gtk::Align::Baseline);
+    text.append(&label(&d.label, &["heading"]));
+    if let Some(dim) = &d.dim {
+        let classes: &[&str] = if d.number.is_none() {
+            &["body", "dimmed", "numeric"]
+        } else {
+            &["body", "dimmed"]
+        };
+        text.append(&label(dim, classes));
+    }
+    line.append(&text);
+    root.append(&line);
+    // From the day number (right-aligned in its 32 px column), not from the row edge.
+    root.append(&hairline(6));
+    root.upcast()
+}
+
+fn month_header(title: &str) -> gtk::Widget {
+    let l = label(title, &["title-4", "tick-month-header"]);
+    l.set_margin_start(12);
+    l.set_margin_bottom(6);
+    l.upcast()
+}
+
+fn meta_item(icon_name: Option<&str>, text: &str, classes: &[&str]) -> gtk::Box {
+    let b = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+    if let Some(i) = icon_name {
+        let img = icon(i, classes);
+        img.set_valign(gtk::Align::Center);
+        b.append(&img);
+    }
+    b.append(&label(text, classes));
+    b
+}
+
+fn due_classes(d: &MetaDue) -> &'static [&'static str] {
+    match d.state {
+        DueState::Overdue => &["tick-due", "overdue"],
+        DueState::Today => &["tick-due", "today"],
+        DueState::Other => &["tick-due", "dimmed"],
+    }
+}
+
+fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .margin_start(32 * t.depth as i32)
+        .build();
+
+    let ring = gtk::CheckButton::builder()
+        .valign(gtk::Align::Start)
+        .css_classes(["tick-ring".to_owned(), format!("p{}", t.p)])
+        .active(t.checked)
+        .build();
+    let ring_name = if t.checked {
+        gettext("Mark as not done")
+    } else {
+        gettext("Complete task")
+    };
+    ring.update_property(&[
+        gtk::accessible::Property::Label(&ring_name),
+        gtk::accessible::Property::Description(&t.title),
+    ]);
+    let dispatch = ctx.dispatch.clone();
+    let id = t.id.clone();
+    ring.connect_toggled(move |b| {
+        dispatch(RowAction::Ring {
+            id: id.clone(),
+            active: b.is_active(),
+        })
+    });
+    root.append(&ring);
+
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .hexpand(true)
+        .margin_top(12)
+        .margin_bottom(12)
+        .build();
+    let title = label(&t.title, &["body"]);
+    title.set_wrap(true);
+    title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    title.set_lines(3);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    if t.completing {
+        title.add_css_class("tick-struck");
+        title.add_css_class("dimmed");
+    }
+    content.append(&title);
+    if let Some(d) = &t.description {
+        let desc = label(d, &["caption", "dimmed"]);
+        desc.set_single_line_mode(true);
+        desc.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        desc.set_margin_top(2);
+        content.append(&desc);
+    }
+    let meta = adw::WrapBox::builder()
+        .child_spacing(12)
+        .line_spacing(2)
+        .margin_top(2)
+        .css_classes(["caption", "tick-meta"])
+        .build();
+    let mut has_meta = false;
+    if t.completed_pending {
+        let b = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+        let spinner = adw::Spinner::new();
+        spinner.set_size_request(12, 12);
+        b.append(&spinner);
+        b.append(&label(&gettext("Completing"), &["dimmed"]));
+        meta.append(&b);
+        has_meta = true;
+    }
+    if let Some(d) = &t.due {
+        let icon_name = if d.recurring {
+            "media-playlist-repeat-symbolic"
+        } else {
+            "tick-due-symbolic"
+        };
+        meta.append(&meta_item(Some(icon_name), &d.text, due_classes(d)));
+        has_meta = true;
+    }
+    if let Some((text, overdue)) = &t.deadline {
+        let classes: &[&str] = if *overdue {
+            &["tick-deadline", "overdue"]
+        } else {
+            &["tick-deadline", "dimmed"]
+        };
+        meta.append(&meta_item(Some("tick-deadline-symbolic"), text, classes));
+        has_meta = true;
+    }
+    if let Some((done, total)) = t.subtasks {
+        meta.append(&meta_item(
+            Some("tick-subtasks-symbolic"),
+            &format!("{done}/{total}"),
+            &["dimmed", "numeric"],
+        ));
+        has_meta = true;
+    }
+    if t.comments > 0 {
+        meta.append(&meta_item(
+            Some("tick-comment-symbolic"),
+            &t.comments.to_string(),
+            &["dimmed", "numeric"],
+        ));
+        has_meta = true;
+    }
+    if !t.labels.is_empty() {
+        let mut text = t
+            .labels
+            .iter()
+            .take(2)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        if t.labels.len() > 2 {
+            text.push_str(&format!(" +{}", t.labels.len() - 2));
+        }
+        meta.append(&meta_item(Some("tick-label-symbolic"), &text, &["dimmed"]));
+        has_meta = true;
+    }
+    if let Some(p) = &t.project {
+        let b = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+        b.append(&dot(&p.color, "tick-dot-8"));
+        b.append(&label(&p.name, &["dimmed"]));
+        meta.append(&b);
+        has_meta = true;
+    }
+    if has_meta {
+        content.append(&meta);
+    }
+    root.append(&content);
+
+    let trailing = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .valign(gtk::Align::Center)
+        .margin_start(12)
+        .build();
+    if let Some(msg) = &t.failed {
+        let warn = icon("dialog-warning-symbolic", &["tick-failed"]);
+        warn.set_tooltip_text(Some(msg));
+        trailing.append(&warn);
+    }
+    if let Some(name) = &t.assignee {
+        let a = adw::Avatar::new(20, Some(name), true);
+        a.upcast_ref::<gtk::Widget>()
+            .update_property(&[gtk::accessible::Property::Label(&fill(
+                &gettext("Assigned to {name}"),
+                &[("name", name)],
+            ))]);
+        trailing.append(&a);
+    }
+    if t.has_children {
+        let chevron = gtk::Button::builder()
+            .icon_name("pan-down-symbolic")
+            .css_classes(["flat", "tick-icon-44", "tick-chevron", "dimmed"])
+            .build();
+        let name = if t.collapsed {
+            chevron.add_css_class("collapsed");
+            gettext("Expand sub-tasks")
+        } else {
+            gettext("Collapse sub-tasks")
+        };
+        chevron.update_property(&[gtk::accessible::Property::Label(&name)]);
+        let dispatch = ctx.dispatch.clone();
+        let id = t.id.clone();
+        chevron.connect_clicked(move |_| dispatch(RowAction::ToggleSubtasks(id.clone())));
+        trailing.append(&chevron);
+    } else if t.chevron_slot {
+        // Keep the chevron column so avatars line up with the parents' (4.4).
+        let slot = gtk::Box::builder()
+            .width_request(44)
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .build();
+        trailing.append(&slot);
+    }
+    if trailing.first_child().is_some() {
+        root.append(&trailing);
+    }
+
+    if t.fading {
+        // libadwaita skips an animation whose widget is not mapped (it jumps to the end):
+        // start the fade once the row is on screen. Test mode uses no duration (5.3).
+        let duration = if crate::test_mode::enabled() { 0 } else { 250 };
+        let target = adw::PropertyAnimationTarget::new(&root, "opacity");
+        let anim = adw::TimedAnimation::new(&root, 1.0, 0.0, duration, target);
+        anim.set_easing(adw::Easing::EaseOutCubic);
+        anim.set_follow_enable_animations_setting(false);
+        if root.is_mapped() {
+            anim.play();
+        } else {
+            let pending = std::cell::RefCell::new(Some(anim));
+            root.connect_map(move |_| {
+                if let Some(a) = pending.borrow_mut().take() {
+                    a.play();
+                }
+            });
+        }
+    }
+    root.upcast()
+}
+
+fn ghost_row(prefill: &str, ctx: &RenderCtx) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .height_request(44)
+        .build();
+    let plus = icon("list-add-symbolic", &["dimmed"]);
+    plus.set_size_request(44, 44);
+    root.append(&plus);
+    root.append(&label(&gettext("Add task"), &["dimmed"]));
+    let click = gtk::GestureClick::new();
+    let dispatch = ctx.dispatch.clone();
+    let prefill = prefill.to_owned();
+    click.connect_released(move |g, _, _, _| {
+        g.set_state(gtk::EventSequenceState::Claimed);
+        dispatch(RowAction::Ghost(prefill.clone()));
+    });
+    root.add_controller(click);
+    root.upcast()
+}
+
+/// The empty state (4.13): the layout of a compact `AdwStatusPage` (64 px dimmed icon,
+/// `.title-2` title, `.body .dimmed` description). `AdwStatusPage` itself wraps its content
+/// in a scrolled window, which a list row clips to its minimum height and exposes as an
+/// unnamed focusable scroll pane.
+fn empty_row(e: &EmptyState) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .halign(gtk::Align::Center)
+        .css_classes(["tick-empty-row"])
+        .build();
+    let image = icon(e.icon, &["dimmed"]);
+    image.set_pixel_size(64);
+    image.set_margin_bottom(12);
+    root.append(&image);
+    let title = label(&e.title, &["title-2"]);
+    title.set_wrap(true);
+    title.set_justify(gtk::Justification::Center);
+    title.set_xalign(0.5);
+    root.append(&title);
+    let description = label(&e.description, &["body", "dimmed"]);
+    description.set_wrap(true);
+    description.set_justify(gtk::Justification::Center);
+    description.set_xalign(0.5);
+    root.append(&description);
+    root.upcast()
+}
+
+fn loading_row(text: &str) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(36)
+        .halign(gtk::Align::Center)
+        .build();
+    let spinner = adw::Spinner::new();
+    spinner.set_size_request(32, 32);
+    root.append(&spinner);
+    root.append(&label(text, &["dimmed"]));
+    root.upcast()
+}
+
+fn source_line(text: &str, spinner: bool) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .margin_start(12)
+        .margin_bottom(6)
+        .build();
+    if spinner {
+        let s = adw::Spinner::new();
+        s.set_size_request(16, 16);
+        root.append(&s);
+    }
+    root.append(&label(text, &["caption", "dimmed"]));
+    root.upcast()
+}

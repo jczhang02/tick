@@ -7,6 +7,7 @@ use serde_json::Value;
 use super::queue::{self, QueuedCommand, rebuild_local};
 use super::{Changes, Kind, Origin, Result, Store, meta_set, put_object, remove_object};
 use crate::clock::Now;
+use crate::command::Command;
 use crate::model::{CommandError, CommandStatus, CompletedInfo, SyncResponse, User};
 
 /// What happened to the commands of one `/sync` request.
@@ -19,6 +20,25 @@ pub struct SyncApplied {
     pub failed: Vec<(QueuedCommand, CommandError)>,
     /// Commands that failed with a retryable error and stay queued.
     pub retry: Vec<(QueuedCommand, CommandError)>,
+}
+
+/// Queue the inverse of a command the server applied after the UI discarded it (see
+/// [`Store::discard_queued`]). Only a non-recurring close has one: `item_uncomplete` does
+/// not move a recurring task back to its previous date, and a delete cannot be undone.
+fn undo_in_flight(tx: &Transaction<'_>, cmd: &Command, now: &Now) -> Result<()> {
+    if !matches!(cmd.kind.as_str(), "item_close" | "item_complete") {
+        return Ok(());
+    }
+    let Some(id) = cmd.args.get("id").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let recurring = super::load_raw(tx, Kind::Item, id)?
+        .and_then(|v| v.get("due")?.get("is_recurring")?.as_bool())
+        .unwrap_or(false);
+    if recurring && cmd.kind == "item_close" {
+        return Ok(());
+    }
+    queue::insert_queued(tx, &Command::item_uncomplete(id), now, None)
 }
 
 fn id_of(v: &Value, key: &str) -> Option<String> {
@@ -177,7 +197,11 @@ impl Store {
         for q in sent {
             match resp.sync_status.get(&q.command.uuid) {
                 Some(CommandStatus::Ok) => {
-                    queue::delete_queued(&tx, &q.command.uuid)?;
+                    if !queue::delete_queued(&tx, &q.command.uuid)? {
+                        // Discarded ("Undo") while the request was on its way: the server
+                        // did it anyway, so take it back with the inverse command.
+                        undo_in_flight(&tx, &q.command, &now)?;
+                    }
                     out.acknowledged += 1;
                 }
                 Some(CommandStatus::Error(e)) if e.is_retryable() => {

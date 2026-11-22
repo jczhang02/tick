@@ -8,6 +8,8 @@ use std::path::Path;
 use adw::prelude::*;
 use gtk::{gio, glib, graphene};
 
+use crate::window::TickWindow;
+
 /// True when the app runs under the E2E harness.
 pub fn enabled() -> bool {
     std::env::var("TICK_TEST_MODE").is_ok_and(|v| v == "1")
@@ -25,12 +27,25 @@ pub fn install_actions(app: &adw::Application) {
                 eprintln!("test-screenshot: no window");
                 return;
             };
-            if let Err(err) = save_screenshot(&window, Path::new(&path)) {
-                eprintln!("test-screenshot: {err}");
-            }
+            screenshot_with_retry(window, path, 20);
         })
         .build();
     app.add_action_entries([screenshot]);
+}
+
+/// A window that has not drawn yet (for example right after a page switch on a slow,
+/// software-rendered runner) renders to an empty node: try again shortly.
+fn screenshot_with_retry(window: gtk::Window, path: String, attempts: u32) {
+    match save_screenshot(&window, Path::new(&path)) {
+        Ok(()) => {}
+        Err(err) if attempts > 1 => {
+            eprintln!("test-screenshot: {err}, retrying");
+            glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
+                screenshot_with_retry(window, path, attempts - 1);
+            });
+        }
+        Err(err) => eprintln!("test-screenshot: {err}"),
+    }
 }
 
 /// Renders `window` with its own renderer and writes a PNG to `path`.
@@ -46,6 +61,11 @@ fn save_screenshot(window: &gtk::Window, path: &Path) -> Result<(), String> {
     let paintable = gtk::WidgetPaintable::new(Some(window));
     let snapshot = gtk::Snapshot::new();
     paintable.snapshot(&snapshot, f64::from(width), f64::from(height));
+    // Popovers, menus and tooltips are surfaces of their own: draw them on top, where the
+    // compositor shows them. Popup positions are relative to the parent surface, whose
+    // origin is the window's surface transform (the CSD shadow) away from the window.
+    let (wx, wy) = window.surface_transform();
+    add_popups(window.upcast_ref(), &snapshot, (-wx, -wy));
     let node = snapshot.to_node().ok_or("empty render node")?;
     let renderer = window.renderer().ok_or("window has no renderer")?;
     let viewport = graphene::Rect::new(0.0, 0.0, width as f32, height as f32);
@@ -55,18 +75,75 @@ fn save_screenshot(window: &gtk::Window, path: &Path) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
-/// Prints `TICK_FIRST_DATA_FRAME_MS` after the window paints its first frame.
-///
-/// For now this is the first frame of any content. Once the cache is wired up it must be
-/// the first frame that shows cached data.
-pub fn report_first_frame(window: &impl IsA<gtk::Widget>) {
-    window.connect_realize(|widget| {
-        let Some(clock) = widget.frame_clock() else {
+/// Draws the mapped popup natives (popovers, tooltip windows) below `widget` at their
+/// on-screen position. `origin` is where the parent surface's (0, 0) lies in window
+/// coordinates.
+fn add_popups(widget: &gtk::Widget, snapshot: &gtk::Snapshot, origin: (f64, f64)) {
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        let popup = c
+            .dynamic_cast_ref::<gtk::Native>()
+            .filter(|_| c.is_mapped())
+            .and_then(|n| Some((n.surface()?.downcast::<gtk::gdk::Popup>().ok()?, n)));
+        match popup {
+            Some((popup, native)) => {
+                let (tx, ty) = native.surface_transform();
+                let surface = (
+                    origin.0 + f64::from(popup.position_x()),
+                    origin.1 + f64::from(popup.position_y()),
+                );
+                // The paintable draws the widget's bounds (its border box) scaled to the size it
+                // is given. width() and height() are the content box: a tooltip's padding and
+                // border would be squeezed into it. Draw at the bounds' size and place their
+                // origin (negative for a padded tooltip) where the widget puts it.
+                let paintable = gtk::WidgetPaintable::new(Some(&c));
+                let bounds = c.compute_bounds(&c).unwrap_or_else(|| {
+                    graphene::Rect::new(0.0, 0.0, c.width() as f32, c.height() as f32)
+                });
+                // The compositor shows only the surface: clip to it, as a shadow drawn past it
+                // is not on screen either.
+                snapshot.push_clip(&graphene::Rect::new(
+                    surface.0 as f32,
+                    surface.1 as f32,
+                    popup.width() as f32,
+                    popup.height() as f32,
+                ));
+                snapshot.save();
+                snapshot.translate(&graphene::Point::new(
+                    (surface.0 + tx) as f32 + bounds.x(),
+                    (surface.1 + ty) as f32 + bounds.y(),
+                ));
+                paintable.snapshot(
+                    snapshot,
+                    f64::from(bounds.width()),
+                    f64::from(bounds.height()),
+                );
+                snapshot.restore();
+                snapshot.pop();
+                // Nested popups (a submenu) are relative to this surface.
+                add_popups(&c, snapshot, surface);
+            }
+            None => add_popups(&c, snapshot, origin),
+        }
+        child = c.next_sibling();
+    }
+}
+
+/// Prints `TICK_FIRST_DATA_FRAME_MS` after the first frame that shows cached tasks: the
+/// first paint after a task row of the open view was built, or the first paint at all when
+/// the view (or the login page) has no tasks.
+pub fn report_first_frame(window: &TickWindow) {
+    window.connect_realize(|window| {
+        let Some(clock) = window.frame_clock() else {
             return;
         };
         let handler = std::rc::Rc::new(std::cell::Cell::new(None));
         let handler_in = handler.clone();
+        let weak = window.downgrade();
         let id = clock.connect_after_paint(move |clock| {
+            if !weak.upgrade().is_some_and(|w| w.data_frame_ready()) {
+                return;
+            }
             if let Some(ms) = ms_since_process_start() {
                 eprintln!("TICK_FIRST_DATA_FRAME_MS={ms}");
             }
@@ -102,4 +179,9 @@ fn ms_since_process_start() -> Option<u64> {
     let now_ms =
         u64::try_from(now.tv_sec).ok()? * 1000 + u64::try_from(now.tv_nsec).ok()? / 1_000_000;
     now_ms.checked_sub(start_ms)
+}
+
+/// `TICK_TEST_HOLD=1`: keep the 800 ms completion hold in test mode (to test it).
+pub fn keep_hold() -> bool {
+    std::env::var("TICK_TEST_HOLD").is_ok_and(|v| v == "1")
 }

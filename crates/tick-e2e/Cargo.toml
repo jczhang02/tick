@@ -13,3 +13,9 @@ serde = "1.0.229"
 tempfile = "3.27.0"
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
 zbus = { version = "5", features = ["tokio"] }
+
+[dev-dependencies]
+tick-core = { path = "../tick-core" }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
+tick-fake-server = { path = "../tick-fake-server" }

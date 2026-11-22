@@ -96,9 +96,33 @@ pub(crate) fn load_queue(conn: &Connection) -> Result<Vec<QueuedCommand>> {
     Ok(out)
 }
 
-pub(crate) fn delete_queued(tx: &Transaction<'_>, uuid: &str) -> Result<()> {
-    tx.prepare_cached("DELETE FROM queue WHERE uuid = ?1")?
+/// Delete a queued command. Returns false when no row had that uuid.
+pub(crate) fn delete_queued(tx: &Transaction<'_>, uuid: &str) -> Result<bool> {
+    let n = tx
+        .prepare_cached("DELETE FROM queue WHERE uuid = ?1")?
         .execute([uuid])?;
+    Ok(n > 0)
+}
+
+/// Append a command to the queue (no local effect).
+pub(crate) fn insert_queued(
+    tx: &Transaction<'_>,
+    command: &Command,
+    now: &Now,
+    not_before: Option<i64>,
+) -> Result<()> {
+    tx.prepare_cached(
+        "INSERT INTO queue (uuid, kind, temp_id, args, created_at, not_before)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?
+    .execute(params![
+        command.uuid,
+        command.kind,
+        command.temp_id,
+        serde_json::to_string(&command.args)?,
+        now.utc_string(),
+        not_before,
+    ])?;
     Ok(())
 }
 
@@ -135,7 +159,8 @@ pub(crate) fn fail_queued(
         detail.map(serde_json::to_string).transpose()?,
         now.utc_string(),
     ])?;
-    delete_queued(tx, &q.command.uuid)
+    delete_queued(tx, &q.command.uuid)?;
+    Ok(())
 }
 
 /// Rewrite `from` to `to` in every queued command.
@@ -271,18 +296,7 @@ impl Store {
                     changes.id_map.push(pair);
                 }
             }
-            tx.prepare_cached(
-                "INSERT INTO queue (uuid, kind, temp_id, args, created_at, not_before)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            )?
-            .execute(params![
-                command.uuid,
-                command.kind,
-                command.temp_id,
-                serde_json::to_string(&command.args)?,
-                now.utc_string(),
-                not_before,
-            ])?;
+            insert_queued(&tx, &command, &now, not_before)?;
             local::apply_command(&tx, &command, &now, &mut changes)?;
         }
         changes.touch(Kind::Queue);
@@ -367,16 +381,41 @@ impl Store {
         Ok(())
     }
 
-    /// Drop a queued command without sending it (for example "discard change"), rolling back
-    /// its optimistic effect.
-    pub fn discard_queued(&mut self, uuid: &str) -> Result<Changes> {
+    /// Drop a queued command without sending it (for example "Undo"), rolling back its
+    /// optimistic effect.
+    ///
+    /// Returns `None` when the command is no longer queued: it was already sent (or failed),
+    /// so discarding it cannot take it back. The caller must undo it another way (for
+    /// example with `item_uncomplete`) or tell the user.
+    ///
+    /// If the command is on its way to the server when it is discarded, it is still deleted
+    /// here; [`Store::apply_sync_response`] then queues the inverse of an acknowledged close
+    /// whose row is gone.
+    pub fn discard_queued(&mut self, uuid: &str) -> Result<Option<Changes>> {
         let now = self.now();
         let tx = self.write_tx()?;
         let mut changes = Changes::default();
-        delete_queued(&tx, uuid)?;
+        if !delete_queued(&tx, uuid)? {
+            return Ok(None);
+        }
         rebuild_local(&tx, &now, &mut changes)?;
         changes.touch(Kind::Queue);
         tx.commit()?;
-        Ok(changes)
+        Ok(Some(changes))
+    }
+
+    /// Set the send time of the queued commands `uuids` to `delay` from now (wall clock), so
+    /// an "Undo" toast that is still showing can discard them. `Duration::ZERO` makes them
+    /// due at once. Returns how many of them were still queued.
+    pub fn defer_queued(&self, uuids: &[String], delay: std::time::Duration) -> Result<usize> {
+        let at = wall_ms().saturating_add(i64::try_from(delay.as_millis()).unwrap_or(i64::MAX));
+        let mut stmt = self
+            .conn
+            .prepare_cached("UPDATE queue SET not_before = ?2 WHERE uuid = ?1")?;
+        let mut n = 0;
+        for uuid in uuids {
+            n += stmt.execute(params![uuid, at])?;
+        }
+        Ok(n)
     }
 }
