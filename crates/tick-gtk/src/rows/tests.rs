@@ -165,12 +165,10 @@ fn upcoming_groups_days() {
             "ghost:2026-11-22",
             "day:2026-11-23",
             "task:h1",
-            "ghost:2026-11-23",
             "day:2026-11-24",
             "ghost:2026-11-24",
             "day:2026-11-25",
             "task:w4",
-            "ghost:2026-11-25",
             "day:2026-11-26",
             "ghost:2026-11-26",
             "day:2026-11-27",
@@ -180,9 +178,12 @@ fn upcoming_groups_days() {
             "month:2026-12",
             "day:2026-12-05",
             "task:h2",
-            "ghost:2026-12-05",
         ]
     );
+    // The day under the month header is tight against it (4.7); the first group under the
+    // view header has no space above.
+    assert!(day_after_month(&c, "day:2026-12-05"));
+    assert!(!day_after_month(&c, "day:2026-11-28"));
     let day = |k: &str| {
         c.rows
             .iter()
@@ -367,4 +368,14 @@ fn view_ids_round_trip() {
         assert_eq!(ViewId::from_setting(&v.to_setting()), Some(v));
     }
     assert_eq!(ViewId::from_setting("bogus"), None);
+}
+
+fn day_after_month(c: &Content, key: &str) -> bool {
+    c.rows
+        .iter()
+        .find_map(|r| match r {
+            Row::DayHeader(d) if d.key == key => Some(d.after_month),
+            _ => None,
+        })
+        .unwrap()
 }

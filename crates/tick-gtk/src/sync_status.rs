@@ -27,6 +27,13 @@ impl SyncView {
                 "{n} changes could not be saved",
                 self.failed.len(),
             ))
+        } else if !self.pending.is_empty() && self.offline {
+            // Say why the changes wait (4.14).
+            Some(ncount(
+                "Offline. {n} change waiting to sync.",
+                "Offline. {n} changes waiting to sync.",
+                self.pending.len(),
+            ))
         } else if !self.pending.is_empty() {
             Some(ncount(
                 "{n} change waiting to sync",
@@ -46,7 +53,9 @@ pub struct SyncIndicator {
     icon: gtk::Image,
     count: gtk::Label,
     heading: gtk::Label,
+    detail: gtk::Label,
     list: gtk::Box,
+    footer: gtk::Box,
     sync_now: gtk::Button,
     dismiss: gtk::Button,
 }
@@ -75,6 +84,18 @@ impl SyncIndicator {
             .wrap(true)
             .css_classes(["heading"])
             .build();
+        // Failed changes were rolled back: say so once, above the server messages (4.14, 6.4).
+        let detail = gtk::Label::builder()
+            .label(gettext(
+                "Todoist rejected the change. Your task shows the version on the server.",
+            ))
+            .xalign(0.0)
+            .wrap(true)
+            // Wrap at the popover width (4.14) instead of widening it to one line.
+            .max_width_chars(20)
+            .visible(false)
+            .css_classes(["caption", "dimmed"])
+            .build();
         let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let sync_now = gtk::Button::builder()
             .label(gettext("Sync Now"))
@@ -102,6 +123,7 @@ impl SyncIndicator {
             .css_classes(["tick-sync-popover"])
             .build();
         body.append(&heading);
+        body.append(&detail);
         body.append(&list);
         body.append(&footer);
         let popover = gtk::Popover::builder().child(&body).build();
@@ -127,7 +149,9 @@ impl SyncIndicator {
             icon,
             count,
             heading,
+            detail,
             list,
+            footer,
             sync_now,
             dismiss,
         })
@@ -174,8 +198,24 @@ impl SyncIndicator {
         for desc in &v.pending {
             self.list.append(&change_row(desc, None));
         }
+        self.detail.set_visible(!v.failed.is_empty());
+        // One primary action (4.14): Sync Now while changes wait and the network is there;
+        // otherwise Dismiss Errors. Offline, Sync Now stays visible but plain and insensitive,
+        // so it does not read as an available accent button.
+        let sync_primary = !v.offline && (!v.pending.is_empty() || v.failed.is_empty());
+        set_class(&self.sync_now, "suggested-action", sync_primary);
+        set_class(&self.sync_now, "flat", !v.offline && !sync_primary);
         self.sync_now.set_sensitive(!v.offline);
         self.dismiss.set_visible(!v.failed.is_empty());
+        set_class(&self.dismiss, "suggested-action", !sync_primary);
+        // The primary action goes last (GNOME HIG).
+        if sync_primary {
+            self.footer
+                .reorder_child_after(&self.sync_now, Some(&self.dismiss));
+        } else {
+            self.footer
+                .reorder_child_after(&self.dismiss, Some(&self.sync_now));
+        }
     }
 
     /// Opens the popover ("Details" on a failed-change toast).
@@ -216,4 +256,45 @@ fn change_row(desc: &str, message: Option<&str>) -> gtk::Widget {
     }
     row.append(&inner);
     row.upcast()
+}
+
+fn set_class(w: &impl IsA<gtk::Widget>, class: &str, on: bool) {
+    if on {
+        w.add_css_class(class);
+    } else {
+        w.remove_css_class(class);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_line_says_why_changes_wait() {
+        let mut v = SyncView {
+            offline: true,
+            ..SyncView::default()
+        };
+        assert_eq!(
+            v.status_text().as_deref(),
+            Some("Offline. Changes are saved on this computer.")
+        );
+        v.pending = vec!["Complete \"Buy milk\"".into()];
+        assert_eq!(
+            v.status_text().as_deref(),
+            Some("Offline. 1 change waiting to sync.")
+        );
+        v.offline = false;
+        v.pending.push("Rename project \"Home\"".into());
+        assert_eq!(
+            v.status_text().as_deref(),
+            Some("2 changes waiting to sync")
+        );
+        v.failed = vec![("Complete \"Buy milk\"".into(), "Item not found".into())];
+        assert_eq!(
+            v.status_text().as_deref(),
+            Some("1 change could not be saved")
+        );
+    }
 }

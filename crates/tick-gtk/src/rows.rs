@@ -101,6 +101,8 @@ pub struct DayHeader {
     pub dim: Option<String>,
     /// Directly under the view header: no space above (the header has its own).
     pub first: bool,
+    /// Directly under a month header, which is its heading: no space above, tighter.
+    pub after_month: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -801,6 +803,7 @@ fn day_header(lk: &Lookup<'_>, date: NaiveDate) -> DayHeader {
         label,
         dim,
         first: false,
+        after_month: false,
     }
 }
 
@@ -811,6 +814,7 @@ fn overdue_header(count: usize) -> DayHeader {
         label: gettext("Overdue"),
         dim: Some(count.to_string()),
         first: false,
+        after_month: false,
     }
 }
 
@@ -898,11 +902,18 @@ fn upcoming(lk: &Lookup<'_>, ui: &UiState) -> Result<Content> {
                     title: format::month_header(day.date, lk.today),
                 });
             }
-            rows.push(Row::DayHeader(day_header(lk, day.date)));
+            let mut header = day_header(lk, day.date);
+            header.after_month = matches!(rows.last(), Some(Row::MonthHeader { .. }));
+            rows.push(Row::DayHeader(header));
             let mut tasks = day.tasks.clone();
             tasks.sort_by(today_order);
             for t in &tasks {
                 rows.push(Row::Task(Box::new(lk.task_row(t, 0, false, mode, ui))));
+            }
+            // "Add task" only where a day has nothing yet, and under today (4.7): a ghost row
+            // after every group would break the calendar rhythm.
+            if !day.tasks.is_empty() && day.date != lk.today {
+                continue;
             }
             rows.push(Row::Ghost {
                 key: format!("ghost:{}", iso(day.date)),

@@ -558,7 +558,9 @@ impl Sidebar {
             ),
         ];
         let mut section = |section: Section, entries: Vec<SidebarItem>| {
-            if entries.is_empty() {
+            // Only Favorites hides when empty (4.1): the other headers say where projects,
+            // labels and filters will appear, and hold their "Add ..." buttons.
+            if entries.is_empty() && section == Section::Favorites {
                 return;
             }
             let is_collapsed = collapsed.contains(&section);

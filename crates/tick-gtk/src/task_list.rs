@@ -221,10 +221,15 @@ fn view_header(h: &ViewHeader, ctx: &RenderCtx) -> gtk::Widget {
     }
     // A zero count repeats the empty state below it (4.2).
     if h.count > 0 {
-        sub.append(&label(
+        let count = label(
             &ncount("{n} task", "{n} tasks", h.count),
             &["body", "dimmed", "numeric"],
-        ));
+        );
+        // After a monospace query, 12 px reads as part of the query: 24 (space-5) parts them.
+        if h.query.is_some() {
+            count.set_margin_start(12);
+        }
+        sub.append(&count);
     }
     if !h.avatars.is_empty() {
         let avatars = gtk::Box::new(gtk::Orientation::Horizontal, 3);
@@ -345,6 +350,9 @@ fn day_header(d: &DayHeader) -> gtk::Widget {
         .build();
     if d.first {
         root.add_css_class("first");
+    }
+    if d.after_month {
+        root.add_css_class("after-month");
     }
     let line = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)

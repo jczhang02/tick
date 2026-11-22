@@ -172,7 +172,7 @@ async fn quick_add_offline_is_sent_once_back_online() {
     app::task_row(&window, "Offline task").await;
     tick_e2e::poll(WAIT, "pending count", || async {
         let d = sync.description().await.ok()?;
-        (d == "1 change waiting to sync").then_some(())
+        (d == "Offline. 1 change waiting to sync.").then_some(())
     })
     .await
     .unwrap();

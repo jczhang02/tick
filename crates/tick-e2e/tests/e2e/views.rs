@@ -100,12 +100,10 @@ async fn upcoming_groups_by_day() {
             "Add task",
             "Tomorrow",
             "Water the plants",
-            "Add task",
             "Tuesday",
             "Add task",
             "Wednesday",
             "Book the venue",
-            "Add task",
             "Thursday",
             "Add task",
             "Friday",
@@ -115,7 +113,6 @@ async fn upcoming_groups_by_day() {
             "December",
             "Saturday",
             "Plant bulbs",
-            "Add task",
         ],
     )
     .await;

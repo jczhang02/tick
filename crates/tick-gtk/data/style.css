@@ -210,10 +210,10 @@ checkbutton.tick-ring.p1,
 checkbutton.tick-ring.p2,
 checkbutton.tick-ring.p3 { --tick-ring-rest: color-mix(in srgb, var(--tick-ring) 12%, transparent); }
 checkbutton.tick-ring > check {
-  min-width: 18px;
-  min-height: 18px;
+  min-width: 12px;                          /* the icon fills the content box: 12 px check mark */
+  min-height: 12px;
   margin: 13px;
-  padding: 0;
+  padding: 3px;                             /* 13 + 3 + 12 + 3 + 13 = 44; the ring is the 18 px border box */
   border-radius: 9999px;
   border: none;
   background-image: none;
@@ -423,6 +423,8 @@ entry.tick-quick-entry {
   min-height: 44px;
   background: none;
   box-shadow: none;
+  /* has-frame: false adds .flat, whose radius is 0: the focus ring would be square */
+  border-radius: 9px;
   /* the focus ring (2.4.5) needs room around the text; the negative margin keeps the text on
      the chips' x */
   padding-left: 9px;
@@ -482,3 +484,18 @@ dialog.tick-quick-add sheet {
 
 /* the first day group right under the view header needs no space of its own (4.7) */
 .tick-day-header.first { margin-top: 0; }
+
+/* a day group right under a month header: the month header is its heading, so the group has
+   no space of its own and no air above its line (natural height, not 56), keeping the month
+   title with its days: more space above the month header than below it (2.1, 4.7) */
+.tick-day-header.after-month {
+  margin-top: 0;
+  min-height: 0;
+}
+
+/* the last sidebar row keeps a gap to the window edge (2.1) */
+.navigation-sidebar { padding-bottom: 12px; }
+
+/* a tooltip surface is exactly its border box: the floating shadow would be cut off, leaving
+   grey corners outside the 15 px radius (7.4 pitfall 7). Background, border and radius stay. */
+tooltip.background { box-shadow: none; }

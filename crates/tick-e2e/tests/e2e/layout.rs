@@ -130,3 +130,34 @@ async fn sidebar_sections_collapse_and_persist() {
             .is_none()
     );
 }
+
+/// An empty account keeps the Projects, Labels and Filters headers (they say where those
+/// will appear); only Favorites hides when empty (4.1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn empty_account_keeps_sidebar_headers() {
+    let server = app::server("empty").await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    let sidebar = app::sidebar(&window).await;
+    let want = [
+        "Inbox",
+        "Today",
+        "Upcoming",
+        "Projects, expanded",
+        "Labels, expanded",
+        "Filters, expanded",
+    ];
+    let names = || async {
+        let mut out = Vec::new();
+        for n in sidebar.find_all(&Query::role(Role::ListItem)).await {
+            out.push(n.name().await.unwrap_or_default());
+        }
+        out
+    };
+    let ok = tick_e2e::poll(WAIT, "sidebar rows", || async {
+        (names().await == want).then_some(())
+    })
+    .await;
+    assert!(ok.is_ok(), "sidebar rows: {:?}", names().await);
+}

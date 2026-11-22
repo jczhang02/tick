@@ -272,6 +272,16 @@ async fn sync_popover_sync_now_and_dismiss() {
         )
         .await
         .unwrap();
+    // The rolled-back change is explained once (4.14, 6.4).
+    window
+        .wait_for(
+            &Query::role(Role::Label)
+                .name("Todoist rejected the change. Your task shows the version on the server.")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
     s.click(&sync_now).await.unwrap();
     tick_e2e::poll(Duration::from_secs(5), "a sync after Sync Now", || async {
         (app::requests(&server, "/api/v1/sync").len() > before).then_some(())

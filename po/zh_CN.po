@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: tick\n"
 "Report-Msgid-Bugs-To: https://github.com/jczhang02/tick/issues\n"
-"POT-Creation-Date: 2026-11-22 14:00-0800\n"
+"POT-Creation-Date: 2026-11-22 15:00-0800\n"
 "PO-Revision-Date: 2026-11-22 18:00+0800\n"
 "Last-Translator: Tick contributors\n"
 "Language-Team: Chinese (simplified)\n"
@@ -45,7 +45,7 @@ msgstr "令牌保存在 GNOME 密钥环中."
 #: crates/tick-gtk/data/ui/quick_add.blp:9
 #: crates/tick-gtk/data/ui/quick_add.blp:12
 #: crates/tick-gtk/data/ui/quick_add.blp:76
-#: crates/tick-gtk/data/ui/window.blp:44 crates/tick-gtk/data/ui/window.blp:103
+#: crates/tick-gtk/data/ui/window.blp:44 crates/tick-gtk/data/ui/window.blp:107
 msgid "Add Task"
 msgstr "添加任务"
 
@@ -62,11 +62,11 @@ msgid "Cancel"
 msgstr "取消"
 
 #: crates/tick-gtk/data/ui/window.blp:9 crates/tick-gtk/data/ui/window.blp:28
-#: crates/tick-gtk/src/main.rs:97
+#: crates/tick-gtk/src/main.rs:105
 msgid "Tick"
 msgstr "Tick"
 
-#: crates/tick-gtk/data/ui/window.blp:40 crates/tick-gtk/data/ui/window.blp:99
+#: crates/tick-gtk/data/ui/window.blp:40 crates/tick-gtk/data/ui/window.blp:103
 msgid "Add Task (Q)"
 msgstr "添加任务 (Q)"
 
@@ -79,12 +79,12 @@ msgid "Views"
 msgstr "视图"
 
 #: crates/tick-gtk/data/ui/window.blp:79 crates/tick-gtk/src/format.rs:129
-#: crates/tick-gtk/src/rows.rs:791 crates/tick-gtk/src/rows.rs:822
+#: crates/tick-gtk/src/rows.rs:793 crates/tick-gtk/src/rows.rs:826
 #: crates/tick-gtk/src/sidebar.rs:549
 msgid "Today"
 msgstr "今天"
 
-#: crates/tick-gtk/data/ui/window.blp:116
+#: crates/tick-gtk/data/ui/window.blp:120
 msgid "Sync Status"
 msgstr "同步状态"
 
@@ -320,7 +320,7 @@ msgctxt "date"
 msgid "{mon} {day}, {year}"
 msgstr "{year} 年 {mon} {day} 日"
 
-#: crates/tick-gtk/src/format.rs:130 crates/tick-gtk/src/rows.rs:793
+#: crates/tick-gtk/src/format.rs:130 crates/tick-gtk/src/rows.rs:795
 msgid "Tomorrow"
 msgstr "明天"
 
@@ -385,7 +385,7 @@ msgstr "这个令牌无效. 请检查后重试."
 msgid "Can't reach Todoist. Check your connection and try again."
 msgstr "无法连接 Todoist. 请检查网络后重试."
 
-#: crates/tick-gtk/src/main.rs:99
+#: crates/tick-gtk/src/main.rs:107
 msgid "A Todoist client"
 msgstr "Todoist 客户端"
 
@@ -405,143 +405,143 @@ msgstr "离线. 恢复联网后会自动添加这个任务."
 msgid "Enter to add, Esc to close"
 msgstr "按 Enter 添加, 按 Esc 关闭"
 
-#: crates/tick-gtk/src/rows.rs:175 crates/tick-gtk/src/task_list.rs:479
+#: crates/tick-gtk/src/rows.rs:177 crates/tick-gtk/src/task_list.rs:490
 msgid "Completing"
 msgstr "正在完成"
 
-#: crates/tick-gtk/src/rows.rs:178
+#: crates/tick-gtk/src/rows.rs:180
 msgid "Due {date}"
 msgstr "日期 {date}"
 
-#: crates/tick-gtk/src/rows.rs:181
+#: crates/tick-gtk/src/rows.rs:183
 msgid "deadline {date}"
 msgstr "截止日期 {date}"
 
-#: crates/tick-gtk/src/rows.rs:185
+#: crates/tick-gtk/src/rows.rs:187
 msgid "{done} of {n} sub-task"
 msgid_plural "{done} of {n} sub-tasks"
 msgstr[0] "子任务已完成 {done}/{n}"
 
-#: crates/tick-gtk/src/rows.rs:190
+#: crates/tick-gtk/src/rows.rs:192
 msgid "{n} comment"
 msgid_plural "{n} comments"
 msgstr[0] "{n} 条评论"
 
-#: crates/tick-gtk/src/rows.rs:194
+#: crates/tick-gtk/src/rows.rs:196
 msgid "labels {names}"
 msgstr "标签 {names}"
 
-#: crates/tick-gtk/src/rows.rs:199
+#: crates/tick-gtk/src/rows.rs:201
 msgid "project {name}"
 msgstr "项目 {name}"
 
-#: crates/tick-gtk/src/rows.rs:202 crates/tick-gtk/src/task_list.rs:558
+#: crates/tick-gtk/src/rows.rs:204 crates/tick-gtk/src/task_list.rs:569
 msgid "Assigned to {name}"
 msgstr "负责人 {name}"
 
-#: crates/tick-gtk/src/rows.rs:205
+#: crates/tick-gtk/src/rows.rs:207
 msgid "Not saved: {message}"
 msgstr "未保存: {message}"
 
 #. Translators: separator between the parts of a task's meta line read aloud.
-#: crates/tick-gtk/src/rows.rs:208
+#: crates/tick-gtk/src/rows.rs:210
 msgctxt "list separator"
 msgid ", "
 msgstr ", "
 
-#: crates/tick-gtk/src/rows.rs:455 crates/tick-gtk/src/rows.rs:615
-#: crates/tick-gtk/src/rows.rs:616 crates/tick-gtk/src/rows.rs:679
+#: crates/tick-gtk/src/rows.rs:457 crates/tick-gtk/src/rows.rs:617
+#: crates/tick-gtk/src/rows.rs:618 crates/tick-gtk/src/rows.rs:681
 #: crates/tick-gtk/src/sidebar.rs:543
 msgid "Inbox"
 msgstr "收件箱"
 
-#: crates/tick-gtk/src/rows.rs:661
+#: crates/tick-gtk/src/rows.rs:663
 msgid "Inbox is empty"
 msgstr "收件箱是空的"
 
-#: crates/tick-gtk/src/rows.rs:662
+#: crates/tick-gtk/src/rows.rs:664
 msgid "New tasks land here. Press Q to add one."
 msgstr "新任务会先放在这里. 按 Q 添加一个."
 
-#: crates/tick-gtk/src/rows.rs:714
+#: crates/tick-gtk/src/rows.rs:716
 msgid "No tasks yet"
 msgstr "还没有任务"
 
-#: crates/tick-gtk/src/rows.rs:715
+#: crates/tick-gtk/src/rows.rs:717
 msgid "Press Q to add the first one."
 msgstr "按 Q 添加第一个任务."
 
-#: crates/tick-gtk/src/rows.rs:811
+#: crates/tick-gtk/src/rows.rs:814
 msgid "Overdue"
 msgstr "已逾期"
 
-#: crates/tick-gtk/src/rows.rs:834
+#: crates/tick-gtk/src/rows.rs:838
 msgid "All done for today"
 msgstr "今天的任务都完成了"
 
-#: crates/tick-gtk/src/rows.rs:835
+#: crates/tick-gtk/src/rows.rs:839
 msgid "Enjoy the rest of your day."
 msgstr "好好享受剩下的时间."
 
-#: crates/tick-gtk/src/rows.rs:866 crates/tick-gtk/src/sidebar.rs:555
+#: crates/tick-gtk/src/rows.rs:870 crates/tick-gtk/src/sidebar.rs:555
 msgid "Upcoming"
 msgstr "即将到来"
 
-#: crates/tick-gtk/src/rows.rs:876
+#: crates/tick-gtk/src/rows.rs:880
 msgid "Nothing scheduled"
 msgstr "近期没有安排"
 
-#: crates/tick-gtk/src/rows.rs:877
+#: crates/tick-gtk/src/rows.rs:881
 msgid "Tasks with a date show up here, day by day."
 msgstr "设置了日期的任务会按天显示在这里."
 
-#: crates/tick-gtk/src/rows.rs:942
+#: crates/tick-gtk/src/rows.rs:953
 msgid "No tasks with @{name}"
 msgstr "没有带 @{name} 的任务"
 
-#: crates/tick-gtk/src/rows.rs:944
+#: crates/tick-gtk/src/rows.rs:955
 msgid "Add @{name} to a task to see it here."
 msgstr "给任务加上 @{name}, 它就会出现在这里."
 
-#: crates/tick-gtk/src/rows.rs:1023
+#: crates/tick-gtk/src/rows.rs:1034
 msgid "Offline. Showing results from {time}."
 msgstr "离线. 显示的是 {time} 的结果."
 
-#: crates/tick-gtk/src/rows.rs:1029
+#: crates/tick-gtk/src/rows.rs:1040
 msgid "Updating"
 msgstr "正在更新"
 
-#: crates/tick-gtk/src/rows.rs:1033
+#: crates/tick-gtk/src/rows.rs:1044
 msgid "Results from Todoist, updated {time}"
 msgstr "来自 Todoist 的结果, 更新于 {time}"
 
-#: crates/tick-gtk/src/rows.rs:1051
+#: crates/tick-gtk/src/rows.rs:1062
 msgid "Todoist couldn't read this filter"
 msgstr "Todoist 无法识别这个过滤器"
 
-#: crates/tick-gtk/src/rows.rs:1052
+#: crates/tick-gtk/src/rows.rs:1063
 msgid "Check the query and try again."
 msgstr "请检查查询后重试."
 
-#: crates/tick-gtk/src/rows.rs:1056
+#: crates/tick-gtk/src/rows.rs:1067
 msgid "Can't show this filter offline"
 msgstr "离线时无法显示这个过滤器"
 
-#: crates/tick-gtk/src/rows.rs:1057
+#: crates/tick-gtk/src/rows.rs:1068
 msgid ""
 "Tick can't evaluate part of this query on this computer. Connect to see "
 "results."
 msgstr "Tick 无法在本机计算这个查询的一部分. 联网后即可查看结果."
 
-#: crates/tick-gtk/src/rows.rs:1061
+#: crates/tick-gtk/src/rows.rs:1072
 msgid "Loading results"
 msgstr "正在加载结果"
 
-#: crates/tick-gtk/src/rows.rs:1073
+#: crates/tick-gtk/src/rows.rs:1084
 msgid "No matching tasks"
 msgstr "没有匹配的任务"
 
-#: crates/tick-gtk/src/rows.rs:1074
+#: crates/tick-gtk/src/rows.rs:1085
 msgid "Nothing matches this filter right now."
 msgstr "目前没有任务符合这个过滤器."
 
@@ -577,11 +577,11 @@ msgstr "{name}, {state}"
 msgid "{name}, {count}"
 msgstr "{name}, {count}"
 
-#: crates/tick-gtk/src/sidebar.rs:441 crates/tick-gtk/src/task_list.rs:294
+#: crates/tick-gtk/src/sidebar.rs:441 crates/tick-gtk/src/task_list.rs:299
 msgid "Collapse {name}"
 msgstr "折叠 {name}"
 
-#: crates/tick-gtk/src/sidebar.rs:443 crates/tick-gtk/src/task_list.rs:292
+#: crates/tick-gtk/src/sidebar.rs:443 crates/tick-gtk/src/task_list.rs:297
 msgid "Expand {name}"
 msgstr "展开 {name}"
 
@@ -590,20 +590,29 @@ msgid "{n} change could not be saved"
 msgid_plural "{n} changes could not be saved"
 msgstr[0] "{n} 项更改无法保存"
 
-#: crates/tick-gtk/src/sync_status.rs:32
+#: crates/tick-gtk/src/sync_status.rs:33
+msgid "Offline. {n} change waiting to sync."
+msgid_plural "Offline. {n} changes waiting to sync."
+msgstr[0] "离线. {n} 项更改等待同步."
+
+#: crates/tick-gtk/src/sync_status.rs:39
 msgid "{n} change waiting to sync"
 msgid_plural "{n} changes waiting to sync"
 msgstr[0] "{n} 项更改等待同步"
 
-#: crates/tick-gtk/src/sync_status.rs:37
+#: crates/tick-gtk/src/sync_status.rs:44
 msgid "Offline. Changes are saved on this computer."
 msgstr "离线. 更改已保存在本机."
 
-#: crates/tick-gtk/src/sync_status.rs:80
+#: crates/tick-gtk/src/sync_status.rs:90
+msgid "Todoist rejected the change. Your task shows the version on the server."
+msgstr "Todoist 拒绝了这项更改. 任务已恢复为服务器上的版本."
+
+#: crates/tick-gtk/src/sync_status.rs:99
 msgid "Sync Now"
 msgstr "立即同步"
 
-#: crates/tick-gtk/src/sync_status.rs:84
+#: crates/tick-gtk/src/sync_status.rs:103
 msgid "Dismiss Errors"
 msgstr "忽略错误"
 
@@ -611,104 +620,104 @@ msgstr "忽略错误"
 msgid "{name}, {count}, {state}"
 msgstr "{name}, {count}, {state}"
 
-#: crates/tick-gtk/src/task_list.rs:149 crates/tick-gtk/src/task_list.rs:621
+#: crates/tick-gtk/src/task_list.rs:149 crates/tick-gtk/src/task_list.rs:632
 msgid "Add task"
 msgstr "添加任务"
 
-#: crates/tick-gtk/src/task_list.rs:426
+#: crates/tick-gtk/src/task_list.rs:437
 msgid "Mark as not done"
 msgstr "标记为未完成"
 
-#: crates/tick-gtk/src/task_list.rs:428
+#: crates/tick-gtk/src/task_list.rs:439
 msgid "Complete task"
 msgstr "完成任务"
 
-#: crates/tick-gtk/src/task_list.rs:570
+#: crates/tick-gtk/src/task_list.rs:581
 msgid "Expand sub-tasks"
 msgstr "展开子任务"
 
-#: crates/tick-gtk/src/task_list.rs:572
+#: crates/tick-gtk/src/task_list.rs:583
 msgid "Collapse sub-tasks"
 msgstr "折叠子任务"
 
-#: crates/tick-gtk/src/window.rs:578
+#: crates/tick-gtk/src/window.rs:627
 msgid "Couldn't update this filter"
 msgstr "无法更新这个过滤器"
 
-#: crates/tick-gtk/src/window.rs:579
+#: crates/tick-gtk/src/window.rs:628
 msgid "Retry"
 msgstr "重试"
 
-#: crates/tick-gtk/src/window.rs:689
+#: crates/tick-gtk/src/window.rs:744
 msgid "Couldn't save \"{title}\""
 msgstr "无法保存 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:692
+#: crates/tick-gtk/src/window.rs:747
 msgid "Details"
 msgstr "详情"
 
-#: crates/tick-gtk/src/window.rs:888
+#: crates/tick-gtk/src/window.rs:943
 msgid "Complete \"{title}\""
 msgstr "完成 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:889
+#: crates/tick-gtk/src/window.rs:944
 msgid "Reopen \"{title}\""
 msgstr "重新打开 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:890
+#: crates/tick-gtk/src/window.rs:945
 msgid "Add \"{title}\""
 msgstr "添加 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:891
+#: crates/tick-gtk/src/window.rs:946
 msgid "Delete \"{title}\""
 msgstr "删除 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:892
+#: crates/tick-gtk/src/window.rs:947
 msgid "Move \"{title}\""
 msgstr "移动 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:893
+#: crates/tick-gtk/src/window.rs:948
 msgid "Change project \"{title}\""
 msgstr "修改项目 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:894
+#: crates/tick-gtk/src/window.rs:949
 msgid "Change section \"{title}\""
 msgstr "修改分区 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:895
+#: crates/tick-gtk/src/window.rs:950
 msgid "Change label \"{title}\""
 msgstr "修改标签 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:896
+#: crates/tick-gtk/src/window.rs:951
 msgid "Change filter \"{title}\""
 msgstr "修改过滤器 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:897
+#: crates/tick-gtk/src/window.rs:952
 msgid "Change \"{title}\""
 msgstr "修改 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1223
+#: crates/tick-gtk/src/window.rs:1278
 msgid "Task completed"
 msgstr "任务已完成"
 
-#: crates/tick-gtk/src/window.rs:1225
+#: crates/tick-gtk/src/window.rs:1280
 msgid "{n} task completed"
 msgid_plural "{n} tasks completed"
 msgstr[0] "已完成 {n} 个任务"
 
-#: crates/tick-gtk/src/window.rs:1231
+#: crates/tick-gtk/src/window.rs:1286
 msgid "Undo"
 msgstr "撤销"
 
-#: crates/tick-gtk/src/window.rs:1310
+#: crates/tick-gtk/src/window.rs:1368
 msgid "{n} task was already saved and could not be restored"
 msgid_plural "{n} tasks were already saved and could not be restored"
 msgstr[0] "{n} 个任务已经保存, 无法恢复"
 
-#: crates/tick-gtk/src/window.rs:1495
+#: crates/tick-gtk/src/window.rs:1554
 msgid "Task added"
 msgstr "任务已添加"
 
-#: crates/tick-gtk/src/window.rs:1496
+#: crates/tick-gtk/src/window.rs:1555
 msgid "Open"
 msgstr "打开"
