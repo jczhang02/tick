@@ -6,6 +6,7 @@
 mod a11y;
 mod app;
 mod fixture;
+mod flows;
 mod harness;
 mod layout;
 mod login;

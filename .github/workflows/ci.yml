@@ -24,6 +24,9 @@ jobs:
           pacman -Syu --noconfirm --needed git base-devel rustup just gtk4 libadwaita \
             blueprint-compiler mutter at-spi2-core dbus mesa sqlite gettext \
             noto-fonts noto-fonts-cjk
+          # The Chinese screenshots run in zh_CN.UTF-8.
+          sed -i 's/^#zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen
+          locale-gen
           rustup default stable
           rustup component add rustfmt clippy
       - uses: actions/checkout@v7

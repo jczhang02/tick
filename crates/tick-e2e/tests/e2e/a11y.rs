@@ -108,7 +108,8 @@ async fn every_view_has_named_44px_targets() {
         ("Work", "Work"),
         ("phone", "phone"),
         ("Urgent", "Urgent"),
-        ("Before Monday", "Results from Todoist, updated 09:00"),
+        // The source line of server results is part of the view header.
+        ("Before Monday", "Before Monday"),
     ] {
         app::open_view(&s, &window, view).await;
         app::task_list(&window)

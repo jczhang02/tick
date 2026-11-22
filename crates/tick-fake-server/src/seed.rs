@@ -309,6 +309,8 @@ pub fn demo(st: &mut State) {
         ("6Xtask00000000005", T::new(INBOX_ID, "Pay the electricity bill").p(2).due(on(t, 1)).labels(&["errand"])),
         ("6Xtask00000000006", T::new(INBOX_ID, "整理 2026 年度预算, 下周一前提交").p(2).due(on(t, 3)).desc("参考去年的表格, 重点看 *交通* 和 *房租* 两项.")),
         ("6Xtask00000000007", T::new(INBOX_ID, "Look into standing desks")),
+        // Wraps to three lines and ends in an ellipsis in a narrow window (4.4).
+        ("6Xtask00000000008", T::new(INBOX_ID, "Compare the three quotes for replacing the kitchen windows, ask the landlord whether the building insurance covers any of it, and book whichever installer can come before the first frost, then tell the neighbours about the noise").p(3).labels(&["home"])),
         // Work
         ("6Xtask00000000010", T::new(work, "Prepare the quarterly planning deck").sec(s1).p(1).due(at(t, 0, "14:00")).labels(&["deep-work"]).desc("Outline:\n1. Results\n2. Risks\n3. Asks").deadline(2).assign(USER_ID)),
         ("6Xtask00000000011", T::new(work, "Collect metrics from the dashboard").parent("6Xtask00000000010").sec(s1).due(on(t, 0)).assign(USER_ID)),

@@ -39,20 +39,34 @@ pub fn session(server: &FakeServer) -> SessionBuilder {
         .env("TICK_SYNC_INTERVAL_MS", "1000")
 }
 
+/// The showing list named by one of `names` (English, or Chinese for the zh_CN screenshots).
+async fn list_named(window: &Node, names: &[&str]) -> Node {
+    let found = tick_e2e::poll(WAIT, &format!("list {names:?}"), || async {
+        for n in names {
+            if let Some(l) = window
+                .find(&Query::role(Role::List).name(*n).showing())
+                .await
+            {
+                return Some(l);
+            }
+        }
+        None
+    })
+    .await;
+    match found {
+        Ok(l) => l,
+        Err(e) => panic!("{e}\n{}", window.dump().await),
+    }
+}
+
 /// The sidebar list ("Views").
 pub async fn sidebar(window: &Node) -> Node {
-    window
-        .wait_for(&Query::role(Role::List).name("Views").showing(), WAIT)
-        .await
-        .unwrap()
+    list_named(window, &["Views", "视图"]).await
 }
 
 /// The task list ("Tasks").
 pub async fn task_list(window: &Node) -> Node {
-    window
-        .wait_for(&Query::role(Role::List).name("Tasks").showing(), WAIT)
-        .await
-        .unwrap()
+    list_named(window, &["Tasks", "任务"]).await
 }
 
 /// Clicks the sidebar row whose accessible name is `name` or starts with "`name`, ".

@@ -213,7 +213,7 @@ async fn server_filter_falls_back_to_todoist() {
     app::open_view(&s, &window, "Before Monday").await;
     let list = app::task_list(&window).await;
     list.wait_for(
-        &Query::role(Role::ListItem).name("Results from Todoist, updated 09:00"),
+        &Query::role(Role::Label).name("Results from Todoist, updated 09:00"),
         WAIT,
     )
     .await

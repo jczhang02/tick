@@ -319,6 +319,17 @@ impl Session {
         for (_, d) in &dirs {
             std::fs::create_dir_all(d)?;
         }
+        // The session has no GNOME settings, so libadwaita's monospace family falls back to
+        // fontconfig's "monospace", which is not Adwaita Mono on every machine. Point it at
+        // the GNOME default so screenshots match a desktop.
+        let fc = home.join(".config/fontconfig");
+        std::fs::create_dir_all(&fc)?;
+        std::fs::write(
+            fc.join("fonts.conf"),
+            "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n\
+             <fontconfig>\n  <alias binding=\"strong\">\n    <family>monospace</family>\n    \
+             <prefer><family>Adwaita Mono</family></prefer>\n  </alias>\n</fontconfig>\n",
+        )?;
 
         let bus_socket = runtime.join("bus");
         let bus_address = format!("unix:path={}", bus_socket.display());

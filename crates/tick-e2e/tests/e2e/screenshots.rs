@@ -27,14 +27,12 @@ fn scheme_name(c: ColorScheme) -> &'static str {
 
 /// Takes a screenshot of the app's window and returns the PNG path.
 async fn shoot(s: &Session, name: &str) -> PathBuf {
-    // Park the pointer on the window edge so no row shows a hover tint.
-    let (mw, mh) = s.monitor_size();
+    // Park the pointer in the middle of the header bar: no row shows a hover tint, and it is
+    // away from the scrolled window's edge, where GTK shows the overlay scrollbar.
+    let (mw, _) = s.monitor_size();
     let input = s.input().await.unwrap();
     input
-        .move_to(
-            i32::try_from(mw).unwrap() - 2,
-            i32::try_from(mh).unwrap() / 2,
-        )
+        .move_to(i32::try_from(mw).unwrap() / 2, 2)
         .await
         .unwrap();
     shoot_here(s, name).await
@@ -85,7 +83,7 @@ async fn wait_row(window: &Node, name: &str) {
     if name.is_empty() {
         // Server filter: the source line names where the rows come from.
         tick_e2e::poll(WAIT, "server results", || async {
-            for n in list.find_all(&Query::role(Role::ListItem)).await {
+            for n in list.find_all(&Query::role(Role::Label)).await {
                 if n.name()
                     .await
                     .is_ok_and(|t| t.starts_with("Results from Todoist"))
@@ -164,6 +162,24 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
     input.move_to(x, y).await.unwrap();
     input.scroll(6).await.unwrap();
     shoot(&s, &name("upcoming-scrolled")).await;
+    // Further down: the rest of the fixed week (empty days with their "Add task" rows) and
+    // the next month's header (signature move 3).
+    let (x, y) = list.center();
+    input.move_to(x, y).await.unwrap();
+    input.scroll(24).await.unwrap();
+    shoot(&s, &name("upcoming-later")).await;
+    input.move_to(x, y).await.unwrap();
+    input.scroll(14).await.unwrap();
+    shoot(&s, &name("upcoming-month")).await;
+
+    // A focused and selected row (keyboard), with a long title that wraps to 3 lines and
+    // ends in an ellipsis in the narrow window.
+    s.key(u32::from(b'g')).await.unwrap();
+    s.key(u32::from(b'i')).await.unwrap();
+    wait_row(&window, "Call the dentist to move the appointment").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    s.key(keysym::DOWN).await.unwrap();
+    shoot(&s, &name("selected")).await;
 
     // The p4 ring (DESIGN 9): hovered, and checked (a recurring task stays visible as
     // completed-pending).
@@ -188,6 +204,74 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
         let ring = app::inside(&bulb, Query::role(Role::CheckBox)).await;
         s.click(&ring).await.unwrap();
         shoot_here(&s, &name("completing")).await;
+
+        // A change the server rejected (4.4 failed change): the row is back with the
+        // warning, and the toast explains it.
+        server.inject(tick_fake_server::Failure::CommandError {
+            command_type: "item_close".into(),
+            args_contain: Some("6Xtask00000000007".into()),
+            error: Some(serde_json::json!({
+                "error_tag": "ITEM_NOT_FOUND", "error_code": 22, "http_code": 400,
+                "error": "Item not found", "error_extra": {}
+            })),
+            count: 1,
+        });
+        app::open_view(&s, &window, "Inbox").await;
+        let desk = app::task_row(&window, "Look into standing desks").await;
+        let ring = app::inside(&desk, Query::role(Role::CheckBox)).await;
+        s.click(&ring).await.unwrap();
+        window
+            .wait_for(
+                &Query::role(Role::Button).name("Details").showing(),
+                Duration::from_secs(20),
+            )
+            .await
+            .unwrap();
+        app::task_row(&window, "Look into standing desks").await;
+        shoot(&s, &name("failed-change")).await;
+        // The sync popover lists it (4.14); Dismiss Errors clears it for the offline shots.
+        let sync = window
+            .wait_for(
+                &Query::role(Role::Button).name("Sync Status").showing(),
+                WAIT,
+            )
+            .await
+            .unwrap();
+        s.click(&sync).await.unwrap();
+        let dismiss = window
+            .wait_for(
+                &Query::role(Role::Button).name("Dismiss Errors").showing(),
+                WAIT,
+            )
+            .await
+            .unwrap();
+        shoot(&s, &name("sync-popover-failed")).await;
+        s.click(&dismiss).await.unwrap();
+        window
+            .wait_gone(
+                &Query::role(Role::Button).name("Sync Status").showing(),
+                WAIT,
+            )
+            .await
+            .unwrap();
+
+        // A tooltip, and the main menu (the floating surface, 2.6).
+        let add = window
+            .wait_for(&Query::role(Role::Button).name("Add Task").showing(), WAIT)
+            .await
+            .unwrap();
+        let (x, y) = add.extents().await.unwrap().center();
+        s.input().await.unwrap().move_to(x, y).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        shoot_here(&s, &name("tooltip")).await;
+        let menu = window
+            .wait_for(&Query::role(Role::Button).name("Main Menu").showing(), WAIT)
+            .await
+            .unwrap();
+        s.click(&menu).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        shoot(&s, &name("main-menu")).await;
+        s.key(keysym::ESCAPE).await.unwrap();
     }
 
     // Quick add with highlighted tokens (a bottom sheet on narrow windows).
@@ -221,6 +305,10 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
         .await
         .unwrap();
     shoot(&s, &name("quick-add-offline")).await;
+    // Replace the kept draft.
+    s.chord(&[keysym::CONTROL_L, u32::from(b'a')])
+        .await
+        .unwrap();
     s.type_text("Buy oat milk").await.unwrap();
     s.key(keysym::RETURN).await.unwrap();
     tick_e2e::poll(WAIT, "pending count", || async {
@@ -230,6 +318,14 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
     .await
     .unwrap();
     shoot(&s, &name("offline")).await;
+    // The sync popover (4.14) on the floating surface.
+    s.click(&sync).await.unwrap();
+    window
+        .wait_for(&Query::role(Role::Button).name("Sync Now").showing(), WAIT)
+        .await
+        .unwrap();
+    shoot(&s, &name("sync-popover")).await;
+    s.key(keysym::ESCAPE).await.unwrap();
 }
 
 /// Empty Today and Inbox (4.13).
@@ -277,6 +373,7 @@ async fn wide_light() {
     login(ColorScheme::Light, false).await;
     if full() {
         empty(ColorScheme::Light, false).await;
+        chinese(ColorScheme::Light).await;
     }
 }
 
@@ -286,6 +383,7 @@ async fn wide_dark() {
     login(ColorScheme::Dark, false).await;
     if full() {
         empty(ColorScheme::Dark, false).await;
+        chinese(ColorScheme::Dark).await;
     }
 }
 
@@ -305,4 +403,73 @@ async fn narrow_dark() {
     if full() {
         empty(ColorScheme::Dark, true).await;
     }
+}
+
+/// Compiles `po/zh_CN.po` into a locale tree for `TICK_LOCALEDIR`.
+fn zh_catalog() -> PathBuf {
+    let po = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../po/zh_CN.po");
+    let dir = std::env::temp_dir().join(format!("tick-e2e-locale-{}", std::process::id()));
+    let out = dir.join("zh_CN/LC_MESSAGES");
+    std::fs::create_dir_all(&out).unwrap();
+    let status = std::process::Command::new("msgfmt")
+        .arg("-o")
+        .arg(out.join("tick.mo"))
+        .arg(&po)
+        .status()
+        .expect("msgfmt (gettext) is needed for the Chinese screenshots");
+    assert!(status.success(), "msgfmt {}", po.display());
+    dir
+}
+
+/// The Chinese UI (`DESIGN.md` 6.2, 6.3, 9): dates, counts and punctuation.
+async fn chinese(scheme: ColorScheme) {
+    let sc = scheme_name(scheme);
+    let name = |view: &str| format!("{view}-zh-wide-{sc}");
+    let locale = zh_catalog();
+    let zh = |server: &FakeServer| {
+        app::session(server)
+            .color_scheme(scheme)
+            .locale("zh_CN.UTF-8")
+            .env("LANGUAGE", "zh_CN")
+            .env("TICK_LOCALEDIR", locale.display().to_string())
+    };
+
+    let server = app::server("demo").await;
+    let s = zh(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    wait_row(&window, "已逾期").await;
+    shoot(&s, &name("today")).await;
+    app::open_view(&s, &window, "收件箱").await;
+    wait_row(&window, "Call the dentist to move the appointment").await;
+    shoot(&s, &name("inbox")).await;
+    app::open_view(&s, &window, "即将到来").await;
+    wait_row(&window, "即将到来").await;
+    shoot(&s, &name("upcoming")).await;
+    app::open_view(&s, &window, "收件箱").await;
+    server.set_offline(true);
+    window
+        .wait_for(
+            &Query::role(Role::Button).name("同步状态").showing(),
+            Duration::from_secs(15),
+        )
+        .await
+        .unwrap();
+    s.key(u32::from(b'q')).await.unwrap();
+    window
+        .wait_for(&Query::role(Role::Text).name("任务").showing(), WAIT)
+        .await
+        .unwrap();
+    s.type_text("Call Mom tomorrow 6pm p2 #Personal @phone")
+        .await
+        .unwrap();
+    shoot(&s, &name("quick-add-offline")).await;
+    drop(s);
+
+    let server = app::server("empty").await;
+    let s = zh(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    wait_row(&window, "今天的任务都完成了").await;
+    shoot(&s, &name("empty-today")).await;
 }
