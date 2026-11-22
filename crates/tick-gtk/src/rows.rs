@@ -541,8 +541,16 @@ fn strip_markdown(line: &str) -> String {
     out.trim().to_owned()
 }
 
+/// Tasks a count includes: completed-pending ones are done as far as the user is concerned.
+fn active(tasks: &[Task]) -> usize {
+    tasks.iter().filter(|t| !t.checked).count()
+}
+
 fn count_nodes(nodes: &[TaskNode]) -> usize {
-    nodes.iter().map(|n| 1 + count_nodes(&n.children)).sum()
+    nodes
+        .iter()
+        .map(|n| usize::from(!n.task.checked) + count_nodes(&n.children))
+        .sum()
 }
 
 fn push_tree(
@@ -660,7 +668,8 @@ fn project(lk: &Lookup<'_>, id: &str, inbox: bool, ui: &UiState) -> Result<Conte
         format!("#{} ", quick_add_name(&pv.project.name))
     };
     let mut rows = vec![Row::ViewHeader(head)];
-    if total == 0 && pv.sections.is_empty() {
+    let any_task = !pv.tasks.is_empty() || pv.sections.iter().any(|s| !s.tasks.is_empty());
+    if !any_task && pv.sections.is_empty() {
         rows.push(if inbox {
             inbox_empty()
         } else {
@@ -771,7 +780,7 @@ fn today(lk: &Lookup<'_>, ui: &UiState) -> Result<Content> {
     let mut tv = lk.store.today()?;
     tv.overdue.sort_by(overdue_order);
     tv.today.sort_by(today_order);
-    let count = tv.overdue.len() + tv.today.len();
+    let count = active(&tv.overdue) + active(&tv.today);
     let title = gettext("Today");
     let mut head = header(&title, count);
     head.subtitle = Some(format::long_date(lk.today, lk.settings));
@@ -781,7 +790,7 @@ fn today(lk: &Lookup<'_>, ui: &UiState) -> Result<Content> {
         own_project: None,
         group: None,
     };
-    if count == 0 {
+    if tv.overdue.is_empty() && tv.today.is_empty() {
         rows.push(empty(
             "weather-clear-symbolic",
             gettext("All done for today"),
@@ -815,7 +824,7 @@ fn today(lk: &Lookup<'_>, ui: &UiState) -> Result<Content> {
 
 fn upcoming(lk: &Lookup<'_>, ui: &UiState) -> Result<Content> {
     let uv = lk.store.upcoming(UPCOMING_DAYS)?;
-    let count = uv.overdue.len() + uv.days.iter().map(|d| d.tasks.len()).sum::<usize>();
+    let count = active(&uv.overdue) + uv.days.iter().map(|d| active(&d.tasks)).sum::<usize>();
     let title = gettext("Upcoming");
     let mut rows = vec![Row::ViewHeader(header(&title, count))];
     let mode = RowMode {
@@ -823,7 +832,7 @@ fn upcoming(lk: &Lookup<'_>, ui: &UiState) -> Result<Content> {
         own_project: None,
         group: None,
     };
-    if count == 0 {
+    if uv.overdue.is_empty() && uv.days.iter().all(|d| d.tasks.is_empty()) {
         rows.push(empty(
             "x-office-calendar-symbolic",
             gettext("Nothing scheduled"),
@@ -886,7 +895,7 @@ fn label(lk: &Lookup<'_>, id: &str, ui: &UiState) -> Result<Content> {
     };
     let name = info.label.name;
     let tasks = lk.store.label_view(&name)?;
-    let mut head = header(&name, tasks.len());
+    let mut head = header(&name, active(&tasks));
     head.icon = Some("tick-label-symbolic");
     let mut rows = vec![Row::ViewHeader(head)];
     if tasks.is_empty() {
@@ -910,7 +919,7 @@ fn label(lk: &Lookup<'_>, id: &str, ui: &UiState) -> Result<Content> {
     Ok(Content {
         title: name.clone(),
         rows,
-        task_count: tasks.len(),
+        task_count: active(&tasks),
         prefill: format!("@{} ", quick_add_name(&name)),
         server_query: None,
         exists: true,
@@ -934,6 +943,7 @@ fn filter(lk: &Lookup<'_>, id: &str, ui: &UiState) -> Result<Content> {
     let mut count = 0;
     let mut server_query = None;
     let mut all_local = true;
+    let mut any_rows = false;
     let rejected = ui.filter_rejected.contains(&f.query);
     let loading = ui.filter_loading.contains(&f.query);
     for (g, group) in groups.iter().enumerate() {
@@ -950,7 +960,8 @@ fn filter(lk: &Lookup<'_>, id: &str, ui: &UiState) -> Result<Content> {
         };
         match &group.result {
             FilterGroupResult::Local(tasks) => {
-                count += tasks.len();
+                count += active(tasks);
+                any_rows |= !tasks.is_empty();
                 for t in tasks {
                     body.push(Row::Task(Box::new(lk.task_row(t, 0, false, mode, ui))));
                 }
@@ -989,7 +1000,7 @@ fn filter(lk: &Lookup<'_>, id: &str, ui: &UiState) -> Result<Content> {
                             text,
                             spinner,
                         });
-                        count += tasks.len();
+                        count += active(tasks);
                         for t in tasks {
                             body.push(Row::Task(Box::new(lk.task_row(t, 0, false, mode, ui))));
                         }
@@ -1015,7 +1026,7 @@ fn filter(lk: &Lookup<'_>, id: &str, ui: &UiState) -> Result<Content> {
     let mut head = header(&f.name, count);
     head.query = Some(f.query.clone());
     let mut rows = vec![Row::ViewHeader(head)];
-    if count == 0 && all_local {
+    if !any_rows && all_local {
         rows.push(empty(
             "tick-filter-symbolic",
             gettext("No matching tasks"),

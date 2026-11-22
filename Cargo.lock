@@ -2666,6 +2666,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tick-core",
  "tick-fake-server",
  "tokio",
  "zbus 5.19.0",

@@ -37,6 +37,12 @@ async fn shoot(s: &Session, name: &str) -> PathBuf {
         )
         .await
         .unwrap();
+    shoot_here(s, name).await
+}
+
+/// Like [`shoot`] but leaves the pointer where it is (hover states).
+async fn shoot_here(s: &Session, name: &str) -> PathBuf {
+    let (mw, mh) = s.monitor_size();
     // Let the last layout and fades settle (animations are off in test mode).
     tokio::time::sleep(Duration::from_millis(300)).await;
     let path = if full() {
@@ -143,6 +149,26 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
         app::open_view(&s, &window, view).await;
         wait_row(&window, ready).await;
         shoot(&s, &name(file)).await;
+    }
+
+    // The p4 ring (DESIGN 9): hovered, and checked (a recurring task stays visible as
+    // completed-pending).
+    if !narrow {
+        app::open_view(&s, &window, "Home").await;
+        let rest = app::task_row(&window, "Replace the hallway light bulb").await;
+        let ring = app::inside(&rest, Query::role(Role::CheckBox)).await;
+        let (x, y) = ring.extents().await.unwrap().center();
+        s.input().await.unwrap().move_to(x, y).await.unwrap();
+        shoot_here(&s, &name("p4-hover")).await;
+        let water = app::task_row(&window, "Water the plants").await;
+        let ring = app::inside(&water, Query::role(Role::CheckBox)).await;
+        s.click(&ring).await.unwrap();
+        app::inside(
+            &app::task_row(&window, "Water the plants").await,
+            Query::role(Role::CheckBox).name("Mark as not done"),
+        )
+        .await;
+        shoot(&s, &name("p4-checked")).await;
     }
 
     // Quick add with highlighted tokens (a bottom sheet on narrow windows).

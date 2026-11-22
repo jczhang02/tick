@@ -277,3 +277,55 @@ async fn keyboard_shortcuts() {
         .await
         .unwrap();
 }
+
+/// A change the server rejects is rolled back, explained in a toast and listed by the
+/// sync indicator; the row carries the server message in its description (4.4, 4.14).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejected_change_is_explained() {
+    let (server, s, window) = start_in_inbox().await;
+    server.inject(tick_fake_server::Failure::CommandError {
+        command_type: "item_close".into(),
+        args_contain: None,
+        error: Some(serde_json::json!({
+            "error_tag": "ITEM_NOT_FOUND", "error_code": 22, "http_code": 400,
+            "error": "Item not found", "error_extra": {}
+        })),
+        count: 1,
+    });
+    complete(&s, &window, "Read the article").await;
+    app::wait_tasks(&window, &["Call the dentist", "Renew passport"]).await;
+    // After the undo window the server refuses the close: the task comes back.
+    toast_button(&window, "Details").await;
+    window
+        .wait_for(
+            &Query::role(Role::Label)
+                .name("Couldn't save \"Read the article\"")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    let row = app::task_row(&window, "Read the article").await;
+    let description = row.description().await.unwrap();
+    assert!(
+        description.contains("Not saved: Item not found"),
+        "{description:?}"
+    );
+    let sync = window
+        .wait_for(
+            &Query::role(Role::Button).name("Sync Status").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        sync.description().await.unwrap(),
+        "1 change could not be saved"
+    );
+    assert_eq!(server.state().get("items", "i3").unwrap()["checked"], false);
+}

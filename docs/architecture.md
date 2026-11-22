@@ -43,7 +43,9 @@
 
 - SQLite via `rusqlite` (bundled feature off; system SQLite with FTS5).
 - Path: `$XDG_DATA_HOME/tick/cache.sqlite3`. Settings (theme choice, run at login, last view) live
-  in a `settings` table so they are available before the first paint.
+  in a `settings` table so they are available before the first paint. Keys: `color-scheme`
+  (`system`, `light` or `dark`), `last-view` (`today`, `inbox`, `upcoming`, `project:<id>`,
+  `label:<id>`, `filter:<id>`), `sidebar-collapsed` and `collapsed-sections` (comma-separated).
 - Keep raw server JSON per object alongside the indexed columns, so unknown fields survive and
   future features need no migration.
 - Schema migrations are versioned with `PRAGMA user_version`.
@@ -63,6 +65,7 @@
 | `TICK_NOW` | Fixed "now" (RFC 3339) for deterministic Today/Upcoming and screenshots. |
 | `TICK_SYNC_INTERVAL_MS` | Override the 15 s foreground sync interval (tests use a short one). |
 | `TICK_COLOR_SCHEME` | `light` or `dark`, overrides the saved theme (screenshots). |
+| `TICK_LOCALEDIR` | Where the `tick.mo` catalogs are found at run time (default: the build-time `TICK_LOCALEDIR`, else `/usr/share/locale`). |
 
 ## UI structure (tick-gtk)
 

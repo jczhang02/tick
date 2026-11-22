@@ -29,6 +29,8 @@ const HOLD: Duration = Duration::from_millis(800);
 const EXIT: Duration = Duration::from_millis(250);
 /// How long a pending `g` waits for the second key of a "go to" shortcut.
 const SEQUENCE_TIMEOUT: Duration = Duration::from_millis(1500);
+/// How long a change queued while online may wait before the sync indicator shows it.
+const PENDING_GRACE: Duration = Duration::from_secs(2);
 
 /// Completions the visible "Undo" toast can take back.
 pub struct UndoGroup {
@@ -98,6 +100,9 @@ mod imp {
         pub draft: RefCell<String>,
         pub title_shown: Cell<bool>,
         pub title_anim: RefCell<Option<adw::TimedAnimation>>,
+        /// Since when changes are queued while online (the indicator waits, see
+        /// `refresh_sync`).
+        pub pending_since: Cell<Option<Instant>>,
     }
 
     impl TickWindow {
@@ -878,7 +883,7 @@ impl TickWindow {
             let failed = store.failed_commands().unwrap_or_default();
             (pending, failed)
         };
-        let view = SyncView {
+        let mut view = SyncView {
             offline: imp.ui.borrow().offline,
             pending: pending.iter().map(|c| self.describe(c)).collect(),
             failed: failed
@@ -892,6 +897,30 @@ impl TickWindow {
                 })
                 .collect(),
         };
+        // Online, a queued change normally leaves within a moment: show it only when it is
+        // still waiting after PENDING_GRACE, so the indicator does not flash after every
+        // edit. Offline it shows at once.
+        if !view.offline && view.failed.is_empty() && !view.pending.is_empty() {
+            let since = match imp.pending_since.get() {
+                Some(t) => t,
+                None => {
+                    let now = Instant::now();
+                    imp.pending_since.set(Some(now));
+                    let weak = self.downgrade();
+                    glib::timeout_add_local_once(PENDING_GRACE, move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.refresh_sync();
+                        }
+                    });
+                    now
+                }
+            };
+            if since.elapsed() < PENDING_GRACE {
+                view.pending.clear();
+            }
+        } else {
+            imp.pending_since.set(None);
+        }
         if let Some(s) = imp.sync.get() {
             s.update(&view);
         }
