@@ -386,13 +386,17 @@ fn eval_atom(atom: &Atom, t: &EvalTask<'_>, ctx: &EvalContext, now: &Now) -> boo
         Atom::NoLabels => item.labels.is_empty(),
         Atom::Priority(p) => item.p() == *p,
         Atom::Today => t.due.is_some_and(|d| d.date == today),
-        Atom::Tomorrow => t.due.is_some_and(|d| d.date == today + Duration::days(1)),
+        Atom::Tomorrow => t.due.is_some_and(|d| Some(d.date) == today.succ_opt()),
         Atom::Overdue => t.due.is_some_and(|d| d.is_overdue(now)),
         Atom::NoDate => item.due.is_none(),
         Atom::Recurring => item.due.as_ref().is_some_and(|d| d.is_recurring),
-        Atom::NextDays(n) => t
-            .due
-            .is_some_and(|d| d.date >= today && d.date < today + Duration::days(i64::from(*n))),
+        Atom::NextDays(n) => {
+            // `N` is user data (possibly a saved filter from another client): a huge N must
+            // not overflow the date (chrono panics); it means "every future date".
+            let end = Duration::try_days(i64::from(*n)).and_then(|d| today.checked_add_signed(d));
+            t.due
+                .is_some_and(|d| d.date >= today && end.is_none_or(|end| d.date < end))
+        }
         Atom::Search(text) => {
             let text = text.to_lowercase();
             item.content.to_lowercase().contains(&text)
