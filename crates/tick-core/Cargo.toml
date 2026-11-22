@@ -5,3 +5,18 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+async-channel = "2.5"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+oo7 = { version = "0.7", default-features = false, features = ["tokio", "native_crypto"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "query"] }
+rusqlite = { version = "0.43", features = ["serde_json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "macros"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+tick-fake-server = { path = "../tick-fake-server" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "macros"] }
