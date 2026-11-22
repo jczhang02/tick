@@ -138,3 +138,41 @@ async fn actions_focus_scroll_and_drag() {
         .await
         .unwrap();
 }
+
+/// Real pointer drags reach GTK's drag-and-drop machinery under headless mutter.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn drag_and_drop_between_widgets() {
+    let s = fixture().start().await.unwrap();
+    let window = s.window().await.unwrap();
+    let source = window
+        .wait_for(&Query::role(Role::Label).name("Drag source"), WAIT)
+        .await
+        .unwrap();
+    let target = window
+        .wait_for(&Query::role(Role::Label).name("Drop target"), WAIT)
+        .await
+        .unwrap();
+    let from = source.extents().await.unwrap().center();
+    let to = target.extents().await.unwrap().center();
+    let input = s.input().await.unwrap();
+    input.press_at(from.0, from.1).await.unwrap();
+    input
+        .drag_by(to.0 - from.0, to.1 - from.1, 20)
+        .await
+        .unwrap();
+    window
+        .wait_for(&Query::role(Role::Label).name("dragging"), WAIT)
+        .await
+        .unwrap();
+    input.release().await.unwrap();
+    window
+        .wait_for(&Query::role(Role::Label).name("dropped probe-42"), WAIT)
+        .await
+        .unwrap();
+    // The one-call form.
+    input.drag(from, to).await.unwrap();
+    window
+        .wait_for(&Query::role(Role::Label).name("dropped probe-42"), WAIT)
+        .await
+        .unwrap();
+}
