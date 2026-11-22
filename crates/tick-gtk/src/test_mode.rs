@@ -27,12 +27,25 @@ pub fn install_actions(app: &adw::Application) {
                 eprintln!("test-screenshot: no window");
                 return;
             };
-            if let Err(err) = save_screenshot(&window, Path::new(&path)) {
-                eprintln!("test-screenshot: {err}");
-            }
+            screenshot_with_retry(window, path, 20);
         })
         .build();
     app.add_action_entries([screenshot]);
+}
+
+/// A window that has not drawn yet (for example right after a page switch on a slow,
+/// software-rendered runner) renders to an empty node: try again shortly.
+fn screenshot_with_retry(window: gtk::Window, path: String, attempts: u32) {
+    match save_screenshot(&window, Path::new(&path)) {
+        Ok(()) => {}
+        Err(err) if attempts > 1 => {
+            eprintln!("test-screenshot: {err}, retrying");
+            glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
+                screenshot_with_retry(window, path, attempts - 1);
+            });
+        }
+        Err(err) => eprintln!("test-screenshot: {err}"),
+    }
 }
 
 /// Renders `window` with its own renderer and writes a PNG to `path`.

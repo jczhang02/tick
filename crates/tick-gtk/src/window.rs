@@ -36,6 +36,14 @@ const PENDING_GRACE: Duration = Duration::from_secs(2);
 /// Undo reopens the task with `item_uncomplete`.
 const UNDO_HOLD: Duration = Duration::from_secs(60);
 
+/// [`UNDO_HOLD`], or `TICK_TEST_UNDO_HOLD_MS` in test mode (E2E: Undo after the close left).
+fn undo_hold() -> Duration {
+    test_mode::enabled()
+        .then(|| std::env::var("TICK_TEST_UNDO_HOLD_MS").ok()?.parse().ok())
+        .flatten()
+        .map_or(UNDO_HOLD, Duration::from_millis)
+}
+
 /// Completions the visible "Undo" toast can take back.
 pub struct UndoGroup {
     toast: adw::Toast,
@@ -115,6 +123,8 @@ mod imp {
         /// Since when changes are queued while online (the indicator waits, see
         /// `refresh_sync`).
         pub pending_since: Cell<Option<Instant>>,
+        /// The previously focused widget (see `setup_focus_guard`).
+        pub last_focus: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
     }
 
     impl TickWindow {
@@ -184,6 +194,7 @@ impl TickWindow {
         win.setup_lists();
         win.setup_actions();
         win.setup_keys();
+        win.setup_focus_guard();
         win.setup_login();
         win.setup_title_handoff();
         win.load_settings();
@@ -407,6 +418,36 @@ impl TickWindow {
         self.add_controller(keys);
     }
 
+    /// When the focused widget goes away (a completed row leaves the list), GTK hands focus
+    /// to the next focusable widget, often the toast's button, and a toast with focus
+    /// never times out. Move such focus back to the list. Tab or a click into the toast
+    /// (the previous widget still shown) is left alone.
+    fn setup_focus_guard(&self) {
+        self.connect_focus_widget_notify(|w| {
+            let new = gtk::prelude::GtkWindowExt::focus(w);
+            let old = w
+                .imp()
+                .last_focus
+                .replace(new.as_ref().map(ObjectExt::downgrade))
+                .and_then(|o| o.upgrade());
+            let Some(new) = new else { return };
+            if !in_toast(&new) {
+                return;
+            }
+            let vanished = old.is_none_or(|o| !o.is_mapped() || o.root().is_none());
+            if !vanished {
+                return;
+            }
+            let weak = w.downgrade();
+            glib::idle_add_local_once(move || {
+                if let Some(w) = weak.upgrade() {
+                    let selected = w.selected_position();
+                    w.keep_focus_in_list(selected.unwrap_or(0), false);
+                }
+            });
+        });
+    }
+
     fn setup_login(&self) {
         let weak = self.downgrade();
         self.imp().login_page.connect_submit(move |_, token| {
@@ -491,6 +532,14 @@ impl TickWindow {
         let imp = self.imp();
         imp.stack.set_visible_child_name("login");
         imp.login_page.focus_entry();
+    }
+
+    /// The app quits: completions held for an "Undo" toast go out on the next sync instead
+    /// of waiting out the hold.
+    pub fn release_held(&self) {
+        if let Err(e) = self.store().release_deferred() {
+            eprintln!("tick: releasing held changes: {e}");
+        }
     }
 
     /// The token is known: start syncing (after the first frame, see `main.rs`).
@@ -1189,7 +1238,7 @@ impl TickWindow {
         let cmd = Command::item_close(id);
         let uuid = cmd.uuid.clone();
         // Held back while the Undo toast shows (see `push_undo`).
-        let result = self.store().enqueue_deferred(vec![cmd], UNDO_HOLD);
+        let result = self.store().enqueue_deferred(vec![cmd], undo_hold());
         let changes = match result {
             Ok(c) => c,
             Err(e) => {
@@ -1200,7 +1249,7 @@ impl TickWindow {
         };
         self.after_local_change(&changes);
         if let Some(pos) = focus_pos {
-            self.focus_task_near(pos, was_selected);
+            self.keep_focus_in_list(pos, was_selected);
         }
         self.push_undo(UndoEntry {
             id: id.to_owned(),
@@ -1222,7 +1271,7 @@ impl TickWindow {
             .unwrap_or_default();
         commands.push(entry);
         let uuids: Vec<String> = commands.iter().map(|e| e.uuid.clone()).collect();
-        if let Err(e) = self.store().defer_queued(&uuids, UNDO_HOLD) {
+        if let Err(e) = self.store().defer_queued(&uuids, undo_hold()) {
             eprintln!("tick: holding completions for Undo: {e}");
         }
         let title = if commands.len() == 1 {
@@ -1288,7 +1337,9 @@ impl TickWindow {
         let mut reopen = Vec::new();
         let mut lost = 0;
         for entry in &group.commands {
-            match self.store().discard_queued(&entry.uuid) {
+            // Bound first: the store must not stay borrowed inside the arms.
+            let discarded = self.store().discard_queued(&entry.uuid);
+            match discarded {
                 Ok(Some(c)) => all.merge(c),
                 // Already sent (the toast outlived UNDO_HOLD): reopen it on the server.
                 Ok(None) if !entry.recurring => {
@@ -1304,7 +1355,8 @@ impl TickWindow {
             }
         }
         if !reopen.is_empty() {
-            match self.store().enqueue_many(reopen) {
+            let reopened = self.store().enqueue_many(reopen);
+            match reopened {
                 Ok(c) => all.merge(c),
                 Err(e) => eprintln!("tick: undo: {e}"),
             }
@@ -1346,7 +1398,8 @@ impl TickWindow {
                 if let Some(g) = self.imp().undo.borrow_mut().as_mut() {
                     g.commands.retain(|e| e.id != id);
                 }
-                match self.store().discard_queued(&uuid) {
+                let discarded = self.store().discard_queued(&uuid);
+                match discarded {
                     Ok(Some(c)) => self.after_local_change(&c),
                     Ok(None) => self.touch_task_row(&id),
                     Err(e) => eprintln!("tick: undo: {e}"),
@@ -1477,7 +1530,7 @@ impl TickWindow {
                     }
                     _ => {
                         let selected = w.selected_position();
-                        w.focus_task_near(selected.unwrap_or(0), selected.is_some());
+                        w.keep_focus_in_list(selected.unwrap_or(0), selected.is_some());
                     }
                 }
             });
@@ -1630,19 +1683,40 @@ impl TickWindow {
     }
 
     fn focus_first_task_now(&self) {
-        self.focus_task_near(0, true);
+        let _ = self.focus_task_near(0, true);
     }
 
     /// Focus (and select, if `select`) the first task row at or after position `from`,
     /// else the last one before it.
-    fn focus_task_near(&self, from: u32, select: bool) {
+    fn focus_task_near(&self, from: u32, select: bool) -> bool {
+        self.focus_row_near(from, select, |r| matches!(r, Row::Task(_)))
+    }
+
+    /// Like [`Self::focus_task_near`], for keyboard focus that was in the list: when no task
+    /// is left, an "Add task" row or section header, else no focus at all. Never the toast
+    /// (GTK moves focus there when the focused row goes away, and a focused toast never
+    /// times out).
+    fn keep_focus_in_list(&self, from: u32, select: bool) {
+        if self.focus_task_near(from, select) {
+            return;
+        }
+        let interactive =
+            |r: &Row| matches!(r, Row::Task(_) | Row::SectionHeader(_) | Row::Ghost { .. });
+        if !self.focus_row_near(from, false, interactive) {
+            gtk::prelude::GtkWindowExt::set_focus(self, None::<&gtk::Widget>);
+        }
+    }
+
+    fn focus_row_near(&self, from: u32, select: bool, want: impl Fn(&Row) -> bool) -> bool {
         let imp = self.imp();
-        let Some(store) = imp.rows.get() else { return };
+        let Some(store) = imp.rows.get() else {
+            return false;
+        };
         let is_task = |i: &u32| {
             store
                 .item(*i)
                 .and_downcast::<TickRow>()
-                .is_some_and(|r| matches!(&*r.row(), Row::Task(_)))
+                .is_some_and(|r| want(&r.row()))
         };
         let n = store.n_items();
         let found = (from.min(n)..n)
@@ -1655,6 +1729,20 @@ impl TickWindow {
             }
             imp.task_list.scroll_to(pos, flags, None);
             imp.task_list.grab_focus();
+            return true;
         }
+        false
     }
+}
+
+/// Whether `w` is inside a toast (libadwaita's private `AdwToastWidget`).
+fn in_toast(w: &gtk::Widget) -> bool {
+    let mut cur = Some(w.clone());
+    while let Some(c) = cur {
+        if c.type_().name() == "AdwToastWidget" {
+            return true;
+        }
+        cur = c.parent();
+    }
+    false
 }

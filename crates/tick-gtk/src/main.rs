@@ -34,6 +34,13 @@ fn main() -> glib::ExitCode {
 
     let app = adw::Application::builder().application_id(APP_ID).build();
     app.connect_startup(startup);
+    app.connect_shutdown(|app| {
+        for w in app.windows() {
+            if let Ok(w) = w.downcast::<TickWindow>() {
+                w.release_held();
+            }
+        }
+    });
     app.connect_activate(activate);
     app.run()
 }
@@ -43,8 +50,9 @@ fn open_store() -> Store {
         Ok(s) => s,
         Err(e) => {
             // A temporary file, not memory: the sync engine opens the same path with its own
-            // connection, so UI and engine must share a file.
-            let tmp = std::env::temp_dir().join(format!("tick-{}.sqlite3", std::process::id()));
+            // connection, so UI and engine must share a file. The runtime dir is private to
+            // the user and cleared at logout.
+            let tmp = glib::user_runtime_dir().join(format!("tick-{}.sqlite3", std::process::id()));
             eprintln!(
                 "tick: cannot open the cache, using {} for this session: {e}",
                 tmp.display()
