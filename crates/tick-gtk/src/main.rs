@@ -1,6 +1,7 @@
 mod format;
 mod i18n;
 mod login;
+mod markdown;
 mod quick_add;
 mod row_object;
 mod rows;

@@ -875,7 +875,13 @@ impl TickWindow {
             if detach {
                 imp.task_list.set_model(None::<&gtk::SelectionModel>);
             }
-            update_store(store, content.rows.clone());
+            let prefer = imp
+                .selection
+                .get()
+                .and_then(|s| s.selected_item())
+                .and_downcast::<TickRow>()
+                .map(|r| r.key());
+            update_store(store, content.rows.clone(), prefer.as_deref());
             if detach {
                 imp.task_list.set_model(imp.selection.get());
             }
