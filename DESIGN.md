@@ -614,6 +614,10 @@ Every pointer and touch target is at least 44 x 44 px. Three techniques, in orde
    `background-clip: padding-box` keeps hover and pressed backgrounds at the visual size.
    Stylesheet 7.2 applies this to every header bar button (including menu buttons and the window
    controls) and to toast buttons, and offers `.tick-hit` for any other small button.
+   `border-radius` is measured from the border box, so these buttons need 9 + 5 = 14 px to show
+   the 9 px `radius-row` on their visible fill (circular ones keep 9999 px), and their focus ring
+   needs `outline-offset: -7px` to hug the visible button (a menu button's inner button has no
+   such border and keeps -2 px). `style.css` adds both after the starter rules.
    Verified on GTK 4.22.5 / libadwaita 1.9.4 in headless mutter: a 34 px header bar button, a
    header bar `GtkMenuButton` and each window-control button report 44 x 44 bounds, and
    `Gtk.Widget.pick` hits the add and menu buttons 21 px left and right of their centers. Without
@@ -872,8 +876,12 @@ At the top of every list, scrolling with it. It is the first item of the list mo
 [dot 12 (projects only)][gap 9][title .title-1]
 [gap 3]
 [subtitle .body .dimmed: date or description][gap 12][count .body .dimmed .numeric]
+[server filter results only: gap 6, source line .caption .dimmed (4.22)]
 [bottom margin 24]
 ```
+
+The count is hidden when it is 0: the empty state below already says so ("Inbox is empty"),
+and "0 tasks" next to it reads mechanically. Today then shows only the date.
 
 | View | Title | Subtitle |
 |---|---|---|
@@ -944,11 +952,11 @@ icons and labels individually `.dimmed` unless colored:
 
 | Item | Icon | Text | Color | Hidden when |
 |---|---|---|---|---|
-| Due | `task-due-symbolic` (recurring: `media-playlist-repeat-symbolic`) | "Today", "Tomorrow", "Wed", "28 Nov", "28 Nov 2027", with time "14:00" when set | 2.4.3 states | no due date; in Today and Upcoming the date part is dropped and only a time remains (no time: item hidden, except overdue which always shows) |
+| Due | `tick-due-symbolic` (recurring: `media-playlist-repeat-symbolic`) | "Today", "Tomorrow", "Wed", "28 Nov", "28 Nov 2027", with time "14:00" when set | 2.4.3 states | no due date; in Today and Upcoming the date part is dropped and only a time remains (no time: item hidden, except overdue which always shows) |
 | Deadline | `tick-deadline-symbolic` (a target) | same date format, prefixed by nothing | red when overdue | no deadline |
 | Sub-tasks | `tick-subtasks-symbolic` | "1/3" (done/total, numeric) | dimmed | no sub-tasks |
 | Comments | `tick-comment-symbolic` | "2" | dimmed | 0 comments |
-| Labels | `tick-label-symbolic` once, then names | "travel, errands" (max 2, then "+2") | dimmed | no labels |
+| Labels | `tick-label-symbolic` once, then names | "travel, errands" (max 2, then "+2") | dimmed | no labels; in the label's own view that label is left out (the item is hidden when no other label remains), as the project item is in the project view |
 | Project | color dot 8 px | "Vacation" or "Vacation / Packing" (section after a slash) | dimmed | in the task's own project view |
 
 The project item is pushed to the end of the meta line (it wraps to the next line rather than
@@ -957,7 +965,9 @@ truncating other items).
 **Trailing.** Assignee `AdwAvatar` 20 px (shared projects only, accessible name "Assigned to
 Name"). For parents, a collapse button: `pan-down-symbolic` 16 px in a 44 x 44 flat button,
 rotated -90 degrees when collapsed, `.dimmed` at rest, accessible name "Collapse sub-tasks" /
-"Expand sub-tasks".
+"Expand sub-tasks". When any row of the view has a collapse button, rows with other trailing
+content (an avatar, the failed-change warning) keep an empty 44 px slot in its place, so the
+avatar column lines up.
 
 **States.**
 
@@ -1026,14 +1036,18 @@ The list is a sequence of day groups, starting with "Overdue" (if any) and then 
 The next 7 days always appear, even when empty; after that only days with tasks.
 
 ```
-Day header (a non-selectable header row, 7.4 pitfall 14; 56 px tall, top space 18, bottom 6):
-[day number .title-2 .numeric, min-width 36, right-aligned][gap 12][relative label .heading][gap 9][weekday/date .body .dimmed]
-[hairline below, from the day number's x]
+Day header (a non-selectable header row, 7.4 pitfall 14; 56 px tall, top space 18 (0 for the first
+group right under the view header, which has its own 24 px), bottom 6):
+[day number .title-2 .numeric, min-width 32, right-aligned][gap 12][relative label .heading][gap 9][weekday/date .body .dimmed]
+[hairline below, from the day number's x (6 px into the number column)]
 ```
+
+The number column is 32 wide so that 32 + 12 puts the relative label at 44, the x of the task
+titles below it.
 
 | Day | Number | Relative label | Dim text |
 |---|---|---|---|
-| Overdue group | none (`task-past-due-symbolic` 20 px in `--tick-red`) | "Overdue" | count |
+| Overdue group | none (`tick-overdue-symbolic` 20 px in `--tick-red`) | "Overdue" | count |
 | Today | 22 | "Today" | "Sunday" |
 | Tomorrow | 23 | "Tomorrow" | "Monday" |
 | Other | 26 | "Thursday" | none |
@@ -1425,8 +1439,12 @@ unsupported syntax, the results come from `GET /api/v1/tasks/filter` and are cac
 
 ```
 [view header: filter name; subtitle: the query in .monospace .dimmed, then the count]
-[source line, .caption .dimmed: "Results from Todoist, updated 14:05"]      server results only
+[  part of the header, 6 px under the subtitle: source line, .caption .dimmed:
+   "Results from Todoist, updated 14:05"]                                   server results only
 ```
+
+With several comma-separated groups, each server group has its own source line under its group
+heading instead.
 
 | State (server results) | Shown |
 |---|---|
@@ -2177,6 +2195,9 @@ checkbutton.tick-swatch:focus:focus-visible { outline-offset: -2px; }
 Symbolic icons only, 16 px (12 px in the meta line). Use the Adwaita theme name when it exists;
 otherwise bundle an SVG from GNOME's Icon Library (`org.gnome.design.IconLibrary`) into the
 gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` name below.
+Symbolic icons stay one color: Adwaita's `task-due-symbolic` and `task-past-due-symbolic` carry a
+`warning` or `error` badge in a second hue, which would put an orange "warning" mark next to every
+plain date, so the due and overdue icons are Tick's own.
 
 | Role | Name | Source |
 |---|---|---|
@@ -2187,7 +2208,7 @@ gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` na
 | Project (empty state) | `tick-project-symbolic` (list with bullets) | Icon Library |
 | Label | `tick-label-symbolic` (tag) | Icon Library |
 | Filter | `tick-filter-symbolic` (funnel) | Icon Library |
-| Due date | `task-due-symbolic` | Adwaita |
+| Due date | `tick-due-symbolic` (calendar page) | Tick (the `tick-today-symbolic` page without the dot) |
 | Recurring | `media-playlist-repeat-symbolic` | Adwaita |
 | Deadline | `tick-deadline-symbolic` (target / flag) | Icon Library |
 | Sub-tasks | `tick-subtasks-symbolic` (indented list) | Icon Library |
@@ -2195,7 +2216,7 @@ gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` na
 | Attachment | `tick-attachment-symbolic` (paperclip) | Icon Library |
 | Send | `tick-send-symbolic` (paper plane) | Icon Library |
 | Weekend | `tick-weekend-symbolic` (sofa or sun-and-moon) | Icon Library |
-| Overdue group | `task-past-due-symbolic` | Adwaita |
+| Overdue group | `tick-overdue-symbolic` (calendar page with a cross) | Tick |
 | Offline / pending / error | `network-offline-symbolic`, `network-transmit-symbolic`, `dialog-warning-symbolic` | Adwaita |
 | Detail close | `sidebar-show-right-symbolic` | Adwaita |
 | Shared project | `system-users-symbolic` | Adwaita |
