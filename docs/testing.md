@@ -77,3 +77,6 @@ runners render in software.
 `just screenshots` runs the E2E screenshot suite and writes PNGs to `target/screenshots/`:
 each key view in light and dark, at 1280x800 (wide) and 600x800 (narrow; the harness starts
 mutter with a 600x800 virtual monitor).
+The suite also captures the states `DESIGN.md` section 9 asks for explicitly: a p4 task at rest,
+hovered and checked; a focused text entry and the focused login entry row; the date picker with a
+selected and a focused day; a suggested and a destructive button; each with a non-blue accent.
