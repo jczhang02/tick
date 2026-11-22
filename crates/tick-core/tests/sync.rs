@@ -1244,10 +1244,26 @@ async fn unreadable_quick_add_answers_are_retried_then_given_up() {
     e.engine.sync_once().await.unwrap();
     assert_eq!(e.server_items_with_content("Offline note").len(), 1);
 
-    // A server that keeps failing: the quick add moves to the failed list eventually and the
-    // rest of the queue goes through.
+    // An outage or rate limit (429/5xx) is not a verdict on the text: no attempt counted.
     e.server.inject(Failure::Status {
         status: 500,
+        retry_after: None,
+        count: tick_core::store::MAX_ATTEMPTS as u32 + 2,
+        path: Some("/api/v1/tasks/quick".into()),
+        body_contains: None,
+    });
+    e.enqueue(Command::quick_add("Survives an outage"));
+    for _ in 0..(tick_core::store::MAX_ATTEMPTS + 2) {
+        assert!(e.engine.sync_once().await.unwrap_err().is_transient());
+    }
+    assert_eq!(e.store().pending_commands().unwrap()[0].attempts, 0);
+    e.engine.sync_once().await.unwrap();
+    assert_eq!(e.server_items_with_content("Survives an outage").len(), 1);
+
+    // An endpoint that keeps answering nonsense (404): the quick add moves to the failed
+    // list eventually and the rest of the queue goes through.
+    e.server.inject(Failure::Status {
+        status: 404,
         retry_after: None,
         count: 1000,
         path: Some("/api/v1/tasks/quick".into()),
@@ -1317,7 +1333,8 @@ async fn many_queued_quick_adds_go_out_in_one_cycle() {
 async fn deferred_commands_wait_for_the_undo_window() {
     let mut e = env().await;
     e.engine.sync_once().await.unwrap();
-    let delay = Duration::from_millis(400);
+    // Long enough that no sync round trip can outlast it, even on a loaded runner.
+    let delay = Duration::from_secs(60);
     e.engine
         .store_mut()
         .enqueue_deferred(vec![Command::item_delete("6Xtask00000000007")], delay)
@@ -1346,7 +1363,8 @@ async fn deferred_commands_wait_for_the_undo_window() {
     e.engine.sync_once().await.unwrap();
     assert!(e.sync_requests_with_commands().is_empty());
     assert!(e.store().next_deferred_due().unwrap().is_some());
-    tokio::time::sleep(delay + Duration::from_millis(50)).await;
+    // The undo window ends (quitting releases it the same way).
+    e.store().release_deferred().unwrap();
     assert!(e.store().next_deferred_due().unwrap().is_none());
     e.engine.sync_once().await.unwrap();
     let sent = e.sync_requests_with_commands();
@@ -1372,7 +1390,7 @@ async fn background_engine_sends_deferred_commands_when_due() {
         db_path: db.clone(),
         // Long cadences: only the deferred deadline can trigger the second sync in time.
         foreground_interval: Duration::from_secs(60),
-        background_interval: Duration::from_secs(60),
+        background_interval: Duration::from_secs(300),
         clock: Some(fixed_clock()),
     };
     let (handle, events) = tick_core::Engine::spawn(config).unwrap();
@@ -1388,13 +1406,16 @@ async fn background_engine_sends_deferred_commands_when_due() {
     }
     let mut ui = Store::open(&db).unwrap();
     ui.set_clock(fixed_clock());
+    let enqueued = Instant::now();
     ui.enqueue_deferred(
         vec![Command::item_delete("6Xtask00000000007")],
         Duration::from_millis(500),
     )
     .unwrap();
-    let enqueued = Instant::now();
     handle.sync_now();
+    // Hiding the window right away switches to the 5 min cadence; the delete must still go
+    // out when its undo window ends.
+    handle.set_foreground(false);
     let deadline = Instant::now() + Duration::from_secs(10);
     while e
         .server

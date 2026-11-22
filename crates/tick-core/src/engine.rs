@@ -443,9 +443,12 @@ impl SyncEngine {
                 // rest of the queue. The text stays visible in the failed list.
                 self.drop_quick_add(&q, format!("quick add failed: {e}"), report)
             }
+            // 429/5xx are about the API, not about this text (like request-level errors on
+            // `/sync`): retry without counting an attempt.
+            Err(e) if e.is_transient() => Err(e.into()),
             Err(e) => {
-                // 429, 5xx, an unreadable answer (for example a captive portal page) or
-                // another 4xx: retry later, but not forever.
+                // An unreadable answer (for example a captive portal page) or another 4xx:
+                // retry later, but not forever.
                 if q.attempts + 1 >= MAX_ATTEMPTS {
                     let msg = format!("quick add failed after {MAX_ATTEMPTS} attempts: {e}");
                     return self.drop_quick_add(&q, msg, report);
@@ -763,6 +766,11 @@ async fn run(
     // History/filter requests that arrived inside a backoff window; run when it ends.
     let mut deferred: Vec<SideRequest> = Vec::new();
     loop {
+        // Wake up when a deferred command (undo window) becomes due, whatever set
+        // `next_sync` (switching to the 5 min cadence must not hold back a delete).
+        if let Ok(Some(due)) = engine.store().next_deferred_due() {
+            next_sync = next_sync.min(Instant::now() + due + Duration::from_millis(20));
+        }
         let wait = next_sync.saturating_duration_since(Instant::now());
         let mut want_sync = false;
         let mut side = None;
@@ -859,10 +867,6 @@ async fn run(
                 // server refuses, a local database error): back off instead of hammering.
                 next_sync = backoff.after(&e);
             }
-        }
-        // Wake up when a deferred command (undo window) becomes due.
-        if let Ok(Some(due)) = engine.store().next_deferred_due() {
-            next_sync = next_sync.min(Instant::now() + due + Duration::from_millis(20));
         }
     }
 }
