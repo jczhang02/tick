@@ -152,6 +152,11 @@ fn apply_resources(
     Ok(())
 }
 
+/// Error text for a command dropped after [`queue::MAX_ATTEMPTS`] attempts.
+fn gave_up(last: &str) -> String {
+    format!("gave up after {} attempts: {last}", queue::MAX_ATTEMPTS)
+}
+
 impl Store {
     /// Apply one `/sync` response. `sent` are the queued commands that went with the request.
     ///
@@ -165,7 +170,7 @@ impl Store {
         resp: &SyncResponse,
     ) -> Result<SyncApplied> {
         let now = self.now();
-        let tx = self.conn.transaction()?;
+        let tx = self.write_tx()?;
         let mut out = SyncApplied::default();
         let mut changes = Changes::default();
 
@@ -176,12 +181,26 @@ impl Store {
                     out.acknowledged += 1;
                 }
                 Some(CommandStatus::Error(e)) if e.is_retryable() => {
-                    queue::mark_attempt(&tx, &q.command.uuid, Some(&e.message()))?;
-                    out.retry.push((q.clone(), e.clone()));
+                    if q.attempts + 1 >= queue::MAX_ATTEMPTS {
+                        let msg = gave_up(&e.message());
+                        queue::fail_queued(&tx, q, &msg, Some(e), &now)?;
+                        out.failed.push((q.clone(), e.clone()));
+                    } else {
+                        queue::mark_attempt(&tx, &q.command.uuid, Some(&e.message()))?;
+                        out.retry.push((q.clone(), e.clone()));
+                    }
                 }
                 Some(CommandStatus::Error(e)) => {
                     queue::fail_queued(&tx, q, &e.message(), Some(e), &now)?;
                     out.failed.push((q.clone(), e.clone()));
+                }
+                None if q.attempts + 1 >= queue::MAX_ATTEMPTS => {
+                    let e = CommandError {
+                        error: gave_up("the server did not report a result"),
+                        ..CommandError::default()
+                    };
+                    queue::fail_queued(&tx, q, &e.error, Some(&e), &now)?;
+                    out.failed.push((q.clone(), e));
                 }
                 None => {
                     // The server did not report on this command; it stays queued and is sent
@@ -194,6 +213,11 @@ impl Store {
 
         for (temp, real) in &resp.temp_id_mapping {
             queue::remap_queue(&tx, temp, real)?;
+            queue::record_temp_id(&tx, temp, real)?;
+            changes.id_map.push((temp.clone(), real.clone()));
+        }
+        if !resp.temp_id_mapping.is_empty() {
+            queue::prune_temp_ids(&tx)?;
         }
 
         if !resp.full_sync {
@@ -209,11 +233,13 @@ impl Store {
     /// A queued quick add was accepted: `item` is the created task.
     pub fn apply_quick_add_result(&mut self, q: &QueuedCommand, item: &Value) -> Result<Changes> {
         let now = self.now();
-        let tx = self.conn.transaction()?;
+        let tx = self.write_tx()?;
         let mut changes = Changes::default();
         queue::delete_queued(&tx, &q.command.uuid)?;
         if let (Some(temp), Some(real)) = (&q.command.temp_id, id_of(item, "id")) {
             queue::remap_queue(&tx, temp, &real)?;
+            queue::record_temp_id(&tx, temp, &real)?;
+            changes.id_map.push((temp.clone(), real));
         }
         super::reset_local(&tx, &now, &mut changes)?;
         put_object(&tx, Kind::Item, item, Origin::Server, &now, &mut changes)?;
@@ -231,7 +257,7 @@ impl Store {
         detail: Option<&CommandError>,
     ) -> Result<Changes> {
         let now = self.now();
-        let tx = self.conn.transaction()?;
+        let tx = self.write_tx()?;
         let mut changes = Changes::default();
         queue::fail_queued(&tx, q, error, detail, &now)?;
         rebuild_local(&tx, &now, &mut changes)?;
@@ -242,7 +268,7 @@ impl Store {
 
     /// Record a transient error on a queued command (kept for retry).
     pub fn note_attempt(&mut self, uuid: &str, error: &str) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.write_tx()?;
         queue::mark_attempt(&tx, uuid, Some(error))?;
         tx.commit()?;
         Ok(())
@@ -250,7 +276,7 @@ impl Store {
 
     /// Store a page of completed tasks in the history cache.
     pub fn cache_completed(&mut self, items: &[Value]) -> Result<Changes> {
-        let tx = self.conn.transaction()?;
+        let tx = self.write_tx()?;
         let mut changes = Changes::default();
         for v in items {
             let Some(id) = id_of(v, "id") else { continue };
@@ -280,7 +306,7 @@ impl Store {
     /// The tasks are also upserted so the view can render them.
     pub fn cache_filter_results(&mut self, query: &str, items: &[Value]) -> Result<Changes> {
         let now = self.now();
-        let tx = self.conn.transaction()?;
+        let tx = self.write_tx()?;
         let mut changes = Changes::default();
         let mut ids = Vec::new();
         for v in items {

@@ -27,7 +27,7 @@ use serde_json::Value;
 use crate::clock::{self, Now};
 
 pub use query::*;
-pub use queue::{FailedCommand, QueuedCommand};
+pub use queue::{FailedCommand, MAX_ATTEMPTS, QueuedCommand, UNDO_DELAY, wall_ms};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -100,6 +100,10 @@ pub struct Changes {
     pub full: bool,
     pub objects: BTreeSet<(Kind, String)>,
     pub kinds: BTreeSet<Kind>,
+    /// Temp ids the server replaced, as `(temp_id, real_id)`. A view that still shows a
+    /// temp id (for example the detail pane of a just-created task) switches to the real id.
+    /// Commands enqueued with the old temp id are rewritten anyway (see `Store::enqueue`).
+    pub id_map: Vec<(String, String)>,
 }
 
 impl Changes {
@@ -114,9 +118,21 @@ impl Changes {
         self.full |= other.full;
         self.objects.extend(other.objects);
         self.kinds.extend(other.kinds);
+        for pair in other.id_map {
+            if !self.id_map.contains(&pair) {
+                self.id_map.push(pair);
+            }
+        }
     }
     pub fn is_empty(&self) -> bool {
-        !self.full && self.kinds.is_empty()
+        !self.full && self.kinds.is_empty() && self.id_map.is_empty()
+    }
+    /// The real id for `id` if this change replaced it, else `id`.
+    pub fn resolve<'a>(&'a self, id: &'a str) -> &'a str {
+        self.id_map
+            .iter()
+            .find(|(t, _)| t == id)
+            .map_or(id, |(_, r)| r.as_str())
     }
     pub fn ids(&self, kind: Kind) -> impl Iterator<Item = &str> {
         self.objects
@@ -206,6 +222,33 @@ impl Store {
         &self.conn
     }
 
+    /// How long a write waits for another connection's write transaction (default 5 s).
+    /// The UI connection may want a shorter wait and retry from the main loop instead.
+    pub fn set_busy_timeout(&self, timeout: std::time::Duration) -> Result<()> {
+        self.conn.busy_timeout(timeout)?;
+        Ok(())
+    }
+
+    /// Start a write transaction. `IMMEDIATE` takes the write lock up front: a deferred
+    /// transaction that starts with a read and upgrades later fails with `SQLITE_BUSY` under
+    /// WAL (without waiting for `busy_timeout`) when the other connection committed between.
+    pub(crate) fn write_tx(&mut self) -> Result<Transaction<'_>> {
+        Ok(self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?)
+    }
+
+    /// The real id for an id the server replaced (a temp id of a synced create), else `id`.
+    pub fn resolve_id(&self, id: &str) -> Result<String> {
+        Ok(self
+            .conn
+            .query_row("SELECT real FROM temp_ids WHERE temp = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?
+            .unwrap_or_else(|| id.to_owned()))
+    }
+
     // ---- settings (UI preferences) ----
 
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
@@ -247,14 +290,14 @@ impl Store {
 
     /// Delete all cached data (logout). Settings are kept.
     pub fn clear_all(&mut self) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.write_tx()?;
         for kind in Kind::OBJECT_KINDS {
             tx.execute(&format!("DELETE FROM {}", kind.table()), [])?;
         }
         tx.execute_batch(
             "DELETE FROM item_labels; DELETE FROM collaborator_states; DELETE FROM completed_info;
              DELETE FROM completed_items; DELETE FROM filter_cache; DELETE FROM queue;
-             DELETE FROM failed_commands; DELETE FROM meta;",
+             DELETE FROM failed_commands; DELETE FROM meta; DELETE FROM temp_ids;",
         )?;
         tx.commit()?;
         Ok(())

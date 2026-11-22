@@ -191,17 +191,49 @@ END;
     )
 }
 
+/// v2: temp id mappings that outlive the queued commands, and deferred sending.
+const V2: &str = "
+-- temp_id -> real id from `temp_id_mapping` and quick-add results. Commands enqueued after
+-- the mapping arrived (for example by a view that still holds the temp id) are rewritten
+-- with it before they are queued.
+CREATE TABLE temp_ids (
+    temp TEXT PRIMARY KEY,
+    real TEXT NOT NULL,
+    -- Wall-clock Unix ms; old rows are pruned.
+    created_at INTEGER NOT NULL
+) WITHOUT ROWID;
+
+-- Wall-clock time (Unix ms) before which a queued command is not sent (undo window).
+ALTER TABLE queue ADD COLUMN not_before INTEGER;
+";
+
 /// Bring the schema to the latest version.
+///
+/// Each step runs in an immediate transaction and re-reads `user_version` inside it, so two
+/// connections opening the same cache at startup (UI and engine) cannot both run a step.
 pub(super) fn migrate(conn: &Connection) -> Result<()> {
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    let migrations: Vec<String> = vec![v1()];
+    let migrations: Vec<String> = vec![v1(), V2.to_owned()];
     for (idx, sql) in migrations.iter().enumerate() {
         let target = idx as i64 + 1;
-        if version < target {
-            let tx = conn.unchecked_transaction()?;
-            tx.execute_batch(sql)?;
-            tx.pragma_update(None, "user_version", target)?;
-            tx.commit()?;
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version >= target {
+            continue;
+        }
+        conn.execute_batch("BEGIN IMMEDIATE")?;
+        let step = (|| -> Result<()> {
+            let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            if version < target {
+                conn.execute_batch(sql)?;
+                conn.pragma_update(None, "user_version", target)?;
+            }
+            Ok(())
+        })();
+        match step {
+            Ok(()) => conn.execute_batch("COMMIT")?,
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(e);
+            }
         }
     }
     Ok(())

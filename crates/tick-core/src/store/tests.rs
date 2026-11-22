@@ -84,7 +84,7 @@ fn migrations_are_versioned_and_idempotent() {
         .connection()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(v, 1);
+    assert_eq!(v, 2);
     let mode: String = s
         .connection()
         .query_row("PRAGMA journal_mode", [], |r| r.get(0))
@@ -533,4 +533,27 @@ fn filter_view_evaluates_locally() {
     work.sort();
     assert_eq!(work, vec!["c", "d", "e", "f", "h"]);
     assert_eq!(ids(&groups[2].result), vec!["a"]);
+}
+
+/// `N days` is user data (possibly a saved filter from another client); a huge `N` must not
+/// overflow the date arithmetic and panic the UI thread.
+#[test]
+fn filter_view_with_huge_day_counts_does_not_panic() {
+    let s = seeded();
+    let small = s.filter_view("next 36500 days").unwrap();
+    for q in [
+        "999999999 days",
+        "next 4294967295 days",
+        "next 4294967295 days | tomorrow",
+    ] {
+        let groups = s.filter_view(q).unwrap();
+        let (FilterGroupResult::Local(huge), FilterGroupResult::Local(base)) =
+            (&groups[0].result, &small[0].result)
+        else {
+            panic!("{q}: {groups:?}");
+        };
+        // Every task due today or later matches, like a long finite window.
+        let ids = |v: &[Task]| v.iter().map(|t| t.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(huge), ids(base), "{q}");
+    }
 }
