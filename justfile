@@ -26,9 +26,11 @@ run:
 run-fake:
     cargo run -p tick-fake-server -- --seed demo --launch
 
-# Install release build, desktop file and icon into ~/.local
+# Install release build, translations, desktop file and icon into ~/.local
 install:
-    cargo build --release -p tick-gtk
+    TICK_LOCALEDIR=$HOME/.local/share/locale cargo build --release -p tick-gtk
+    install -d ~/.local/share/locale/zh_CN/LC_MESSAGES
+    msgfmt -o ~/.local/share/locale/zh_CN/LC_MESSAGES/tick.mo po/zh_CN.po
     install -Dm755 target/release/tick ~/.local/bin/tick
     install -Dm644 crates/tick-gtk/data/dev.chengrui.Tick.desktop ~/.local/share/applications/dev.chengrui.Tick.desktop
     install -Dm644 crates/tick-gtk/data/icons/dev.chengrui.Tick.svg ~/.local/share/icons/hicolor/scalable/apps/dev.chengrui.Tick.svg
