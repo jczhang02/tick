@@ -185,6 +185,7 @@ The suite also captures the states `DESIGN.md` section 9 asks for explicitly: a 
 hovered and checked; a focused text entry and the focused login entry row; the date picker with a
 selected and a focused day; a suggested and a destructive button; each with a non-blue accent.
 Captured so far (wide, both schemes): `p4-hover` and `p4-checked` (a recurring p4 task in its
-completed-pending state); the focused quick-add entry is in `quick-add`, the focused login entry
+completed-pending state), `completing` (the 800 ms hold, kept with `TICK_TEST_HOLD=1`),
+`upcoming-scrolled` (the header bar title hand-off) and `empty-today`/`empty-inbox` (all sizes); the focused quick-add entry is in `quick-add`, the focused login entry
 row in `login`, a suggested button in both. Not yet: the date picker and destructive buttons
 (their components come later) and a non-blue accent (the session's accent cannot be set yet).

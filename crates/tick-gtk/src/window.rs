@@ -214,7 +214,11 @@ impl TickWindow {
             .as_ref()
             .is_some_and(|c| c.rows.iter().any(|r| matches!(r, Row::Task(_))));
         let showing_main = self.imp().stack.visible_child_name().as_deref() == Some("main");
-        !showing_main || !has_tasks || self.imp().task_bound.get()
+        // An unmapped list (narrow layout, sidebar page shown) has no rows to wait for.
+        !showing_main
+            || !has_tasks
+            || !self.imp().task_list.is_mapped()
+            || self.imp().task_bound.get()
     }
 
     // ---- setup ----
@@ -284,6 +288,33 @@ impl TickWindow {
                 w.on_row_activated(pos);
             }
         });
+        // Up/Down (and J/K) move between interactive rows, skipping the view, day and month
+        // headers; GtkListView would stop at a row that cannot take focus.
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = self.downgrade();
+        keys.connect_key_pressed(move |_, key, _, mods| {
+            use gtk::gdk::{Key, ModifierType};
+            let Some(w) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            if mods.intersects(
+                ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SHIFT_MASK,
+            ) {
+                return glib::Propagation::Proceed;
+            }
+            let down = match key {
+                Key::Down | Key::KP_Down | Key::j => true,
+                Key::Up | Key::KP_Up | Key::k => false,
+                _ => return glib::Propagation::Proceed,
+            };
+            if w.move_focus(down) {
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        imp.task_list.add_controller(keys);
 
         let weak = self.downgrade();
         let sidebar = Sidebar::new(
@@ -1024,11 +1055,14 @@ impl TickWindow {
             return;
         };
         if task.checked || self.imp().ui.borrow().completing.contains(id) {
+            // Nothing changes, but the ring was toggled: show the data again.
+            self.touch_task_row(id);
             return;
         }
         let recurring = task.item.due.as_ref().is_some_and(|d| d.is_recurring);
-        if recurring || test_mode::enabled() {
-            // Test mode skips the hold and the fade (5.3) so E2E timing is deterministic.
+        if recurring || (test_mode::enabled() && !test_mode::keep_hold()) {
+            // Test mode skips the hold and the fade (5.3) so E2E timing is deterministic,
+            // unless TICK_TEST_HOLD=1 asks for the real sequence.
             self.finish_complete(id);
             return;
         }
@@ -1160,7 +1194,22 @@ impl TickWindow {
                     Err(e) => eprintln!("tick: undo: {e}"),
                 }
             }
-            None => self.refresh_rows(),
+            None => self.touch_task_row(id),
+        }
+    }
+
+    /// Rebuild the row of task `id` from unchanged data (undo a ring toggle that had no
+    /// effect).
+    fn touch_task_row(&self, id: &str) {
+        let Some(store) = self.imp().rows.get() else {
+            return;
+        };
+        for i in 0..store.n_items() {
+            if let Some(r) = store.item(i).and_downcast::<TickRow>()
+                && r.task_id().as_deref() == Some(id)
+            {
+                r.touch();
+            }
         }
     }
 
@@ -1332,6 +1381,54 @@ impl TickWindow {
             }
             _ => false,
         }
+    }
+
+    /// Move focus to the next interactive row (task, section header, "Add task") above or
+    /// below the focused one. Returns false when there is none (GTK handles the key).
+    fn move_focus(&self, down: bool) -> bool {
+        let imp = self.imp();
+        let list: gtk::Widget = imp.task_list.get().upcast();
+        let Some(mut w) = gtk::prelude::GtkWindowExt::focus(self) else {
+            return false;
+        };
+        // Up to the row widget, a direct child of the list view.
+        while w.parent().as_ref() != Some(&list) {
+            let Some(p) = w.parent() else { return false };
+            w = p;
+        }
+        let key = w
+            .first_child()
+            .and_downcast::<adw::Bin>()
+            .and_then(|b| b.child())
+            .map(|c| c.widget_name().to_string());
+        let Some(key) = key else { return false };
+        let Some(store) = imp.rows.get() else {
+            return false;
+        };
+        let rows: Vec<TickRow> = (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast::<TickRow>())
+            .collect();
+        let Some(pos) = rows.iter().position(|r| r.key() == key) else {
+            return false;
+        };
+        let interactive = |r: &TickRow| {
+            matches!(
+                &*r.row(),
+                Row::Task(_) | Row::SectionHeader(_) | Row::Ghost { .. }
+            )
+        };
+        let next = if down {
+            (pos + 1..rows.len()).find(|i| interactive(&rows[*i]))
+        } else {
+            (0..pos).rev().find(|i| interactive(&rows[*i]))
+        };
+        let Some(next) = next else { return false };
+        let mut flags = gtk::ListScrollFlags::FOCUS;
+        if matches!(&*rows[next].row(), Row::Task(_)) {
+            flags |= gtk::ListScrollFlags::SELECT;
+        }
+        imp.task_list.scroll_to(next as u32, flags, None);
+        true
     }
 
     /// Move keyboard focus to the first task of the list (after "go to" shortcuts).

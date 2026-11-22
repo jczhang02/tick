@@ -108,3 +108,8 @@ fn ms_since_process_start() -> Option<u64> {
         u64::try_from(now.tv_sec).ok()? * 1000 + u64::try_from(now.tv_nsec).ok()? / 1_000_000;
     now_ms.checked_sub(start_ms)
 }
+
+/// `TICK_TEST_HOLD=1`: keep the 800 ms completion hold in test mode (to test it).
+pub fn keep_hold() -> bool {
+    std::env::var("TICK_TEST_HOLD").is_ok_and(|v| v == "1")
+}

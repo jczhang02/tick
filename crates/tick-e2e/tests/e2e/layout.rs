@@ -78,3 +78,55 @@ async fn medium_and_wide_windows_dock_the_sidebar() {
         assert_eq!(showing(&window, Role::Button, "Add Task").await.len(), 1);
     }
 }
+
+/// Sidebar section headers collapse on click and stay collapsed after a relaunch.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sidebar_sections_collapse_and_persist() {
+    let server = app::server_with(app::fixture()).await;
+    let mut s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    let sidebar = app::sidebar(&window).await;
+    let projects = sidebar
+        .wait_for(
+            &Query::role(Role::ListItem).name("Projects, expanded"),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    sidebar
+        .wait_for(&Query::role(Role::ListItem).name_contains("Work"), WAIT)
+        .await
+        .unwrap();
+    s.click(&projects).await.unwrap();
+    sidebar
+        .wait_for(
+            &Query::role(Role::ListItem).name("Projects, collapsed"),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    sidebar
+        .wait_gone(&Query::role(Role::ListItem).name_contains("Work"), WAIT)
+        .await
+        .unwrap();
+
+    s.activate_action("quit", None).await.unwrap();
+    s.wait_app_exit(WAIT).await.unwrap();
+    s.launch_app().unwrap();
+    let window = s.window().await.unwrap();
+    let sidebar = app::sidebar(&window).await;
+    sidebar
+        .wait_for(
+            &Query::role(Role::ListItem).name("Projects, collapsed"),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    assert!(
+        sidebar
+            .find(&Query::role(Role::ListItem).name_contains("Work"))
+            .await
+            .is_none()
+    );
+}

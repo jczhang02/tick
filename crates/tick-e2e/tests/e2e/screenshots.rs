@@ -115,6 +115,7 @@ async fn back_to_sidebar(s: &Session, window: &Node) {
 
 async fn session(server: &FakeServer, scheme: ColorScheme, narrow: bool) -> Session {
     let mut b = app::session(server).color_scheme(scheme);
+    b = b.env("TICK_TEST_HOLD", "1");
     if narrow {
         b = b.narrow();
     }
@@ -151,6 +152,19 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
         shoot(&s, &name(file)).await;
     }
 
+    // The header bar title hand-off (4.2): scrolled past the large title.
+    if narrow {
+        back_to_sidebar(&s, &window).await;
+    }
+    app::open_view(&s, &window, "Upcoming").await;
+    wait_row(&window, "Upcoming").await;
+    let list = app::task_list(&window).await.extents().await.unwrap();
+    let input = s.input().await.unwrap();
+    let (x, y) = list.center();
+    input.move_to(x, y).await.unwrap();
+    input.scroll(6).await.unwrap();
+    shoot(&s, &name("upcoming-scrolled")).await;
+
     // The p4 ring (DESIGN 9): hovered, and checked (a recurring task stays visible as
     // completed-pending).
     if !narrow {
@@ -169,6 +183,11 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
         )
         .await;
         shoot(&s, &name("p4-checked")).await;
+        // The completion hold (TICK_TEST_HOLD=1): ring filled, title struck through.
+        let bulb = app::task_row(&window, "Replace the hallway light bulb").await;
+        let ring = app::inside(&bulb, Query::role(Role::CheckBox)).await;
+        s.click(&ring).await.unwrap();
+        shoot_here(&s, &name("completing")).await;
     }
 
     // Quick add with highlighted tokens (a bottom sheet on narrow windows).
@@ -206,11 +225,32 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
     s.key(keysym::RETURN).await.unwrap();
     tick_e2e::poll(WAIT, "pending count", || async {
         let d = sync.description().await.ok()?;
-        (d == "1 change waiting to sync").then_some(())
+        d.ends_with("waiting to sync").then_some(())
     })
     .await
     .unwrap();
     shoot(&s, &name("offline")).await;
+}
+
+/// Empty Today and Inbox (4.13).
+async fn empty(scheme: ColorScheme, narrow: bool) {
+    let server = app::server("empty").await;
+    let s = session(&server, scheme, narrow).await;
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    let size = if narrow { "narrow" } else { "wide" };
+    let sc = scheme_name(scheme);
+    if narrow {
+        app::open_view(&s, &window, "Today").await;
+    }
+    wait_row(&window, "All done for today").await;
+    shoot(&s, &format!("empty-today-{size}-{sc}")).await;
+    if narrow {
+        back_to_sidebar(&s, &window).await;
+    }
+    app::open_view(&s, &window, "Inbox").await;
+    wait_row(&window, "Inbox is empty").await;
+    shoot(&s, &format!("empty-inbox-{size}-{sc}")).await;
 }
 
 async fn login(scheme: ColorScheme, narrow: bool) {
@@ -235,22 +275,34 @@ async fn login(scheme: ColorScheme, narrow: bool) {
 async fn wide_light() {
     matrix(ColorScheme::Light, false).await;
     login(ColorScheme::Light, false).await;
+    if full() {
+        empty(ColorScheme::Light, false).await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn wide_dark() {
     matrix(ColorScheme::Dark, false).await;
     login(ColorScheme::Dark, false).await;
+    if full() {
+        empty(ColorScheme::Dark, false).await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn narrow_light() {
     matrix(ColorScheme::Light, true).await;
     login(ColorScheme::Light, true).await;
+    if full() {
+        empty(ColorScheme::Light, true).await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn narrow_dark() {
     matrix(ColorScheme::Dark, true).await;
     login(ColorScheme::Dark, true).await;
+    if full() {
+        empty(ColorScheme::Dark, true).await;
+    }
 }

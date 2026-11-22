@@ -60,6 +60,7 @@ pub async fn open_view(s: &Session, window: &Node, name: &str) {
     let list = sidebar(window).await;
     let area = list.extents().await.unwrap();
     let deadline = tokio::time::Instant::now() + WAIT;
+    let mut rewound = false;
     while tokio::time::Instant::now() < deadline {
         for n in list.find_all(&Query::role(Role::ListItem).showing()).await {
             let got = n.name().await.unwrap_or_default();
@@ -72,11 +73,12 @@ pub async fn open_view(s: &Session, window: &Node, name: &str) {
                 return;
             }
         }
-        // Not built or not fully visible yet: scroll the sidebar down a little.
+        // Not built or not fully visible: go to the top once, then scroll down a little.
         let input = s.input().await.unwrap();
         let (x, y) = area.center();
         input.move_to(x, y).await.unwrap();
-        input.scroll(2).await.unwrap();
+        input.scroll(if rewound { 2 } else { -40 }).await.unwrap();
+        rewound = true;
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     panic!("no sidebar row {name:?}:\n{}", list.dump().await);

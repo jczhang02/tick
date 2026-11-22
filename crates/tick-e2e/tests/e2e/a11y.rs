@@ -85,7 +85,7 @@ async fn hit_area_from_parent(node: &Node, name: &str) -> bool {
     same_name && big
 }
 
-async fn check(window: &Node, what: &str) {
+pub async fn check(window: &Node, what: &str) {
     let problems = audit(window).await;
     assert!(problems.is_empty(), "{what}:\n{}", problems.join("\n"));
 }
@@ -118,6 +118,29 @@ async fn every_view_has_named_44px_targets() {
             .unwrap();
         check(&window, view).await;
     }
+
+    // The Undo toast (its buttons are targets too).
+    app::open_view(&s, &window, "Inbox").await;
+    let row = app::task_row(&window, "Read the article").await;
+    let ring = app::inside(&row, Query::role(Role::CheckBox)).await;
+    s.click(&ring).await.unwrap();
+    window
+        .wait_for(&Query::role(Role::Button).name("Undo").showing(), WAIT)
+        .await
+        .unwrap();
+    check(&window, "undo toast").await;
+
+    // The sync status button.
+    server.set_offline(true);
+    window
+        .wait_for(
+            &Query::role(Role::Button).name("Sync Status").showing(),
+            std::time::Duration::from_secs(15),
+        )
+        .await
+        .unwrap();
+    check(&window, "sync status").await;
+    server.set_offline(false);
 
     // Quick add dialog.
     s.key(u32::from(b'q')).await.unwrap();

@@ -253,3 +253,28 @@ async fn remote_change_appears() {
     )
     .await;
 }
+
+/// An account without tasks shows the empty states (4.13), which pass the audit too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn empty_states() {
+    let server = app::server("empty").await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::wait_rows(&window, &["Today", "All done for today"]).await;
+    crate::a11y::check(&window, "empty Today").await;
+    app::open_view(&s, &window, "Inbox").await;
+    app::wait_rows(&window, &["Inbox", "Inbox is empty"]).await;
+    let empty = app::task_list(&window)
+        .await
+        .wait_for(&Query::role(Role::ListItem).name("Inbox is empty"), WAIT)
+        .await
+        .unwrap();
+    assert_eq!(
+        empty.description().await.unwrap(),
+        "New tasks land here. Press Q to add one."
+    );
+    crate::a11y::check(&window, "empty Inbox").await;
+    app::open_view(&s, &window, "Upcoming").await;
+    app::wait_rows(&window, &["Upcoming", "Nothing scheduled"]).await;
+}

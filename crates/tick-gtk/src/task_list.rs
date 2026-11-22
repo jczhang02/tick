@@ -120,6 +120,8 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
         Row::Loading { text, .. } => loading_row(text),
         Row::SourceLine { text, spinner, .. } => source_line(text, *spinner),
     };
+    // The key lets keyboard navigation map the focused row back to its model position.
+    widget.set_widget_name(&obj.key());
     bin.set_child(Some(&widget));
 }
 
@@ -544,11 +546,23 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
     }
 
     if t.fading {
+        // libadwaita skips an animation whose widget is not mapped (it jumps to the end):
+        // start the fade once the row is on screen. Test mode uses no duration (5.3).
+        let duration = if crate::test_mode::enabled() { 0 } else { 250 };
         let target = adw::PropertyAnimationTarget::new(&root, "opacity");
-        let anim = adw::TimedAnimation::new(&root, 1.0, 0.0, 250, target);
+        let anim = adw::TimedAnimation::new(&root, 1.0, 0.0, duration, target);
         anim.set_easing(adw::Easing::EaseOutCubic);
         anim.set_follow_enable_animations_setting(false);
-        anim.play();
+        if root.is_mapped() {
+            anim.play();
+        } else {
+            let pending = std::cell::RefCell::new(Some(anim));
+            root.connect_map(move |_| {
+                if let Some(a) = pending.borrow_mut().take() {
+                    a.play();
+                }
+            });
+        }
     }
     root.upcast()
 }
@@ -573,14 +587,32 @@ fn ghost_row(prefill: &str, ctx: &RenderCtx) -> gtk::Widget {
     root.upcast()
 }
 
+/// The empty state (4.13): the layout of a compact `AdwStatusPage` (64 px dimmed icon,
+/// `.title-2` title, `.body .dimmed` description). `AdwStatusPage` itself wraps its content
+/// in a scrolled window, which a list row clips to its minimum height and exposes as an
+/// unnamed focusable scroll pane.
 fn empty_row(e: &EmptyState) -> gtk::Widget {
-    let page = adw::StatusPage::builder()
-        .icon_name(e.icon)
-        .title(&e.title)
-        .description(&e.description)
-        .css_classes(["compact", "tick-empty-row"])
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .halign(gtk::Align::Center)
+        .css_classes(["tick-empty-row"])
         .build();
-    page.upcast()
+    let image = icon(e.icon, &["dimmed"]);
+    image.set_pixel_size(64);
+    image.set_margin_bottom(12);
+    root.append(&image);
+    let title = label(&e.title, &["title-2"]);
+    title.set_wrap(true);
+    title.set_justify(gtk::Justification::Center);
+    title.set_xalign(0.5);
+    root.append(&title);
+    let description = label(&e.description, &["body", "dimmed"]);
+    description.set_wrap(true);
+    description.set_justify(gtk::Justification::Center);
+    description.set_xalign(0.5);
+    root.append(&description);
+    root.upcast()
 }
 
 fn loading_row(text: &str) -> gtk::Widget {

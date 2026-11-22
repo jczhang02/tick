@@ -255,9 +255,9 @@ impl Sidebar {
                 c.insert(section);
             }
         }
-        if let Some(d) = self.data.borrow_mut().take() {
+        let data = self.data.borrow().clone();
+        if let Some(d) = data {
             self.rebuild(&d);
-            self.data.replace(Some(d));
         }
         (self.events)(SidebarEvent::SectionToggled);
     }

@@ -329,3 +329,103 @@ async fn rejected_change_is_explained() {
     );
     assert_eq!(server.state().get("items", "i3").unwrap()["checked"], false);
 }
+
+async fn wait_selected(window: &Node, title: &str) {
+    let row = app::task_row(window, title).await;
+    tick_e2e::poll(WAIT, &format!("{title:?} selected"), || async {
+        row.has_state(State::Selected).await.ok().filter(|f| *f)
+    })
+    .await
+    .unwrap();
+}
+
+/// Up and Down move between tasks across the day headers of Today.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn arrow_keys_cross_day_headers() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::wait_tasks(
+        &window,
+        &["Renew passport", "Plan the deck", "Call the dentist"],
+    )
+    .await;
+    s.key(u32::from(b'g')).await.unwrap();
+    s.key(u32::from(b't')).await.unwrap();
+    wait_selected(&window, "Renew passport").await;
+    // "Renew passport" (Overdue) and "Plan the deck" (Today) have a day header between them.
+    s.key(keysym::DOWN).await.unwrap();
+    wait_selected(&window, "Plan the deck").await;
+    s.key(keysym::DOWN).await.unwrap();
+    wait_selected(&window, "Call the dentist").await;
+    s.key(keysym::UP).await.unwrap();
+    s.key(keysym::UP).await.unwrap();
+    wait_selected(&window, "Renew passport").await;
+}
+
+/// The real completion sequence (`TICK_TEST_HOLD=1` keeps the 800 ms hold): unchecking
+/// during the hold cancels without a toast or a request; otherwise the row leaves after the
+/// hold and the Undo toast appears.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn completion_hold_can_be_cancelled() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server)
+        .env("TICK_TEST_HOLD", "1")
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Inbox").await;
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+
+    // Check, then uncheck inside the hold.
+    complete(&s, &window, "Read the article").await;
+    let row = app::task_row(&window, "Read the article").await;
+    let checked = app::inside(&row, Query::role(Role::CheckBox).name("Mark as not done")).await;
+    s.click(&checked).await.unwrap();
+    app::inside(
+        &app::task_row(&window, "Read the article").await,
+        Query::role(Role::CheckBox).name("Complete task"),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    assert!(
+        window
+            .find(&Query::role(Role::Button).name("Undo").showing())
+            .await
+            .is_none(),
+        "no toast after a cancelled completion"
+    );
+
+    // Check and leave it: the row goes after the hold and the toast appears.
+    complete(&s, &window, "Read the article").await;
+    app::inside(
+        &app::task_row(&window, "Read the article").await,
+        Query::role(Role::CheckBox).name("Mark as not done"),
+    )
+    .await;
+    app::wait_tasks(&window, &["Call the dentist", "Renew passport"]).await;
+    toast_button(&window, "Undo").await;
+    let closes = tick_e2e::poll(Duration::from_secs(15), "item_close", || async {
+        let c = app::commands_sent(&server, "item_close");
+        (!c.is_empty()).then_some(c)
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        closes.len(),
+        1,
+        "only the second completion is sent: {closes:?}"
+    );
+}
