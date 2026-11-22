@@ -162,7 +162,7 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
     input.move_to(x, y).await.unwrap();
     input.scroll(6).await.unwrap();
     shoot(&s, &name("upcoming-scrolled")).await;
-    // Further down: the rest of the fixed week (empty days with their "Add task" rows) and
+    // Further down: the rest of the fixed week (an empty day would show its "Add task" row) and
     // the next month's header (signature move 3).
     let (x, y) = list.center();
     input.move_to(x, y).await.unwrap();
@@ -313,7 +313,7 @@ async fn matrix(scheme: ColorScheme, narrow: bool) {
     s.key(keysym::RETURN).await.unwrap();
     tick_e2e::poll(WAIT, "pending count", || async {
         let d = sync.description().await.ok()?;
-        d.ends_with("waiting to sync").then_some(())
+        d.contains("waiting to sync").then_some(())
     })
     .await
     .unwrap();
@@ -452,6 +452,21 @@ async fn chinese(scheme: ColorScheme) {
     app::open_view(&s, &window, "即将到来").await;
     wait_row(&window, "即将到来").await;
     shoot(&s, &name("upcoming")).await;
+    // Weekday names (6.3): the day headers of the week at body size, and short weekdays at
+    // caption size in a project's meta lines (周二 to 周六; today and tomorrow read 今天 and
+    // 明天). A regression shot for CJK glyphs in small labels.
+    let list = app::task_list(&window).await.extents().await.unwrap();
+    let input = s.input().await.unwrap();
+    let (x, y) = list.center();
+    input.move_to(x, y).await.unwrap();
+    input.scroll(16).await.unwrap();
+    shoot(&s, &name("upcoming-week")).await;
+    input.move_to(x, y).await.unwrap();
+    input.scroll(14).await.unwrap();
+    shoot(&s, &name("upcoming-week-end")).await;
+    app::open_view(&s, &window, "Work").await;
+    wait_row(&window, "Book the offsite venue").await;
+    shoot(&s, &name("project")).await;
     app::open_view(&s, &window, "收件箱").await;
     server.set_offline(true);
     window

@@ -92,14 +92,34 @@ fn add_popups(widget: &gtk::Widget, snapshot: &gtk::Snapshot, origin: (f64, f64)
                     origin.0 + f64::from(popup.position_x()),
                     origin.1 + f64::from(popup.position_y()),
                 );
+                // The paintable draws the widget's bounds (its border box) scaled to the size it
+                // is given. width() and height() are the content box: a tooltip's padding and
+                // border would be squeezed into it. Draw at the bounds' size and place their
+                // origin (negative for a padded tooltip) where the widget puts it.
                 let paintable = gtk::WidgetPaintable::new(Some(&c));
+                let bounds = c.compute_bounds(&c).unwrap_or_else(|| {
+                    graphene::Rect::new(0.0, 0.0, c.width() as f32, c.height() as f32)
+                });
+                // The compositor shows only the surface: clip to it, as a shadow drawn past it
+                // is not on screen either.
+                snapshot.push_clip(&graphene::Rect::new(
+                    surface.0 as f32,
+                    surface.1 as f32,
+                    popup.width() as f32,
+                    popup.height() as f32,
+                ));
                 snapshot.save();
                 snapshot.translate(&graphene::Point::new(
-                    (surface.0 + tx) as f32,
-                    (surface.1 + ty) as f32,
+                    (surface.0 + tx) as f32 + bounds.x(),
+                    (surface.1 + ty) as f32 + bounds.y(),
                 ));
-                paintable.snapshot(snapshot, f64::from(c.width()), f64::from(c.height()));
+                paintable.snapshot(
+                    snapshot,
+                    f64::from(bounds.width()),
+                    f64::from(bounds.height()),
+                );
                 snapshot.restore();
+                snapshot.pop();
                 // Nested popups (a submenu) are relative to this surface.
                 add_popups(&c, snapshot, surface);
             }
