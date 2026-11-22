@@ -578,7 +578,7 @@ priority picker, sync status), menus (`popover.menu`), tooltips, toasts, and the
 | text | `--popover-fg-color` | `--popover-fg-color` |
 | border | 1 px `rgb(0 0 0 / 14%)` | 1 px `rgb(255 255 255 / 8%)` (the faint ring where shadows vanish) |
 | radius | 15 px | 15 px |
-| shadow | floating (2.5) | floating (2.5) |
+| shadow | floating (2.5); none on tooltips (7.4 pitfall 7) | same |
 | inner padding | 6 px (menus), 12 px (tooltips: 6 px x 12 px), 12 px (pickers) | same |
 
 Libadwaita's defaults differ for two of these and Tick overrides them (7.2):
@@ -890,7 +890,7 @@ and "0 tasks" next to it reads mechanically. Today then shows only the date.
 | Upcoming | Upcoming | count only |
 | Project | project name + color dot | count; for shared projects also the member avatars (up to 3, 20 px) |
 | Label | label name with `tick-label-symbolic` | count |
-| Filter | filter name | the query in `.monospace .dimmed`, then count |
+| Filter | filter name | the query in `.monospace .dimmed`, then count, 24 px apart (12 would read as part of the query) |
 | Search | the search entry replaces the title (4.15) | result count |
 | Completed | Completed | "Last 30 days" |
 
@@ -1053,7 +1053,12 @@ titles below it.
 | Other | 26 | "Thursday" | none |
 
 Month change: a month header ("December", with the year when it is not the current year) in
-`.title-4`, 36 px above. An empty day shows only its header plus an "Add task" ghost row, which
+`.title-4`, 36 px above, 6 px below. The day group right under it is the month header's first
+entry: no top space and no minimum height (`.after-month`), so the month title sits with its
+days, not halfway between two groups (2.1).
+
+"Add task" ghost rows appear only under an empty day and under Today; a day with tasks has
+none, so the week reads as a calendar page. An empty day shows only its header plus an "Add task" ghost row, which
 prefills the quick-add text with the day as an ISO date (`2026-11-26 `), the same in every UI
 language. A weekday word would depend on the user's Todoist language setting (quick add parses
 dates in the account's language) and is ambiguous on the same weekday ("Sunday" typed on a Sunday).
@@ -1275,7 +1280,8 @@ the view menu). It is hidden when online with nothing pending (the normal case).
 | State | Icon (16, `.tick-hit`) | Label | Tooltip / accessible name |
 |---|---|---|---|
 | Offline, nothing pending | `network-offline-symbolic`, `.dimmed` | none | "Offline. Changes are saved on this computer." |
-| Pending changes (online or offline) | `network-offline-symbolic` (offline) or `network-transmit-symbolic` (online) | count, `.caption .numeric` | "3 changes waiting to sync" |
+| Pending changes, online | `network-transmit-symbolic` | count, `.caption .numeric` | "3 changes waiting to sync" |
+| Pending changes, offline | `network-offline-symbolic` | count, `.caption .numeric` | "Offline. 3 changes waiting to sync." |
 | A change failed | `dialog-warning-symbolic` in `--tick-red` | count of failures | "1 change could not be saved" |
 
 The tooltip is redundant (2.6): the same text is the button's accessible description (its
@@ -1284,9 +1290,15 @@ accessible name is "Sync Status"), and the popover's status line shows it as vis
 Clicking opens a floating-surface popover (width 320): status line (`.heading`, the tooltip text,
 for example "Offline. Changes are saved on this computer."), the list of pending and failed
 changes as 44 px rows ("Complete "Buy milk"", "Rename project "Home""), each failed row with the
-server message in `.caption .dimmed`; footer "Sync Now" (`.suggested-action .tick-hit` when
-online, insensitive offline) and "Dismiss Errors" (`.tick-hit`). Failed changes were already
-rolled back (server wins); the list explains what happened.
+server message in `.caption .dimmed`. With failed changes, the "Sync error detail" (6.4) sits under
+the status line in `.caption .dimmed`: failed changes were already rolled back (server wins), and
+the list explains what happened.
+
+Footer: "Dismiss Errors" (`.tick-hit`, only with failed changes) and "Sync Now" (`.tick-hit`).
+One primary action, placed last: "Sync Now" is `.suggested-action` when online and something waits
+(or nothing failed); with failed changes and nothing waiting it is `.flat` and "Dismiss Errors" is
+`.suggested-action`. Offline, "Sync Now" stays visible but insensitive and plain (no accent fill,
+which would not read as disabled in dark mode); the status line says why.
 
 No banner, no blocking dialog. Startup offline renders the cache with the indicator only.
 
@@ -1438,7 +1450,7 @@ evaluated locally: the view opens instantly and works offline, with no extra UI.
 unsupported syntax, the results come from `GET /api/v1/tasks/filter` and are cached.
 
 ```
-[view header: filter name; subtitle: the query in .monospace .dimmed, then the count]
+[view header: filter name; subtitle: the query in .monospace .dimmed, then the count 24 px after it]
 [  part of the header, 6 px under the subtitle: source line, .caption .dimmed:
    "Results from Todoist, updated 14:05"]                                   server results only
 ```
@@ -1704,6 +1716,7 @@ Formats depend on the user's Todoist settings `date_format` (0 = day first, 1 = 
 | Toasts | Task completed / 3 tasks completed / Task deleted / Undo | 任务已完成 / 已完成 3 个任务 / 任务已删除 / 撤销 |
 | Sync tooltip, offline | Offline. Changes are saved on this computer. | 离线. 更改已保存在本机. |
 | Sync tooltip, pending | 3 changes waiting to sync | 3 项更改等待同步 |
+| Sync tooltip, offline and pending | Offline. 3 changes waiting to sync. | 离线. 3 项更改等待同步. |
 | Sync error toast | Couldn't save "Buy milk" | 无法保存 "Buy milk" |
 | Sync error detail | Todoist rejected the change. Your task shows the version on the server. | Todoist 拒绝了这项更改. 任务已恢复为服务器上的版本. |
 | Login title / body | Welcome to Tick / Paste your Todoist API token to sign in. | 欢迎使用 Tick / 粘贴你的 Todoist API 令牌以登录. |
@@ -2014,10 +2027,10 @@ checkbutton.tick-ring.p1,
 checkbutton.tick-ring.p2,
 checkbutton.tick-ring.p3 { --tick-ring-rest: color-mix(in srgb, var(--tick-ring) 12%, transparent); }
 checkbutton.tick-ring > check {
-  min-width: 18px;
-  min-height: 18px;
+  min-width: 12px;                          /* the icon fills the content box: 12 px check mark */
+  min-height: 12px;
   margin: 13px;
-  padding: 0;
+  padding: 3px;                             /* 13 + 3 + 12 + 3 + 13 = 44; the ring is the 18 px border box */
   border-radius: 9999px;
   border: none;
   background-image: none;
