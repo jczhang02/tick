@@ -2,19 +2,25 @@
 //!
 //! [`SyncEngine`] owns the HTTP client and its own [`Store`] connection. One
 //! [`SyncEngine::sync_once`] call:
-//! 1. walks the queue in order: queued quick adds go to `POST /api/v1/tasks/quick`, runs of
-//!    other commands go to `/sync` in batches of at most 100 together with the incremental
-//!    read (a full read when there is no `sync_token` yet),
+//! 1. walks the queue in order up to the first deferred command (undo window): queued quick
+//!    adds go to `POST /api/v1/tasks/quick`, runs of other commands go to `/sync` in batches
+//!    of at most 100 commands and [`MAX_BATCH_BYTES`] form-encoded, together with the
+//!    incremental read (a full read when there is no `sync_token` yet),
 //! 2. applies each response (see [`Store::apply_sync_response`]): acknowledged commands
-//!    leave the queue, `temp_id_mapping` is applied to still-queued commands, terminal
-//!    command errors are dropped and recorded, local changes are reset to server state and
-//!    the remaining queue is replayed on top ("server wins"),
-//! 3. reports changes and status over an `async-channel`.
+//!    leave the queue, `temp_id_mapping` is applied to still-queued commands and remembered
+//!    for commands enqueued later, terminal command errors are dropped and recorded, local
+//!    changes are reset to server state and the remaining queue is replayed on top ("server
+//!    wins"),
+//! 3. reports changes (including `id_map`) and status over an `async-channel`.
 //!
 //! Transient failures (`429`, `5xx`, retryable command errors) return
 //! [`EngineError::Transient`] with the server's `retry_after`; network failures mark the
-//! engine offline and keep the queue. [`Engine::spawn`] runs the loop on a tokio runtime in
-//! a background thread with the cadence from `SPEC.md`.
+//! engine offline and keep the queue. A command that keeps failing is dropped after
+//! [`MAX_ATTEMPTS`] answered attempts. When the server refuses a whole `/sync` request
+//! (`400`/`403`/`413`), the engine checks that a request without commands passes, then
+//! bisects the batch and drops the one command that is refused on its own. [`Engine::spawn`]
+//! runs the loop on a tokio runtime in a background thread with the cadence from `SPEC.md`;
+//! inside a backoff window no request of any kind goes out.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -23,10 +29,66 @@ use serde_json::Value;
 
 use crate::api::{ApiError, Client, RESOURCE_TYPES};
 use crate::command::QUICK_ADD;
-use crate::store::{Changes, Clock, Kind, QueuedCommand, Store, StoreError};
+use crate::store::{Changes, Clock, Kind, MAX_ATTEMPTS, QueuedCommand, Store, StoreError, wall_ms};
 
 /// Maximum commands per `/sync` request (`docs/api/pages/request-limits.md`).
 pub const MAX_BATCH: usize = 100;
+
+/// Budget for the form-encoded `commands` field of one `/sync` request. The documented limit
+/// is 1 MiB for the whole request body (`docs/api/pages/request-limits.md`); the rest of the
+/// body (`sync_token`, `resource_types`) is small.
+pub const MAX_BATCH_BYTES: usize = 900 * 1024;
+
+/// Length of `s` once `application/x-www-form-urlencoded` (what `reqwest` sends): unreserved
+/// bytes and the space (`+`) stay one byte, everything else becomes `%XX`.
+fn form_encoded_len(s: &str) -> usize {
+    s.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || matches!(b, b'*' | b'-' | b'.' | b'_' | b' ') {
+                1
+            } else {
+                3
+            }
+        })
+        .sum()
+}
+
+/// The next `/sync` batch: a prefix of the queue up to the first quick add or deferred
+/// command, at most `cap` commands and [`MAX_BATCH_BYTES`] encoded (always at least one
+/// command, so an oversized one is sent alone and rejected on its own).
+fn next_batch(queue: &[QueuedCommand], now_ms: i64, cap: usize) -> Vec<QueuedCommand> {
+    let mut out = Vec::new();
+    // `[` and `]`.
+    let mut bytes = 6;
+    for q in queue {
+        if out.len() >= cap.min(MAX_BATCH) || q.command.kind == QUICK_ADD || !q.is_due(now_ms) {
+            break;
+        }
+        let json = serde_json::to_string(&q.command).unwrap_or_default();
+        // Plus the separating comma.
+        let len = form_encoded_len(&json) + 3;
+        if !out.is_empty() && bytes + len > MAX_BATCH_BYTES {
+            break;
+        }
+        bytes += len;
+        out.push(q.clone());
+    }
+    out
+}
+
+/// Whether the server refused a request as a whole in a way that resending it unchanged
+/// cannot fix (`400`, `403`, `413`, ...). Transient (`429`, `5xx`), network and `401` errors
+/// are handled elsewhere.
+fn rejects_request(e: &ApiError) -> bool {
+    matches!(
+        e,
+        ApiError::Forbidden(_)
+            | ApiError::Request {
+                status: 400 | 413 | 414 | 422,
+                ..
+            }
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnState {
@@ -249,50 +311,84 @@ impl SyncEngine {
     async fn sync_inner(&mut self) -> Result<SyncReport, EngineError> {
         let mut report = SyncReport::default();
         let mut read_done = false;
-        // Bound the loop: every iteration either removes commands from the queue or ends.
-        let mut guard = 0;
-        loop {
-            guard += 1;
+        // Prefix size cap for the next `/sync` batch. Halved when the server rejects a whole
+        // request, doubled again after a request goes through.
+        let mut cap = MAX_BATCH;
+        // Whether a command-less request was tried after a request-level rejection.
+        let mut read_checked = false;
+        // Every iteration settles at least one command, halves `cap` or ends the cycle.
+        // Halvings are bounded by log2(MAX_BATCH) plus the doublings, which follow
+        // successes, so the bound is computed once from the initial queue length.
+        let limit = 2 * self.store.pending_count()? + 2 * MAX_BATCH.ilog2() as usize + 4;
+        for _ in 0..limit {
+            let now_ms = wall_ms();
             let queue = self.store.pending_commands()?;
             let Some(first) = queue.first() else { break };
-            if guard > queue.len() + 4 {
+            if !first.is_due(now_ms) {
+                // Deferred (undo window): keep the order, send nothing behind it yet.
                 break;
             }
             if first.command.kind == QUICK_ADD {
                 self.push_quick_add(first.clone(), &mut report).await?;
                 continue;
             }
-            let batch: Vec<QueuedCommand> = queue
-                .iter()
-                .take_while(|q| q.command.kind != QUICK_ADD)
-                .take(MAX_BATCH)
-                .cloned()
-                .collect();
-            let before = queue.len();
-            let retry = self.sync_request(&batch, &mut report).await?;
-            read_done = true;
-            if let Some(e) = retry {
-                return Err(e);
-            }
-            if self.store.pending_count()? >= before {
-                // The server did not settle any command (no sync_status entries); stop
-                // instead of spinning. They are sent again next cycle with the same uuids.
-                break;
+            let batch = next_batch(&queue, now_ms, cap);
+            match self.sync_request(&batch, &mut report).await {
+                Ok((settled, retry)) => {
+                    read_done = true;
+                    if let Some(e) = retry {
+                        return Err(e);
+                    }
+                    if settled == 0 {
+                        // The server did not settle any command (no sync_status entries);
+                        // stop instead of spinning. They are sent again next cycle with the
+                        // same uuids.
+                        break;
+                    }
+                    cap = (cap * 2).min(MAX_BATCH);
+                }
+                Err(EngineError::Api(e)) if rejects_request(&e) => {
+                    // The server refused the whole request (400/403/413, not a per-command
+                    // error). If a request without commands is refused too, no command is to
+                    // blame: keep the queue and let the caller back off.
+                    if !read_checked {
+                        read_checked = true;
+                        if let (_, Some(retry)) = self.sync_request(&[], &mut report).await? {
+                            return Err(retry);
+                        }
+                        read_done = true;
+                    }
+                    if batch.len() > 1 {
+                        // Bisect: send the first half (a prefix keeps the queue order).
+                        cap = batch.len() / 2;
+                        continue;
+                    }
+                    // One command that the server refuses on its own: drop it, roll back
+                    // its local effect and let the rest of the queue through.
+                    let q = &batch[0];
+                    let msg = format!("{} failed: {e}", q.command.kind);
+                    let changes = self.store.fail_command(q, &msg, None)?;
+                    report.failed.push(msg);
+                    self.emit_changes(&changes);
+                    report.changes.merge(changes);
+                }
+                Err(e) => return Err(e),
             }
         }
-        if !read_done && let Some(e) = self.sync_request(&[], &mut report).await? {
+        if !read_done && let (_, Some(e)) = self.sync_request(&[], &mut report).await? {
             return Err(e);
         }
         Ok(report)
     }
 
-    /// One `/sync` request. Returns `Some(error)` when commands failed with a retryable
-    /// error (their effect stays queued).
+    /// One `/sync` request. Returns how many sent commands were settled (acknowledged or
+    /// dropped) and `Some(error)` when commands failed with a retryable error (their effect
+    /// stays queued).
     async fn sync_request(
         &mut self,
         batch: &[QueuedCommand],
         report: &mut SyncReport,
-    ) -> Result<Option<EngineError>, EngineError> {
+    ) -> Result<(usize, Option<EngineError>), EngineError> {
         let token = self.store.sync_token()?.unwrap_or_else(|| "*".to_owned());
         let commands: Vec<_> = batch.iter().map(|q| q.command.clone()).collect();
         let resp = self.client.sync(&token, RESOURCE_TYPES, &commands).await?;
@@ -300,6 +396,7 @@ impl SyncEngine {
         report.full_sync |= resp.full_sync;
         let applied = self.store.apply_sync_response(batch, &resp)?;
         report.acknowledged += applied.acknowledged;
+        let settled = applied.acknowledged + applied.failed.len();
         for (q, e) in &applied.failed {
             report
                 .failed
@@ -308,12 +405,15 @@ impl SyncEngine {
         self.emit_changes(&applied.changes);
         report.changes.merge(applied.changes);
         if let Some((_, e)) = applied.retry.first() {
-            return Ok(Some(EngineError::Transient {
-                retry_after: e.retry_after(),
-                message: e.message(),
-            }));
+            return Ok((
+                settled,
+                Some(EngineError::Transient {
+                    retry_after: e.retry_after(),
+                    message: e.message(),
+                }),
+            ));
         }
-        Ok(None)
+        Ok((settled, None))
     }
 
     async fn push_quick_add(
@@ -335,22 +435,41 @@ impl SyncEngine {
                 report.changes.merge(changes);
                 Ok(())
             }
-            Err(e) if e.is_transient() => {
-                let _ = self.store.note_attempt(&q.command.uuid, &e.to_string());
-                Err(e.into())
-            }
+            // Offline: keep it; going offline is not an attempt.
+            Err(e @ ApiError::Network(_)) => Err(e.into()),
             Err(ApiError::Unauthorized) => Err(ApiError::Unauthorized.into()),
+            Err(e) if rejects_request(&e) => {
+                // Rejected for good (400, 403, too large): drop it so it does not block the
+                // rest of the queue. The text stays visible in the failed list.
+                self.drop_quick_add(&q, format!("quick add failed: {e}"), report)
+            }
             Err(e) => {
-                // Rejected for good (400, 403, an unreadable response, ...): drop it so it
-                // does not block the rest of the queue.
-                let msg = format!("quick add failed: {e}");
-                let changes = self.store.fail_command(&q, &msg, None)?;
-                report.failed.push(msg);
-                self.emit_changes(&changes);
-                report.changes.merge(changes);
-                Ok(())
+                // 429, 5xx, an unreadable answer (for example a captive portal page) or
+                // another 4xx: retry later, but not forever.
+                if q.attempts + 1 >= MAX_ATTEMPTS {
+                    let msg = format!("quick add failed after {MAX_ATTEMPTS} attempts: {e}");
+                    return self.drop_quick_add(&q, msg, report);
+                }
+                let _ = self.store.note_attempt(&q.command.uuid, &e.to_string());
+                Err(EngineError::Transient {
+                    retry_after: e.retry_after(),
+                    message: e.to_string(),
+                })
             }
         }
+    }
+
+    fn drop_quick_add(
+        &mut self,
+        q: &QueuedCommand,
+        msg: String,
+        report: &mut SyncReport,
+    ) -> Result<(), EngineError> {
+        let changes = self.store.fail_command(q, &msg, None)?;
+        report.failed.push(msg);
+        self.emit_changes(&changes);
+        report.changes.merge(changes);
+        Ok(())
     }
 
     /// Run [`SyncEngine::sync_once`], waiting and retrying after transient errors
@@ -452,7 +571,11 @@ impl SyncEngine {
         let mut all = Changes::default();
         for g in crate::filter::parse(query) {
             if let crate::filter::Group::Unsupported { text, .. } = g {
-                let items = self.client.tasks_filter_all(&text).await?;
+                let items = self
+                    .client
+                    .tasks_filter_all(&text)
+                    .await
+                    .map_err(|e| self.fail(e.into()))?;
                 let changes = self.store.cache_filter_results(&text, &items)?;
                 self.emit(EngineEvent::FilterLoaded {
                     query: text.clone(),
@@ -579,6 +702,48 @@ impl Engine {
     }
 }
 
+/// A request besides syncing that also talks to the API.
+#[derive(Debug, Clone, PartialEq)]
+enum SideRequest {
+    Completed { restart: bool },
+    Filter(String),
+}
+
+async fn run_side(engine: &mut SyncEngine, req: &SideRequest) -> Result<(), EngineError> {
+    match req {
+        SideRequest::Completed { restart } => engine.fetch_completed(*restart).await.map(|_| ()),
+        SideRequest::Filter(q) => engine.fetch_filter(q).await.map(|_| ()),
+    }
+}
+
+/// Backoff state of the background loop.
+struct Backoff {
+    attempt: u32,
+    /// No request starts before this instant, whatever triggers it, and the server's
+    /// `retry_after` is never shortened.
+    not_before: Option<tokio::time::Instant>,
+}
+
+impl Backoff {
+    fn active(&self) -> Option<tokio::time::Instant> {
+        self.not_before
+            .filter(|nb| tokio::time::Instant::now() < *nb)
+    }
+    fn reset(&mut self) {
+        self.attempt = 0;
+        self.not_before = None;
+    }
+    /// Start (or extend) a backoff window after `e`; returns its end.
+    fn after(&mut self, e: &EngineError) -> tokio::time::Instant {
+        self.attempt += 1;
+        let at =
+            tokio::time::Instant::now() + backoff_delay(e, self.attempt, Duration::from_secs(2));
+        let at = self.not_before.map_or(at, |nb| nb.max(at));
+        self.not_before = Some(at);
+        at
+    }
+}
+
 async fn run(
     config: EngineConfig,
     store: Store,
@@ -589,15 +754,18 @@ async fn run(
     let client = Client::new(config.api_base.clone(), config.token.clone());
     let mut engine = SyncEngine::new(store, client).with_events(events.clone());
     let mut foreground = true;
-    let mut attempt = 0u32;
+    let mut backoff = Backoff {
+        attempt: 0,
+        not_before: None,
+    };
     // When the next periodic sync is due (the first one right away).
     let mut next_sync = Instant::now();
-    // Backoff after 429/5xx: no sync starts before this instant, whatever triggers it, and
-    // the server's `retry_after` is never shortened.
-    let mut not_before: Option<Instant> = None;
+    // History/filter requests that arrived inside a backoff window; run when it ends.
+    let mut deferred: Vec<SideRequest> = Vec::new();
     loop {
         let wait = next_sync.saturating_duration_since(Instant::now());
         let mut want_sync = false;
+        let mut side = None;
         match tokio::time::timeout(wait, rx.recv()).await {
             Err(_) => want_sync = true, // timer
             Ok(Err(_)) => return,       // all handles dropped
@@ -612,20 +780,32 @@ async fn run(
                 }
             }
             Ok(Ok(Request::LoadCompleted { restart })) => {
-                if let Err(e) = engine.fetch_completed(restart).await {
-                    let _ = events.try_send(EngineEvent::Error(e.to_string()));
-                }
+                side = Some(SideRequest::Completed { restart });
             }
-            Ok(Ok(Request::FetchFilter(q))) => {
-                if let Err(e) = engine.fetch_filter(&q).await {
-                    let _ = events.try_send(EngineEvent::Error(e.to_string()));
-                }
-            }
+            Ok(Ok(Request::FetchFilter(q))) => side = Some(SideRequest::Filter(q)),
             Ok(Ok(Request::SetToken(t))) => {
                 engine.set_client(Client::new(config.api_base.clone(), t));
-                not_before = None;
+                backoff.reset();
                 want_sync = true;
             }
+        }
+        if let Some(req) = side {
+            if engine.status().state == ConnState::Unauthorized {
+                let e = EngineError::Api(ApiError::Unauthorized);
+                let _ = events.try_send(EngineEvent::Error(e.to_string()));
+            } else if let Some(nb) = backoff.active() {
+                // Inside a 429/5xx window: run it when the window ends.
+                if !deferred.contains(&req) {
+                    deferred.push(req);
+                }
+                next_sync = next_sync.min(nb);
+            } else if let Err(e) = run_side(&mut engine, &req).await {
+                if e.is_transient() && !matches!(e, EngineError::Api(ApiError::Network(_))) {
+                    next_sync = next_sync.max(backoff.after(&e));
+                }
+                let _ = events.try_send(EngineEvent::Error(e.to_string()));
+            }
+            continue;
         }
         if !want_sync {
             continue;
@@ -636,9 +816,7 @@ async fn run(
             config.background_interval
         };
         let now = Instant::now();
-        if let Some(nb) = not_before
-            && now < nb
-        {
+        if let Some(nb) = backoff.active() {
             next_sync = nb;
             continue;
         }
@@ -646,23 +824,45 @@ async fn run(
             next_sync = now + interval;
             continue;
         }
+        // The window is over: first the requests that waited for it.
+        let mut limited = false;
+        for req in std::mem::take(&mut deferred) {
+            if limited {
+                deferred.push(req);
+                continue;
+            }
+            if let Err(e) = run_side(&mut engine, &req).await {
+                if e.is_transient() && !matches!(e, EngineError::Api(ApiError::Network(_))) {
+                    next_sync = backoff.after(&e);
+                    limited = true;
+                    deferred.push(req);
+                    continue;
+                }
+                let _ = events.try_send(EngineEvent::Error(e.to_string()));
+            }
+        }
+        if limited {
+            continue;
+        }
         match engine.sync_once().await {
             Ok(_) => {
-                attempt = 0;
-                not_before = None;
+                backoff.reset();
                 next_sync = Instant::now() + interval;
             }
             Err(EngineError::Api(ApiError::Network(_))) => {
                 // Offline: retry periodically; a user action may try earlier.
                 next_sync = Instant::now() + interval.min(Duration::from_secs(30));
             }
-            Err(e) if e.is_transient() => {
-                attempt += 1;
-                let delay = backoff_delay(&e, attempt, Duration::from_secs(2));
-                not_before = Some(Instant::now() + delay);
-                next_sync = Instant::now() + delay;
+            Err(EngineError::Api(ApiError::Unauthorized)) => next_sync = Instant::now() + interval,
+            Err(e) => {
+                // 429/5xx, and also errors that resending cannot fix right away (a read the
+                // server refuses, a local database error): back off instead of hammering.
+                next_sync = backoff.after(&e);
             }
-            Err(_) => next_sync = Instant::now() + interval,
+        }
+        // Wake up when a deferred command (undo window) becomes due.
+        if let Ok(Some(due)) = engine.store().next_deferred_due() {
+            next_sync = next_sync.min(Instant::now() + due + Duration::from_millis(20));
         }
     }
 }
