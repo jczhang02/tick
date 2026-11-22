@@ -462,7 +462,10 @@ async fn chinese(scheme: ColorScheme) {
     input.scroll(16).await.unwrap();
     shoot(&s, &name("upcoming-week")).await;
     input.move_to(x, y).await.unwrap();
-    input.scroll(14).await.unwrap();
+    input.scroll(7).await.unwrap();
+    shoot(&s, &name("upcoming-week-mid")).await;
+    input.move_to(x, y).await.unwrap();
+    input.scroll(7).await.unwrap();
     shoot(&s, &name("upcoming-week-end")).await;
     app::open_view(&s, &window, "Work").await;
     wait_row(&window, "Book the offsite venue").await;
