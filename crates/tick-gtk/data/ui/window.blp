@@ -1,0 +1,19 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $TickWindow: Adw.ApplicationWindow {
+  title: _("Tick");
+  default-width: 900;
+  default-height: 640;
+
+  content: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {}
+
+    content: Adw.StatusPage {
+      icon-name: "checkbox-checked-symbolic";
+      title: _("No Tasks Yet");
+      description: _("Sync is not implemented yet.");
+    };
+  };
+}

@@ -1,0 +1,35 @@
+# Tick task runner
+
+default: check
+
+# fmt, clippy, unit and integration tests
+check:
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo test --workspace --exclude tick-e2e
+
+# E2E tests against the real app in headless mutter
+e2e:
+    cargo build -p tick-gtk
+    cargo test -p tick-e2e
+
+# Design-review screenshots into target/screenshots/
+screenshots:
+    cargo build -p tick-gtk
+    TICK_SCREENSHOTS=1 cargo test -p tick-e2e screenshots -- --nocapture
+
+# Run against the real Todoist API
+run:
+    cargo run -p tick-gtk
+
+# Run against a seeded fake server
+run-fake:
+    cargo run -p tick-fake-server -- --seed demo --launch
+
+# Install release build, desktop file and icon into ~/.local
+install:
+    cargo build --release -p tick-gtk
+    install -Dm755 target/release/tick ~/.local/bin/tick
+    install -Dm644 crates/tick-gtk/data/dev.chengrui.Tick.desktop ~/.local/share/applications/dev.chengrui.Tick.desktop
+    install -Dm644 crates/tick-gtk/data/icons/dev.chengrui.Tick.svg ~/.local/share/icons/hicolor/scalable/apps/dev.chengrui.Tick.svg
+    install -Dm644 crates/tick-gtk/data/icons/dev.chengrui.Tick-symbolic.svg ~/.local/share/icons/hicolor/symbolic/apps/dev.chengrui.Tick-symbolic.svg

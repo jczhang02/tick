@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      CARGO_TERM_COLOR: always
+      TICK_STARTUP_BUDGET_MS: "1500"
+      TICK_E2E_JOBS: "2"
+    steps:
+      - name: Install system packages
+        run: |
+          pacman -Syu --noconfirm --needed git base-devel rustup just gtk4 libadwaita \
+            blueprint-compiler mutter at-spi2-core dbus mesa sqlite gettext \
+            noto-fonts noto-fonts-cjk
+          rustup default stable
+          rustup component add rustfmt clippy
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: just check
+      - name: E2E
+        run: just e2e
+      - name: Screenshots
+        if: always()
+        run: just screenshots || true
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: target/screenshots/
+          if-no-files-found: ignore
