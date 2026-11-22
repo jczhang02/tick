@@ -23,10 +23,11 @@ pub enum TokenError {
 
 /// Token from `TICK_TOKEN`, when set and non-empty.
 pub fn env_token() -> Option<String> {
-    std::env::var("TICK_TOKEN")
-        .ok()
-        .map(|t| t.trim().to_owned())
-        .filter(|t| !t.is_empty())
+    clean(std::env::var("TICK_TOKEN").ok())
+}
+
+fn clean(t: Option<String>) -> Option<String> {
+    t.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty())
 }
 
 /// Load the token: `TICK_TOKEN` first, then the keyring.
@@ -70,4 +71,42 @@ pub async fn delete() -> Result<(), TokenError> {
     let keyring = oo7::Keyring::new().await?;
     keyring.delete(&attributes()).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_override_is_trimmed() {
+        assert_eq!(clean(Some("  abc \n".into())).as_deref(), Some("abc"));
+        assert_eq!(clean(Some("   ".into())), None);
+        assert_eq!(clean(None), None);
+    }
+
+    /// The keyring code path against oo7's file backend (no Secret Service needed).
+    #[tokio::test]
+    async fn store_and_load_with_a_file_keyring() {
+        let dir = tempfile::tempdir().unwrap();
+        let keyring = oo7::Keyring::sandboxed_with_path(
+            dir.path().join("test.keyring"),
+            oo7::Secret::random().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(load_from(&keyring).await.unwrap(), None);
+        store_in(&keyring, " first-token ").await.unwrap();
+        assert_eq!(
+            load_from(&keyring).await.unwrap().as_deref(),
+            Some("first-token")
+        );
+        store_in(&keyring, "second-token").await.unwrap();
+        assert_eq!(
+            load_from(&keyring).await.unwrap().as_deref(),
+            Some("second-token")
+        );
+        assert_eq!(keyring.search_items(&attributes()).await.unwrap().len(), 1);
+        keyring.delete(&attributes()).await.unwrap();
+        assert_eq!(load_from(&keyring).await.unwrap(), None);
+    }
 }

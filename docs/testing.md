@@ -65,6 +65,23 @@ The fake server and the client are written from the same docs, so a green E2E su
 wrong about real Todoist. The live smoke tests are the only check against reality. Model the fake
 on `docs/api/` (OpenAPI spec and doc pages), not on the client's assumptions.
 
+Control endpoints (JSON bodies):
+
+| Endpoint | Effect |
+|---|---|
+| `POST /__test/seed` | `{"preset": "demo" \| "empty" \| "bulk", "count": N}` or a fixture `{"token"?, "now"?, "user"?, "projects": [...], "items": [...], ..., "collaborator_states": [...], "completed": [...]}` (missing fields get documented defaults) |
+| `GET /__test/state` | the whole account as JSON (including deleted objects and completion records) |
+| `GET /__test/requests`, `DELETE /__test/requests` | request log (method, path, query, decoded body, status) |
+| `POST /__test/fail` | inject one failure or a list: `{"kind": "offline"}` / `{"kind": "online"}` (API connections are dropped), `{"kind": "status", "status": 429, "retry_after": 2, "count": 1, "path"?}`, `{"kind": "error_after_commit", "status": 503}` (commands run, the response is an error), `{"kind": "command_error", "command_type": "item_add", "args_contain"?, "error"?}` |
+| `DELETE /__test/fail` | clear injected failures and go online |
+| `POST /__test/reset` | empty account (token and clock kept) |
+| `POST /__test/now` | `{"now": "<RFC 3339>"}` fixes the server clock (`null` = system clock) |
+
+The binary: `tick-fake-server [--port P] [--seed demo|empty|bulk:N] [--token T] [--launch]`
+(default token `test-token`). `--launch` starts `target/debug/tick` (or `$TICK_BIN`) with
+`TICK_API_BASE` and `TICK_TOKEN` set. The server honors `TICK_NOW` for its clock, and the
+demo seed places due dates relative to it.
+
 ## Startup budget
 
 The startup test measures from process start to the first frame that shows cached tasks

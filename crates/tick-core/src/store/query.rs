@@ -290,16 +290,22 @@ impl Store {
     /// Today: overdue tasks plus tasks due today (Todoist includes overdue in Today).
     pub fn today(&self) -> Result<TodayView> {
         let now = self.now();
-        let today = now.today().format("%Y-%m-%d").to_string();
+        // `due_day` was computed with the offset of the clock at write time; fixed-zone
+        // dues can move by a day if the offset changed since, so prefilter one day wider
+        // and decide on the due date resolved now.
+        let limit = (now.today() + Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
         let mut list = tasks(
             &self.conn,
             &format!(
                 "SELECT raw, local_pending FROM items
                  WHERE {ACTIVE} AND due_day IS NOT NULL AND due_day <= ?1"
             ),
-            [&today],
+            [&limit],
             &now,
         )?;
+        list.retain(|t| t.due.is_some_and(|d| d.date <= now.today()));
         list.sort_by(by_due);
         let (overdue, today): (Vec<_>, Vec<_>) = list
             .into_iter()
@@ -318,7 +324,8 @@ impl Store {
                 "SELECT raw, local_pending FROM items
                  WHERE {ACTIVE} AND due_day IS NOT NULL AND due_day < ?1"
             ),
-            [end.format("%Y-%m-%d").to_string()],
+            // One day wider, see `today`.
+            [(end + Duration::days(1)).format("%Y-%m-%d").to_string()],
             &now,
         )?;
         list.sort_by(by_due);
