@@ -10,7 +10,7 @@ use adw::prelude::*;
 use adw::subclass::prelude::*;
 use gtk::{gio, glib};
 use tick_core::engine::ConnState;
-use tick_core::store::{UNDO_DELAY, wall_ms};
+use tick_core::store::wall_ms;
 use tick_core::{Changes, Command, EngineEvent, EngineHandle, Kind, Store, SyncStatus};
 
 use crate::i18n::{fill, gettext, ncount};
@@ -31,12 +31,24 @@ const EXIT: Duration = Duration::from_millis(250);
 const SEQUENCE_TIMEOUT: Duration = Duration::from_millis(1500);
 /// How long a change queued while online may wait before the sync indicator shows it.
 const PENDING_GRACE: Duration = Duration::from_secs(2);
+/// Longest time a completion waits for its "Undo" toast to go away before it is sent
+/// anyway (libadwaita pauses a toast's timeout while the pointer is over it). After that,
+/// Undo reopens the task with `item_uncomplete`.
+const UNDO_HOLD: Duration = Duration::from_secs(60);
 
 /// Completions the visible "Undo" toast can take back.
 pub struct UndoGroup {
     toast: adw::Toast,
-    /// (task id, queued command uuid)
-    commands: Vec<(String, String)>,
+    commands: Vec<UndoEntry>,
+}
+
+/// One completion of an [`UndoGroup`].
+pub struct UndoEntry {
+    /// The task id (remapped when the server replaces a temp id).
+    id: String,
+    /// The queued `item_close`.
+    uuid: String,
+    recurring: bool,
 }
 
 mod imp {
@@ -576,17 +588,7 @@ impl TickWindow {
     }
 
     fn on_changes(&self, c: &Changes) {
-        if !c.id_map.is_empty() {
-            let mut ui = self.imp().ui.borrow_mut();
-            let ui = &mut *ui;
-            for (temp, real) in &c.id_map {
-                for set in [&mut ui.completing, &mut ui.fading] {
-                    if set.remove(temp) {
-                        set.insert(real.clone());
-                    }
-                }
-            }
-        }
+        self.remap_ids(&c.id_map);
         let only_queue = !c.full && c.kinds.iter().all(|k| *k == Kind::Queue);
         if !only_queue {
             self.refresh_rows_with(&c.id_map);
@@ -1040,6 +1042,7 @@ impl TickWindow {
     }
 
     fn after_local_change(&self, c: &Changes) {
+        self.remap_ids(&c.id_map);
         self.refresh_rows_with(&c.id_map);
         self.refresh_sidebar();
         self.refresh_sync();
@@ -1048,55 +1051,112 @@ impl TickWindow {
         }
     }
 
+    /// The id a task has now: a temp id the server already replaced resolves to the real
+    /// one (a hold timer or the Undo group may still hold the temp id).
+    fn live_id(&self, id: &str) -> String {
+        self.store()
+            .resolve_id(id)
+            .unwrap_or_else(|_| id.to_owned())
+    }
+
+    /// Follow temp ids the server replaced in the completion state and the Undo group.
+    fn remap_ids(&self, id_map: &[(String, String)]) {
+        if id_map.is_empty() {
+            return;
+        }
+        let imp = self.imp();
+        {
+            let mut ui = imp.ui.borrow_mut();
+            let ui = &mut *ui;
+            for (temp, real) in id_map {
+                for set in [&mut ui.completing, &mut ui.fading] {
+                    if set.remove(temp) {
+                        set.insert(real.clone());
+                    }
+                }
+            }
+        }
+        if let Some(g) = imp.undo.borrow_mut().as_mut() {
+            for entry in &mut g.commands {
+                if let Some((_, real)) = id_map.iter().find(|(t, _)| *t == entry.id) {
+                    entry.id = real.clone();
+                }
+            }
+        }
+    }
+
+    /// The current id of a task in the completion hold, or `None` when it left the hold
+    /// (unchecked). `id` may be a temp id the server replaced during the hold.
+    fn completing_id(&self, id: &str) -> Option<String> {
+        let real = self.live_id(id);
+        if real != id {
+            self.remap_ids(&[(id.to_owned(), real.clone())]);
+        }
+        self.imp()
+            .ui
+            .borrow()
+            .completing
+            .contains(&real)
+            .then_some(real)
+    }
+
     /// The ring was checked (or E pressed): hold, fade, then queue the close with an Undo
     /// window (4.4, 4.12). Recurring tasks are queued at once and stay as completed-pending.
     pub fn begin_complete(&self, id: &str) {
-        let Some(task) = self.store().task(id).ok().flatten() else {
+        let id = self.live_id(id);
+        let Some(task) = self.store().task(&id).ok().flatten() else {
             return;
         };
-        if task.checked || self.imp().ui.borrow().completing.contains(id) {
+        if task.checked || self.imp().ui.borrow().completing.contains(&id) {
             // Nothing changes, but the ring was toggled: show the data again.
-            self.touch_task_row(id);
+            self.touch_task_row(&id);
             return;
         }
         let recurring = task.item.due.as_ref().is_some_and(|d| d.is_recurring);
         if recurring || (test_mode::enabled() && !test_mode::keep_hold()) {
             // Test mode skips the hold and the fade (5.3) so E2E timing is deterministic,
             // unless TICK_TEST_HOLD=1 asks for the real sequence.
-            self.finish_complete(id);
+            self.finish_complete(&id, recurring);
             return;
         }
-        self.imp().ui.borrow_mut().completing.insert(id.to_owned());
+        self.imp().ui.borrow_mut().completing.insert(id.clone());
         self.refresh_rows();
         let weak = self.downgrade();
-        let id = id.to_owned();
         glib::timeout_add_local_once(HOLD, move || {
             let Some(w) = weak.upgrade() else { return };
-            if !w.imp().ui.borrow().completing.contains(&id) {
+            // The task may have got its real id from the server during the hold.
+            let Some(id) = w.completing_id(&id) else {
                 return; // unchecked during the hold
-            }
+            };
             w.imp().ui.borrow_mut().fading.insert(id.clone());
             w.refresh_rows();
             let weak = w.downgrade();
             glib::timeout_add_local_once(EXIT, move || {
                 if let Some(w) = weak.upgrade()
-                    && w.imp().ui.borrow().completing.contains(&id)
+                    && let Some(id) = w.completing_id(&id)
                 {
-                    w.finish_complete(&id);
+                    w.finish_complete(&id, false);
                 }
             });
         });
     }
 
-    fn finish_complete(&self, id: &str) {
+    fn finish_complete(&self, id: &str, recurring: bool) {
         {
             let mut ui = self.imp().ui.borrow_mut();
             ui.completing.remove(id);
             ui.fading.remove(id);
         }
+        // Keyboard focus in the list stays in the list: without this, removing the focused
+        // row hands focus to the toast's Undo button, which also pauses the toast's timeout.
+        let imp = self.imp();
+        let focus_pos = gtk::prelude::GtkWindowExt::focus(self)
+            .filter(|f| f.is_ancestor(&*imp.task_list))
+            .map(|_| self.row_position(id).unwrap_or(0));
         let cmd = Command::item_close(id);
         let uuid = cmd.uuid.clone();
-        let result = self.store().enqueue_deferred(vec![cmd], UNDO_DELAY);
+        // Held back while the Undo toast shows (see `push_undo`).
+        let result = self.store().enqueue_deferred(vec![cmd], UNDO_HOLD);
         let changes = match result {
             Ok(c) => c,
             Err(e) => {
@@ -1106,10 +1166,20 @@ impl TickWindow {
             }
         };
         self.after_local_change(&changes);
-        self.push_undo(id, uuid);
+        if let Some(pos) = focus_pos {
+            self.focus_task_near(pos);
+        }
+        self.push_undo(UndoEntry {
+            id: id.to_owned(),
+            uuid,
+            recurring,
+        });
     }
 
-    fn push_undo(&self, id: &str, uuid: String) {
+    /// Show (or grow) the "Undo" toast. Every close it covers stays queued while it shows:
+    /// they are deferred by [`UNDO_HOLD`] again each time the group grows, and released
+    /// when the toast goes away without Undo.
+    fn push_undo(&self, entry: UndoEntry) {
         let imp = self.imp();
         let mut commands = imp
             .undo
@@ -1117,7 +1187,11 @@ impl TickWindow {
             .take()
             .map(|g| g.commands)
             .unwrap_or_default();
-        commands.push((id.to_owned(), uuid));
+        commands.push(entry);
+        let uuids: Vec<String> = commands.iter().map(|e| e.uuid.clone()).collect();
+        if let Err(e) = self.store().defer_queued(&uuids, UNDO_HOLD) {
+            eprintln!("tick: holding completions for Undo: {e}");
+        }
         let title = if commands.len() == 1 {
             gettext("Task completed")
         } else {
@@ -1139,9 +1213,17 @@ impl TickWindow {
         let weak = self.downgrade();
         toast.connect_dismissed(move |t| {
             let Some(w) = weak.upgrade() else { return };
-            let mut undo = w.imp().undo.borrow_mut();
-            if undo.as_ref().is_some_and(|g| &g.toast == t) {
-                *undo = None;
+            let group = {
+                let mut undo = w.imp().undo.borrow_mut();
+                if undo.as_ref().is_some_and(|g| &g.toast == t) {
+                    undo.take()
+                } else {
+                    None // replaced by a grown group, or undone
+                }
+            };
+            // Undo is no longer reachable: send the completions now.
+            if let Some(g) = group {
+                w.release(&g);
             }
         });
         imp.undo.replace(Some(UndoGroup {
@@ -1151,27 +1233,69 @@ impl TickWindow {
         self.show_toast(&toast);
     }
 
+    /// Let the completions of a group go to the server.
+    fn release(&self, group: &UndoGroup) {
+        let uuids: Vec<String> = group.commands.iter().map(|e| e.uuid.clone()).collect();
+        if let Err(e) = self.store().defer_queued(&uuids, Duration::ZERO) {
+            eprintln!("tick: releasing completions: {e}");
+        }
+        self.refresh_sync();
+        if let Some(e) = self.imp().engine.borrow().as_ref() {
+            e.sync_now();
+        }
+    }
+
     /// Undo the completions of the visible toast (its button or Ctrl+Z).
     fn undo(&self) {
         let Some(group) = self.imp().undo.take() else {
             return;
         };
+        group.toast.dismiss();
         let mut all = Changes::default();
-        for (_, uuid) in &group.commands {
-            match self.store().discard_queued(uuid) {
+        let mut reopen = Vec::new();
+        let mut lost = 0;
+        for entry in &group.commands {
+            match self.store().discard_queued(&entry.uuid) {
+                Ok(Some(c)) => all.merge(c),
+                // Already sent (the toast outlived UNDO_HOLD): reopen it on the server.
+                Ok(None) if !entry.recurring => {
+                    reopen.push(Command::item_uncomplete(&self.live_id(&entry.id)));
+                }
+                // A recurring task already moved to its next date; reopening would not move
+                // it back.
+                Ok(None) => lost += 1,
+                Err(e) => {
+                    eprintln!("tick: undo: {e}");
+                    lost += 1;
+                }
+            }
+        }
+        if !reopen.is_empty() {
+            match self.store().enqueue_many(reopen) {
                 Ok(c) => all.merge(c),
                 Err(e) => eprintln!("tick: undo: {e}"),
             }
         }
-        group.toast.dismiss();
         self.after_local_change(&all);
+        if lost > 0 {
+            let toast = adw::Toast::builder()
+                .title(ncount(
+                    "{n} task was already saved and could not be restored",
+                    "{n} tasks were already saved and could not be restored",
+                    lost,
+                ))
+                .timeout(5)
+                .build();
+            self.show_toast(&toast);
+        }
     }
 
     fn uncheck(&self, id: &str) {
+        let id = self.live_id(id);
         let cancelled = {
             let mut ui = self.imp().ui.borrow_mut();
-            ui.fading.remove(id);
-            ui.completing.remove(id)
+            ui.fading.remove(&id);
+            ui.completing.remove(&id)
         };
         if cancelled {
             self.refresh_rows();
@@ -1181,21 +1305,35 @@ impl TickWindow {
         let uuid = self.imp().undo.borrow().as_ref().and_then(|g| {
             g.commands
                 .iter()
-                .find(|(t, _)| t == id)
-                .map(|(_, u)| u.clone())
+                .find(|e| e.id == id)
+                .map(|e| e.uuid.clone())
         });
         match uuid {
             Some(uuid) => {
                 if let Some(g) = self.imp().undo.borrow_mut().as_mut() {
-                    g.commands.retain(|(t, _)| t != id);
+                    g.commands.retain(|e| e.id != id);
                 }
                 match self.store().discard_queued(&uuid) {
-                    Ok(c) => self.after_local_change(&c),
+                    Ok(Some(c)) => self.after_local_change(&c),
+                    Ok(None) => self.touch_task_row(&id),
                     Err(e) => eprintln!("tick: undo: {e}"),
                 }
             }
-            None => self.touch_task_row(id),
+            None => self.touch_task_row(&id),
         }
+    }
+
+    /// Position of task `id` in the task list.
+    fn row_position(&self, id: &str) -> Option<u32> {
+        let store = self.imp().rows.get()?;
+        (0..store.n_items()).find(|i| {
+            store
+                .item(*i)
+                .and_downcast::<TickRow>()
+                .and_then(|r| r.task_id())
+                .as_deref()
+                == Some(id)
+        })
     }
 
     /// Rebuild the row of task `id` from unchanged data (undo a ring toggle that had no
@@ -1443,15 +1581,25 @@ impl TickWindow {
     }
 
     fn focus_first_task_now(&self) {
+        self.focus_task_near(0);
+    }
+
+    /// Focus and select the first task row at or after position `from`, else the last one
+    /// before it.
+    fn focus_task_near(&self, from: u32) {
         let imp = self.imp();
         let Some(store) = imp.rows.get() else { return };
-        let first = (0..store.n_items()).find(|i| {
+        let is_task = |i: &u32| {
             store
                 .item(*i)
                 .and_downcast::<TickRow>()
                 .is_some_and(|r| matches!(&*r.row(), Row::Task(_)))
-        });
-        if let Some(pos) = first {
+        };
+        let n = store.n_items();
+        let found = (from.min(n)..n)
+            .find(is_task)
+            .or_else(|| (0..from.min(n)).rev().find(is_task));
+        if let Some(pos) = found {
             imp.task_list.scroll_to(
                 pos,
                 gtk::ListScrollFlags::FOCUS | gtk::ListScrollFlags::SELECT,

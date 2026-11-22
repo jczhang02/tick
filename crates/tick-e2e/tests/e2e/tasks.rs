@@ -429,3 +429,112 @@ async fn completion_hold_can_be_cancelled() {
         "only the second completion is sent: {closes:?}"
     );
 }
+
+/// The toast's Undo takes back every completion it counts, even one whose own 5 s are
+/// over: completions stay queued while the toast shows (4.12 "Undo (undoes all)").
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grouped_undo_restores_every_task() {
+    let (server, s, window) = start_in_inbox().await;
+    complete(&s, &window, "Read the article").await;
+    app::wait_tasks(&window, &["Call the dentist", "Renew passport"]).await;
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+    complete(&s, &window, "Call the dentist").await;
+    app::wait_tasks(&window, &["Renew passport"]).await;
+    window
+        .wait_for(
+            &Query::role(Role::Label).name("2 tasks completed").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    // Past the first completion's own 5 s: it must still be held back.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(app::commands_sent(&server, "item_close").is_empty());
+    let undo = toast_button(&window, "Undo").await;
+    s.click(&undo).await.unwrap();
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    assert!(app::commands_sent(&server, "item_close").is_empty());
+    let st = server.state();
+    assert_eq!(st.get("items", "i1").unwrap()["checked"], false);
+    assert_eq!(st.get("items", "i3").unwrap()["checked"], false);
+}
+
+/// Ctrl+Z is the toast's Undo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ctrl_z_undoes_a_completion() {
+    let (server, s, window) = start_in_inbox().await;
+    complete(&s, &window, "Renew passport").await;
+    app::wait_tasks(&window, &["Call the dentist", "Read the article"]).await;
+    toast_button(&window, "Undo").await;
+    s.chord(&[keysym::CONTROL_L, u32::from(b'z')])
+        .await
+        .unwrap();
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    window
+        .wait_gone(&Query::role(Role::Button).name("Undo").showing(), WAIT)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    assert!(app::commands_sent(&server, "item_close").is_empty());
+    assert_eq!(server.state().get("items", "i2").unwrap()["checked"], false);
+}
+
+/// A task completed right after quick add, while the add is still on its way (here held
+/// back by a 429): the server's real id arrives during the hold and the close still goes
+/// out, for the real id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn completing_a_task_that_is_still_being_added() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server)
+        .env("TICK_TEST_HOLD", "1")
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Inbox").await;
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    server.inject(tick_fake_server::Failure::Status {
+        status: 429,
+        retry_after: Some(1),
+        count: 1,
+        path: Some("/api/v1/tasks/quick".into()),
+        body_contains: None,
+    });
+    quick_add(&s, &window, "Zed").await;
+    complete(&s, &window, "Zed").await;
+    let closes = tick_e2e::poll(Duration::from_secs(20), "item_close", || async {
+        let c = app::commands_sent(&server, "item_close");
+        (!c.is_empty()).then_some(c)
+    })
+    .await
+    .unwrap();
+    let id = {
+        let st = server.state();
+        st.find("items", "content", "Zed").unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(closes.len(), 1, "{closes:?}");
+    assert_eq!(closes[0]["args"]["id"], id.as_str());
+    assert_eq!(server.state().get("items", &id).unwrap()["checked"], true);
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+}

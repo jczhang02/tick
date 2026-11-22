@@ -34,8 +34,13 @@
    command refused on its own; otherwise keep the queue and back off. Network failure: mark
    offline, keep the queue. Inside a backoff window no request goes out (history and filter
    requests wait for the window to end).
-   Completing or deleting a task is enqueued with a 5 s send delay (`Store::enqueue_deferred`),
-   so "Undo" can still discard it; commands behind it wait to keep the order.
+   Completing a task is enqueued with a send delay (`Store::enqueue_deferred`), so "Undo" can
+   still discard it; commands behind it wait to keep the order. The UI holds every completion
+   its visible "Undo" toast covers (`Store::defer_queued`, at most 60 s, renewed when the toast
+   grows) and releases them when the toast goes away. `Store::discard_queued` returns `None`
+   for a command that already left; Undo then queues `item_uncomplete`. A close discarded while
+   its request was on the wire is answered "ok" with no queue row left: the store queues
+   `item_uncomplete` for it (non-recurring tasks).
 6. Server wins on conflict: incremental read results overwrite local rows, then still-queued
    commands are re-applied on top.
 

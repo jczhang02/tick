@@ -217,6 +217,61 @@ fn enqueue_applies_optimistically_and_persists() {
 }
 
 #[test]
+fn discarding_a_sent_command_reports_it() {
+    let mut s = seeded();
+    let close = Command::item_close("a");
+    s.enqueue_deferred(vec![close.clone()], std::time::Duration::from_secs(60))
+        .unwrap();
+    assert!(s.next_deferred_due().unwrap().is_some());
+    // Deferring again moves the send time; zero makes it due at once.
+    assert_eq!(
+        s.defer_queued(std::slice::from_ref(&close.uuid), std::time::Duration::ZERO)
+            .unwrap(),
+        1
+    );
+    assert!(s.next_deferred_due().unwrap().is_none());
+    let sent = s.pending_commands().unwrap();
+    s.apply_sync_response(
+        &sent,
+        &resp(
+            json!({"sync_token": "t2", "sync_status": {close.uuid.clone(): "ok"},
+                     "items": [item("a", "inbox", "Buy milk", json!({"checked": true}))]}),
+        ),
+    )
+    .unwrap();
+    // The close is gone from the queue: discarding it is not an undo.
+    assert!(s.discard_queued(&close.uuid).unwrap().is_none());
+    assert_eq!(
+        s.defer_queued(&[close.uuid], std::time::Duration::ZERO)
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn close_discarded_in_flight_is_taken_back() {
+    let mut s = seeded();
+    let close = Command::item_close("a");
+    s.enqueue(close.clone()).unwrap();
+    let sent = s.pending_commands().unwrap();
+    // "Undo" while the request is on its way.
+    assert!(s.discard_queued(&close.uuid).unwrap().is_some());
+    s.apply_sync_response(
+        &sent,
+        &resp(
+            json!({"sync_token": "t2", "sync_status": {close.uuid.clone(): "ok"},
+                     "items": [item("a", "inbox", "Buy milk", json!({"checked": true}))]}),
+        ),
+    )
+    .unwrap();
+    let queued = s.pending_commands().unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].command.kind, "item_uncomplete");
+    assert_eq!(queued[0].command.args["id"], "a");
+    assert!(!s.task("a").unwrap().unwrap().checked);
+}
+
+#[test]
 fn sync_response_settles_queue_and_maps_temp_ids() {
     let mut s = seeded();
     let add = Command::item_add(json!({"content": "Draft", "project_id": "inbox"}));
