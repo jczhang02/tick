@@ -13,6 +13,7 @@ template $TickLoginPage: Adw.Bin {
 
     content: Gtk.ScrolledWindow {
       hscrollbar-policy: never;
+      focusable: false;
 
       child: Gtk.Box {
         orientation: vertical;
@@ -33,6 +34,10 @@ template $TickLoginPage: Adw.Bin {
               icon-name: "tick-app-symbolic";
               pixel-size: 96;
               accessible-role: presentation;
+
+              styles [
+                "dimmed",
+              ]
             }
 
             Gtk.Label {
@@ -61,6 +66,10 @@ template $TickLoginPage: Adw.Bin {
             Gtk.ListBox {
               margin-top: 24;
               selection-mode: none;
+
+              accessibility {
+                label: _("API Token");
+              }
 
               styles [
                 "boxed-list",

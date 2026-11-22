@@ -58,18 +58,28 @@ pub async fn task_list(window: &Node) -> Node {
 /// Clicks the sidebar row whose accessible name is `name` or starts with "`name`, ".
 pub async fn open_view(s: &Session, window: &Node, name: &str) {
     let list = sidebar(window).await;
-    let row = tick_e2e::poll(WAIT, &format!("sidebar row {name:?}"), || async {
+    let area = list.extents().await.unwrap();
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while tokio::time::Instant::now() < deadline {
         for n in list.find_all(&Query::role(Role::ListItem).showing()).await {
             let got = n.name().await.unwrap_or_default();
-            if got == name || got.starts_with(&format!("{name}, ")) {
-                return Some(n);
+            if got != name && !got.starts_with(&format!("{name}, ")) {
+                continue;
+            }
+            let r = n.extents().await.unwrap();
+            if r.y >= area.y && r.y + r.height <= area.y + area.height {
+                s.click(&n).await.unwrap();
+                return;
             }
         }
-        None
-    })
-    .await
-    .unwrap();
-    s.click(&row).await.unwrap();
+        // Not built or not fully visible yet: scroll the sidebar down a little.
+        let input = s.input().await.unwrap();
+        let (x, y) = area.center();
+        input.move_to(x, y).await.unwrap();
+        input.scroll(2).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    panic!("no sidebar row {name:?}:\n{}", list.dump().await);
 }
 
 /// Names of the task rows currently in the task list (the rows GTK has built).

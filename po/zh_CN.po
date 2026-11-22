@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: tick\n"
 "Report-Msgid-Bugs-To: https://github.com/jczhang02/tick/issues\n"
-"POT-Creation-Date: 2026-11-22 12:47-0800\n"
+"POT-Creation-Date: 2026-11-22 12:55-0800\n"
 "PO-Revision-Date: 2026-11-22 12:34-0800\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -18,45 +18,46 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: crates/tick-gtk/data/ui/login.blp:39
+#: crates/tick-gtk/data/ui/login.blp:44
 msgid "Welcome to Tick"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/login.blp:50
+#: crates/tick-gtk/data/ui/login.blp:55
 msgid "Paste your Todoist API token to sign in."
 msgstr ""
 
-#: crates/tick-gtk/data/ui/login.blp:70
+#: crates/tick-gtk/data/ui/login.blp:71 crates/tick-gtk/data/ui/login.blp:79
 msgid "API Token"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/login.blp:103 crates/tick-gtk/data/ui/login.blp:115
+#: crates/tick-gtk/data/ui/login.blp:112 crates/tick-gtk/data/ui/login.blp:124
 msgid "Log In"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/login.blp:122
+#: crates/tick-gtk/data/ui/login.blp:131
 msgid "Find your token in Todoist settings"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/login.blp:133
+#: crates/tick-gtk/data/ui/login.blp:142
 msgid "Your token is stored in the GNOME keyring."
 msgstr ""
 
 #: crates/tick-gtk/data/ui/quick_add.blp:9
-#: crates/tick-gtk/data/ui/quick_add.blp:72
-#: crates/tick-gtk/data/ui/window.blp:42 crates/tick-gtk/data/ui/window.blp:100
+#: crates/tick-gtk/data/ui/quick_add.blp:12
+#: crates/tick-gtk/data/ui/quick_add.blp:76
+#: crates/tick-gtk/data/ui/window.blp:42 crates/tick-gtk/data/ui/window.blp:101
 msgid "Add Task"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/quick_add.blp:21
+#: crates/tick-gtk/data/ui/quick_add.blp:25
 msgid "e.g. Call Mom tomorrow 6pm p2 #Family"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/quick_add.blp:31
+#: crates/tick-gtk/data/ui/quick_add.blp:35
 msgid "Task"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/quick_add.blp:62
+#: crates/tick-gtk/data/ui/quick_add.blp:66
 msgid "Cancel"
 msgstr ""
 
@@ -65,7 +66,7 @@ msgstr ""
 msgid "Tick"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:38 crates/tick-gtk/data/ui/window.blp:96
+#: crates/tick-gtk/data/ui/window.blp:38 crates/tick-gtk/data/ui/window.blp:97
 msgid "Add Task (Q)"
 msgstr ""
 
@@ -73,39 +74,39 @@ msgstr ""
 msgid "Main Menu"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:68
+#: crates/tick-gtk/data/ui/window.blp:69
 msgid "Views"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:76 crates/tick-gtk/src/format.rs:129
+#: crates/tick-gtk/data/ui/window.blp:77 crates/tick-gtk/src/format.rs:129
 #: crates/tick-gtk/src/rows.rs:746 crates/tick-gtk/src/rows.rs:775
 #: crates/tick-gtk/src/sidebar.rs:549
 msgid "Today"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:109
+#: crates/tick-gtk/data/ui/window.blp:114
 msgid "Sync Status"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:127
+#: crates/tick-gtk/data/ui/window.blp:133
 msgid "Tasks"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:143
-#: crates/tick-gtk/data/ui/window.blp:154
+#: crates/tick-gtk/data/ui/window.blp:149
+#: crates/tick-gtk/data/ui/window.blp:160
 msgid "Close Task (Esc)"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:147
-#: crates/tick-gtk/data/ui/window.blp:158
+#: crates/tick-gtk/data/ui/window.blp:153
+#: crates/tick-gtk/data/ui/window.blp:164
 msgid "Close Task"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:181
+#: crates/tick-gtk/data/ui/window.blp:187
 msgid "About Tick"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:185
+#: crates/tick-gtk/data/ui/window.blp:191
 msgid "Quit"
 msgstr ""
 

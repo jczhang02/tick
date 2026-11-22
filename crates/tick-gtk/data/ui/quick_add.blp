@@ -8,6 +8,10 @@ template $TickQuickAdd: Adw.Dialog {
   content-width: 560;
   title: _("Add Task");
 
+  accessibility {
+    label: _("Add Task");
+  }
+
   child: Gtk.Box {
     orientation: vertical;
     margin-start: 18;

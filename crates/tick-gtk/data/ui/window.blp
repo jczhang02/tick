@@ -58,6 +58,7 @@ template $TickWindow: Adw.ApplicationWindow {
 
               content: Gtk.ScrolledWindow {
                 hscrollbar-policy: never;
+                focusable: false;
 
                 child: Gtk.ListView sidebar_list {
                   styles [
@@ -105,6 +106,10 @@ template $TickWindow: Adw.ApplicationWindow {
                   Gtk.MenuButton sync_button {
                     visible: false;
 
+                    styles [
+                      "flat",
+                    ]
+
                     accessibility {
                       label: _("Sync Status");
                     }
@@ -113,6 +118,7 @@ template $TickWindow: Adw.ApplicationWindow {
 
                 content: Gtk.ScrolledWindow list_scroller {
                   hscrollbar-policy: never;
+                  focusable: false;
 
                   child: Adw.ClampScrollable {
                     maximum-size: 720;
