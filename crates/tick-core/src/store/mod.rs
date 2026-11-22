@@ -13,6 +13,7 @@
 
 mod apply;
 mod local;
+mod place;
 mod query;
 mod queue;
 mod schema;
@@ -26,6 +27,7 @@ use serde_json::Value;
 
 use crate::clock::{self, Now};
 
+pub use place::{DeleteCounts, TaskPlace};
 pub use query::*;
 pub use queue::{FailedCommand, MAX_ATTEMPTS, QueuedCommand, UNDO_DELAY, wall_ms};
 
