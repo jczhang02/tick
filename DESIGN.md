@@ -57,14 +57,14 @@ Four signature moves make Tick recognizable without costume:
 | # | Principle | What it means in Tick | Owner rule it implements |
 |---|---|---|---|
 | P1 | Content first | Task titles use full-contrast body text; everything else is secondary. No cards around tasks, no per-row icon buttons at rest. | Quiet (default) |
-| P2 | One accent | The GNOME system accent is used for focus rings, links, the selected day in the calendar, drop indicators and the suggested button. Never for selection backgrounds or decoration. | One accent (default) |
+| P2 | One accent | The GNOME system accent is used for focus rings, links, the selected day in the calendar, drop indicators and the suggested button. Text never sits on the raw `--accent-bg-color`: accent fills use `--accent-color` with `--tick-on-accent` text (2.4.4). Never for selection backgrounds or decoration. | One accent (default) |
 | P3 | Color means something | The only extra colors: three priority colors (fixed by SPEC), overdue red (shared with p1), today green, and user-chosen project colors. Each is justified in 2.4. | One accent (default) |
 | P4 | Native first | Standard libadwaita widgets, header bars, split views, dialogs, popovers. Tick restyles only what a hard rule requires. | Find a reference first (default) |
 | P5 | One floating surface | Popovers, menus, tooltips and toasts share one surface style (2.6). | One floating surface (hard) |
 | P6 | Designed dark mode | Every custom color has its own dark value tuned for contrast; floating surfaces get a faint light ring in dark mode where shadows vanish. | Dark mode (hard) |
-| P7 | AA everywhere | All text 4.5:1 (including secondary text and captions), all graphical state indicators 3:1, in both themes, on every background the text can sit on (hover and selected included). Tick raises libadwaita's secondary-text opacity to get there (2.4.2). | Contrast (hard) |
+| P7 | AA everywhere | All text 4.5:1 (including secondary text, captions and text on accent or destructive fills), all graphical state indicators 3:1, in both themes, on every background the text can sit on (hover, pressed and selected included). Tick raises libadwaita's secondary-text opacity (2.4.2) and re-fills suggested and destructive buttons (2.4.4) to get there. The only departures are listed in 1.2.1. | Contrast (hard) |
 | P8 | 44 px targets | Every pointer or touch target is at least 44 x 44 px. Visual size may be smaller; the hit area is not (2.7). | Tap targets (hard) |
-| P9 | Input parity | Anything hover reveals, keyboard focus reveals too; Escape dismisses every popover, overlay and dialog; every pointer action, including drag and drop, has a keyboard path. | Input parity (hard) |
+| P9 | Input parity | Anything hover reveals, keyboard focus reveals too, and touch has its own path (a long-press menu or a control that stays visible); Escape dismisses every popover, overlay and dialog; every pointer action, including drag and drop, has a keyboard path. Tooltips carry only redundant text (4.14, 7.4 pitfall 20). | Input parity (hard) |
 | P10 | Change form, not size | Narrow windows change the presentation (overlay detail, collapsed sidebar, full-width detail), they do not shrink the wide layout. | Change form, not size (default) |
 | P11 | Calm motion | Short state transitions only. Reduced motion keeps fades and drops movement. | Motion (hard) |
 | P12 | Bilingual by design | English and Simplified Chinese strings are designed together; Chinese uses ASCII punctuation and spaces around Latin words and numbers; font stacks are Latin first. | CJK rules (hard) |
@@ -85,8 +85,13 @@ The owner should confirm or reject each item; until then they are binding as wri
 1. **Inline links inside rendered text** (task descriptions, comments) keep their text height as
    hit area. GTK cannot pad a link inside a `GtkLabel`. WCAG 2.5.8 exempts links inside
    sentences. Standalone links (login page) are 44 px buttons.
-2. **Project dots on the selected sidebar row** measure about 2.5:1 (2.4.7). The dot repeats
-   information the adjacent name already gives (9.86:1 or better).
+2. **Project dots on tinted backgrounds** (hover, selected and selected + hover rows in the
+   sidebar, the task list and pickers, and the quick-add chip background) drop below 3:1. Worst
+   measured values: sidebar selected + hover 2.40 (light) and 2.24 (dark), task-list selected +
+   hover 2.83 (both themes), dark quick-add chip 2.50 (2.4.7 lists them all). The dot always repeats
+   information the adjacent name already gives (8.96:1 or better), so it is a redundant cue.
+   Exception: in the color picker (4.23) the color is the content, so swatches sit on the plain
+   dialog background, never on a tint.
 3. **Modal dialogs are not floating surfaces.** `AdwDialog` sheets, alert dialogs, preferences and
    the shortcuts dialog dim the window and keep libadwaita's sheet style. The one-surface rule
    covers popovers, menus, tooltips, toasts and the drag icon.
@@ -96,7 +101,14 @@ The owner should confirm or reject each item; until then they are binding as wri
    Animation" switch sets `gtk-enable-animations = false`, which turns off all GTK and
    libadwaita animation. Tick keeps its own short fades in that case (5.3), so the hard rule
    "keep fades, drop movement" holds for everything Tick draws; libadwaita's own fades (popover
-   and toast appearance) become instant, which Tick cannot change.
+   and toast appearance) become instant, which Tick cannot change. CSS color transitions (hover
+   tints, the 150 ms priority-ring fill) also become instant. That is accepted: they change a
+   color in place, nothing appears, disappears or moves.
+6. **The clear icon inside text entries** (`GtkSearchEntry`, the quick-add entry) is an entry
+   icon, not a button. Tick sizes it with `entry.tick-entry > image { min-width: 44px; }` inside
+   a 44 px entry (7.2). If the first screenshot run shows that GTK does not honor that size for
+   the icon's click area, this item becomes an exemption: the action is redundant (Escape or
+   deleting the text clears the entry) and must not be the only way to clear it.
 
 ### 1.3 References: what Tick adopts and rejects
 
@@ -160,8 +172,8 @@ A 6 px grid, matching libadwaita (which spaces in 6, 12, 18, 24).
 |---|---|---|
 | `space-1` | 3 px | icon-to-text inside a meta item |
 | `space-2` | 6 px | gap between meta items' icon groups; row inner gaps; sidebar row side margin |
-| `space-3` | 12 px | row horizontal padding; gap between title and trailing controls; gap between meta items |
-| `space-4` | 18 px | padding inside popovers and dialogs (libadwaita uses 12 to 24) |
+| `space-3` | 12 px | row horizontal padding; gap between title and trailing controls; gap between meta items; padding inside picker popovers |
+| `space-4` | 18 px | padding inside dialogs (libadwaita uses 12 to 24) |
 | `space-5` | 24 px | space above a section header; view header bottom margin |
 | `space-6` | 36 px | space above an Upcoming month header; empty-state top offset |
 | `space-7` | 48 px | view header top margin on wide windows |
@@ -200,8 +212,11 @@ window, popover, tooltip, dialog {
 with the first family replaced by the user's family. Latin letters and digits therefore always
 come from the UI font; Han characters use the Simplified Chinese glyph forms even under an
 English locale (fontconfig would otherwise pick the Japanese variant for unlabelled Han text).
-Re-install the provider on `notify::gtk-font-name`. Monospace (`.monospace`, inline code in
-descriptions) uses libadwaita's `--monospace-font-family` (Adwaita Mono) unchanged.
+Re-install the provider on `notify::gtk-font-name`. Monospace (`.monospace`) uses libadwaita's
+`--monospace-font-family` (Adwaita Mono by default) unchanged. Inline code in rendered descriptions
+is Pango markup, which cannot carry CSS classes: wrap it in `<span font_family="...">` with the
+family taken from `AdwStyleManager:monospace-font-name` (the same setting libadwaita reads), and
+re-render on `notify::monospace-font-name`.
 
 **Scale.** Libadwaita style classes only. Pixel sizes assume the 14.67 px default.
 
@@ -220,8 +235,11 @@ descriptions) uses libadwaita's `--monospace-font-family` (Adwaita Mono) unchang
 
 Rules:
 
-- Weights come only from the classes above. No other weights, no letter-spacing changes, no
-  uppercase transforms (they break Chinese and look foreign in GNOME).
+- Weights come only from the classes above. One stated exception: the quick-add entry uses the
+  `.title-4` size at weight 400, because what the user types is body text at a larger size, not
+  a heading. Quick-add token highlighting changes only the background, never the weight (bold
+  tokens would make the text reflow while typing). No letter-spacing changes, no uppercase
+  transforms (they break Chinese and look foreign in GNOME).
 - Task titles wrap (`wrap-mode: word-char`, `lines: 3`, `ellipsize: end`), so long URLs and
   Chinese lines break cleanly. The full title is always visible in the detail pane.
 - Measure: the list column is clamped to 720 px, which keeps task titles under about 80
@@ -242,7 +260,7 @@ Rules:
 | Card | `--card-bg-color` | `#ffffff` | `rgb(255 255 255 / 8%)` | boxed lists only |
 | Popover | `--popover-bg-color` / `--popover-fg-color` | `#ffffff` | `#36363a` | the floating surface (2.6) |
 | Dialog | `--dialog-bg-color` | `#fafafb` | `#36363a` | quick add, preferences, shortcuts |
-| Accent | `--accent-bg-color`, `--accent-fg-color`, `--accent-color` | system accent | system accent | 2.4.4 |
+| Accent | `--accent-bg-color`, `--accent-fg-color`, `--accent-color` | system accent | system accent | 2.4.4 (text never sits on `--accent-bg-color`) |
 | Borders | `--border-color` (`currentColor` at `--border-opacity` 15 %) | | | hairlines: section rules, pane separators |
 | Error | `--error-color` | | | inline login error text only |
 
@@ -299,7 +317,7 @@ Each extra color is justified by a job no neutral can do:
 | `--tick-orange` | `#c36400` | `#eb8909` | p2 ring | Fixed by SPEC. |
 | `--tick-blue` | `#246fe0` | `#55a0ff` | p3 ring | Fixed by SPEC. Distinct from the default GNOME blue accent (`#3584e4`) in lightness, and the accent is never used for rings, so they do not compete. |
 | `--tick-green` | `#007335` | `#78e9ab` | "Today" due text outside the Today view | Lets a user scan a project for what is due today; Todoist users expect it. |
-| p4 ring | `currentColor` at 72 % | same | default priority | Neutral; no extra color. |
+| `--tick-p4` | `rgb(0 0 6 / 58%)` | `rgb(255 255 255 / 72%)` | p4 ring (default priority); rings in the read-only Completed view | Neutral: the view text color at 72 % (0.8 x 0.72 = 0.58 in light), written as a concrete color, not `currentColor` (7.4 pitfall 17). No extra hue. |
 
 The starting hues were Todoist's commonly seen priority colors; each was then moved in OKLab
 lightness only (hue and chroma kept, per the owner's "adjust within its hue" rule) until it met
@@ -315,6 +333,7 @@ Light:
 | orange | `#c36400` | 4.08 | 4.08 | 3.91 | 3.81 | 3.42 | 3.21 | 3.0 (ring) |
 | blue | `#246fe0` | 4.75 | 4.75 | 4.55 | 4.43 | 3.98 | 3.73 | 3.0 (ring) |
 | green | `#007335` | 5.99 | 5.99 | 5.75 | 5.59 | 5.03 | 4.72 | 4.5 (text) |
+| p4 | `rgb(0 0 6 / 58%)` | 5.22 | 5.22 | 5.16 | 5.13 | 4.97 | 4.88 | 3.0 (ring) |
 
 Dark:
 
@@ -324,9 +343,12 @@ Dark:
 | orange | `#eb8909` | 6.50 | 4.65 | 4.65 | 5.83 | 4.80 | 4.38 | 3.0 (ring) |
 | blue | `#55a0ff` | 6.29 | 4.50 | 4.50 | 5.65 | 4.65 | 4.24 | 3.0 (ring) |
 | green | `#78e9ab` | 11.24 | 8.04 | 8.04 | 10.09 | 8.31 | 7.58 | 4.5 (text) |
+| p4 | `rgb(255 255 255 / 72%)` | 9.22 | 7.10 | 7.10 | 8.50 | 7.29 | 6.77 | 3.0 (ring) |
 
-Check marks inside a filled ring: white in light mode (red 5.92, orange 4.08, blue 4.75 against
-the fill); `#1d1d20` in dark mode (red 6.82, orange 6.50, blue 6.29; white would be 2.46 to 2.67).
+Check marks inside a filled ring: white in light mode (red 5.92, orange 4.08, blue 4.75, p4 5.22
+or better against the fill); `#1d1d20` in dark mode (red 6.82, orange 6.50, blue 6.29, p4 9.22 or
+better; white would be 2.46 to 2.67). The p4 fill is translucent, so its values were measured
+after compositing on each surface.
 
 Due-date states. Only three:
 
@@ -347,7 +369,9 @@ and `max(l, 0.85)` in dark) for text and lines.
 
 Allowed accent uses: focus rings, links, the selected day in the date picker, today's day number
 in the date picker, drop indicators while dragging, the suggested-action button, the quick-add
-token tint, switches and check buttons (libadwaita defaults).
+token tint, switches and check buttons (libadwaita defaults). Where text sits on an accent fill,
+the fill is `--accent-color`, not `--accent-bg-color` (see "Text on accent and destructive fills"
+below).
 
 Not allowed: selection backgrounds of task or sidebar rows (they are neutral, 2.4.6), headings,
 icons at rest, priority rings, and accent-colored text on the sidebar background (on the selected
@@ -372,6 +396,47 @@ match the table exactly.
 | purple | `#9141ac` | `#8939a4` | 6.59 | 6.59 | 4.41 | `#fba7ff` | 9.67 | 6.92 | 5.15 |
 | slate | `#6f8396` | `#526678` | 5.95 | 5.95 | 3.98 | `#bbd1e5` | 10.70 | 7.66 | 5.70 |
 
+Links on hover: libadwaita lightens `--accent-color` by 10 % in HSL; that measures 4.56:1 or
+better in light (worst: green on white) and 6.78:1 or better in dark (on the popover).
+
+**Text on accent and destructive fills.** Libadwaita puts white `--accent-fg-color` text on
+`--accent-bg-color` (selected calendar day, `.suggested-action` buttons). Measured on the nine
+accents that is 3.01 (yellow) to 4.36 (red); only purple (5.91) reaches 4.5:1, so it fails AA in
+both themes. Tick never puts text on `--accent-bg-color`. Every accent fill that carries text uses
+the derived `--accent-color` as the fill and `--tick-on-accent` as the text: `#ffffff` in light,
+`#1d1d20` in dark (the dark derived accent is a light color). Libadwaita's state overlays stay:
+hover adds `currentColor` at 10 %, pressed adds `rgb(0 0 6 / 20%)`.
+
+| Accent | `--accent-bg-color` | white on it (libadwaita) | light fill | rest | hover | pressed | dark fill | rest | hover | pressed |
+|---|---|---|---|---|---|---|---|---|---|---|
+| blue | `#3584e4` | 3.77 | `#0461be` | 6.07 | 4.99 | 8.26 | `#81d0ff` | 9.93 | 8.27 | 6.36 |
+| teal | `#2190a4` | 3.76 | `#007184` | 5.68 | 4.67 | 7.81 | `#7bdff4` | 10.97 | 9.11 | 6.99 |
+| green | `#3a944a` | 3.81 | `#15772e` | 5.66 | 4.64 | 7.79 | `#8de698` | 11.13 | 9.24 | 7.08 |
+| yellow | `#c88800` | 3.01 | `#905300` | 6.13 | 4.95 | 8.33 | `#ffc057` | 10.35 | 8.61 | 6.61 |
+| orange | `#ed5b00` | 3.44 | `#b62200` | 6.53 | 5.59 | 8.85 | `#ff9c5b` | 8.13 | 6.82 | 5.28 |
+| red | `#e62d42` | 4.36 | `#c00023` | 6.43 | 5.81 | 8.81 | `#ff888c` | 7.33 | 6.17 | 4.79 |
+| pink | `#d56199` | 3.50 | `#a2326c` | 6.54 | 5.37 | 8.80 | `#ffa0d8` | 9.03 | 7.55 | 5.82 |
+| purple | `#9141ac` | 5.91 | `#8939a4` | 6.59 | 5.34 | 8.83 | `#fba7ff` | 9.67 | 8.06 | 6.21 |
+| slate | `#6f8396` | 3.92 | `#526678` | 5.95 | 4.74 | 8.09 | `#bbd1e5` | 10.70 | 8.90 | 6.83 |
+
+"rest", "hover" and "pressed" are `--tick-on-accent` text on the fill in that state. Worst: 4.64
+(light, green, hover) and 4.79 (dark, red, pressed). The fill itself measures 5.64:1 or better
+against the popover and dialog in light (5.43 worst, green on the dialog) and 5.25:1 or better
+in dark, so the selected calendar day
+is also a clear graphical indicator.
+
+Destructive buttons have the same problem in a different form. Libadwaita 1.9.4 draws
+`.destructive-action` as `--destructive-color` text on a 15 % tint of itself (20 % hover, 35 %
+pressed). Measured: 4.14 on the light dialog when hovered, 4.27 on the dark dialog at rest, 4.38
+on a dark card at rest. Tinting a color with itself cannot be fixed by moving its lightness (in
+dark, even `max(l, 0.94)` stays under 3:1 when pressed). Tick fills destructive buttons the same
+way as suggested ones: fill `--destructive-color` (light `#c30000`, dark `#ff938c`), text
+`--tick-on-accent`. Measured: light 6.32 rest, 5.77 hover, 8.70 pressed; dark 7.85, 6.60, 5.11.
+This makes destructive buttons solid red like suggested buttons are solid accent; they appear
+only in confirmation dialogs (4.25), so the extra weight is where it belongs. The "Log Out" row
+in preferences is a plain `AdwButtonRow` (4.17), not destructive-styled, because
+`--destructive-color` text on a dark card measures 4.38.
+
 #### 2.4.5 Focus ring
 
 Libadwaita draws focus rings at 50 % of `--accent-color`, which measures 2.14 to 2.75:1 on white:
@@ -380,12 +445,35 @@ below the 3:1 non-text minimum. Even 80 % (libadwaita's `prefers-contrast: more`
 in solid `--accent-color`: 3.79:1 or better in light and 3.91:1 or better in dark, on every
 surface and accent.
 
+Libadwaita does not key every ring on the focused node's `:focus-visible`, so one selector is not
+enough. These are the libadwaita 1.9.4 rules that draw a ring, and the Tick override for each:
+
+| Ring | Libadwaita selector (node that draws the outline) | Used in Tick by |
+|---|---|---|
+| buttons, rows, check buttons, links, list views | `X:focus:focus-visible` on the focused node | almost everything |
+| text entries, spin buttons | `entry:focus-within`, `spinbutton:focus-within` (the focus is on the inner `text` node) | quick add, search, label search, date entry, comment composer, inline title and section editors |
+| entry rows | `row.entry.focused`, `row.spin.focused` (`AdwEntryRow`, `AdwPasswordEntryRow`) | login token, dialog name and query fields (4.23) |
+| calendar days | `calendar > grid > label:focus` (no `:focus-visible`) | date and deadline pickers |
+| expander rows | `expander-widget:focus:focus-visible > box > title` | not used; covered anyway |
+
 ```css
-*:focus:focus-visible { outline-color: var(--accent-color); }
+*:focus:focus-visible,
+entry:focus-within,
+spinbutton:focus-within,
+row.entry.focused,
+row.spin.focused,
+calendar > grid > label:focus,
+expander-widget:focus:focus-visible > box > title { outline-color: var(--accent-color); }
 ```
 
-Ring geometry stays libadwaita's: 2 px wide; offset -2 px on rows (inside the row), libadwaita's
-offsets on buttons and entries.
+Ring geometry stays libadwaita's: 2 px wide; offset -2 px on rows, buttons and calendar days
+(inside the widget), -2 px on entries, -1 px on entry rows. On an accent or destructive fill
+(suggested and destructive buttons, the selected calendar day) a ring inside the fill in
+`--accent-color` would vanish, so there the ring is `--tick-on-accent`; it measures the same as
+the text on that fill (4.64:1 or better, 2.4.4).
+
+First screenshot run: focus an entry and the login entry row through AT-SPI and sample the ring
+pixels; they must equal the tabled `--accent-color`, not a 50 % mix.
 
 #### 2.4.6 Row tints (neutral selection)
 
@@ -427,10 +515,23 @@ stays distinguishable from `grey`.
 | grey | `#999999` | `#878787` | 3.02 | 2.53 | `#999999` | 4.22 | 3.46 |
 | taupe | `#8f7a69` | `#8f7a69` | 3.42 | 2.86 | `#917c6b` | 3.04 | 2.49 |
 
-**Stated exemption.** On the selected sidebar row (sidebar + 10 % tint) most dots fall to about
-2.5:1. This is accepted: the dot is a redundant cue next to the project name, which stays at
-9.87:1 (light) and 9.86:1 (dark). Do not "fix" it by darkening the selected row, which would
-break the text values in 2.4.2. Always send the API name, never the display hex, back to the
+**Stated exemption (1.2.1, item 2).** Dots were tuned for the plain surfaces. On tinted rows
+and chips some fall below 3:1. Worst dot on each tinted background:
+
+| Background | light: worst dot | dots under 3:1 | dark: worst dot | dots under 3:1 |
+|---|---|---|---|---|
+| task list hover (view + 4 %) | 3.35 mint_green | 0 | 3.77 berry_red | 0 |
+| task list selected (view + 10 %) | 3.01 mint_green | 0 | 3.11 berry_red | 0 |
+| task list selected + hover (13 %) | 2.83 mint_green | 12 | 2.83 berry_red | 8 |
+| sidebar hover (sidebar + 7 %) | 2.67 mint_green | 14 | 2.71 berry_red | 13 |
+| sidebar selected (sidebar + 10 %) | 2.52 mint_green | 17 | 2.47 berry_red | 14 |
+| sidebar selected + hover (13 %) | 2.40 mint_green | 17 | 2.24 berry_red | 18 |
+| quick-add chip (dialog + 6 %) | 3.10 mint_green | 0 | 2.50 berry_red | 13 |
+
+This is accepted: the dot is a redundant cue next to the project name, which stays at 8.96:1 or
+better on all of these. Do not "fix" it by darkening the tints, which would break the text values
+in 2.4.2. The color picker (4.23) is the one place the color is the content; its swatches sit on
+the untinted dialog background. Always send the API name, never the display hex, back to the
 server.
 
 Avatars: `AdwAvatar` with the collaborator's image when available, otherwise libadwaita's
@@ -475,7 +576,7 @@ priority picker, sync status), menus (`popover.menu`), tooltips, toasts, and the
 | border | 1 px `rgb(0 0 0 / 14%)` | 1 px `rgb(255 255 255 / 8%)` (the faint ring where shadows vanish) |
 | radius | 15 px | 15 px |
 | shadow | floating (2.5) | floating (2.5) |
-| inner padding | 6 px (menus), 12 px (tooltips: 6 px x 12 px), 18 px (pickers) | same |
+| inner padding | 6 px (menus), 12 px (tooltips: 6 px x 12 px), 12 px (pickers) | same |
 
 Libadwaita's defaults differ for two of these and Tick overrides them (7.2):
 
@@ -488,6 +589,13 @@ Libadwaita's defaults differ for two of these and Tick overrides them (7.2):
 Modal dialogs (`AdwDialog`, `AdwAlertDialog`, preferences, shortcuts) are not floating surfaces in
 this sense: they dim the window and keep libadwaita's sheet style.
 
+**Tooltips carry only redundant text.** GTK 4 shows a tooltip when the pointer rests on a widget;
+keyboard focus and touch do not reliably open it. So a tooltip may repeat what is already
+reachable another way (the accessible name, the accessible description, a visible label, or a
+popover the control opens), and nothing may live only in a tooltip. Header bar tooltips add the
+shortcut ("Add Task (Q)"), which the shortcuts dialog also lists; the failed-change icon and the
+sync indicator follow this rule in 4.4 and 4.14.
+
 ### 2.7 Hit targets (hard rule: 44 x 44 px)
 
 Every pointer and touch target is at least 44 x 44 px. Three techniques, in order of preference:
@@ -495,6 +603,9 @@ Every pointer and touch target is at least 44 x 44 px. Three techniques, in orde
 1. **Make the widget 44 px.** Rows (task, sidebar, field, menu item, picker option), entries and
    Tick's own icon buttons have `min-height: 44px` (and `min-width: 44px` for icon buttons,
    class `.tick-icon-44`). The priority ring button is 44 x 44 with an 18 px ring inside.
+   GTK's `min-height` and `min-width` size the content box: padding and border come on top
+   (7.4 pitfall 18). A libadwaita text button has 5 px vertical padding, so it reaches 44 px with
+   `min-height: 34px`; `.tick-icon-44` sets `padding: 0`.
 2. **Transparent border.** For buttons whose visual size must stay small, a 5 px transparent
    border extends the hit area and a matching -5 px margin keeps the layout from moving;
    `background-clip: padding-box` keeps hover and pressed backgrounds at the visual size.
@@ -514,7 +625,8 @@ Per-control targets (every row has a matching rule in 7.2 or a widget property):
 | Control | Visual | Hit area | How |
 |---|---|---|---|
 | Sidebar row | full width x 44 | same | `.navigation-sidebar > row { min-height: 44px }` |
-| Sidebar section header | full width x 44 | same | `.tick-section-header { min-height: 44px }` |
+| Sidebar expander (sub-project arrow, `GtkTreeExpander`) | 16 px arrow | 44 x 44 | `treeexpander > expander`: 14 px transparent left and right borders with -14 px margins (it already fills the 44 px row height); the row content starts 14 px after the arrow so nothing overlaps the hit area (4.1) |
+| Sidebar section header | full width x 44 | same | `.tick-sidebar-header { min-height: 44px }` |
 | Header bar buttons, menu buttons, window controls | 34 x 34 (controls: 24 px circles) | 44 x 44 | header bar rule (technique 2) |
 | Priority ring | 18 x 18 ring | 44 x 44 | `checkbutton.tick-ring` |
 | Task row | full width x >= 44 | same | the ring sets the minimum |
@@ -523,10 +635,17 @@ Per-control targets (every row has a matching rule in 7.2 or a widget property):
 | Menu items | full width x 44 | same | `popover.menu modelbutton { min-height: 44px }` (libadwaita: 32) |
 | Picker rows (date quick options, labels, priority, sync list) | full width x 44 | same | `.tick-picker-row` |
 | Text entries (quick add, date entry, label search, search, comment composer) | 44 tall | same | `.tick-entry` |
-| Calendar days | 44 px circle when selected | 44 x 44 | `popover calendar > grid > label.day-number` |
-| Calendar month/year arrows | 16 px icon | 44 x 44 | `popover calendar > header > button` |
+| Entry icons (search clear icon; the leading search icon gets the same 44 px column) | 16 px icon | 44 x 44 | `entry.tick-entry > image { min-width: 44px }`; the icon widgets measure 44 x 44 in a 44 px entry (checked), see 1.2.1 item 6 |
+| Entry row buttons (`AdwPasswordEntryRow` show-text toggle) | 16 px icon | 44 x 44 | `row.entry button.image-button { min-width: 34px; min-height: 34px }` (+ 10 px padding; checked: 44 x 44). Tick does not enable `AdwEntryRow`'s apply button |
+| Calendar days | 44 px circle when selected | 44 x 44 | `popover calendar > grid > label.day-number` (libadwaita's 3 px label margins removed so 7 x 44 fits the 316 px content) |
+| Calendar month/year arrows | 16 px icon | 44 x 44 | `popover calendar > header > button` (padding 0) |
 | Toast buttons ("Undo", dismiss) | libadwaita size | +10 px each way | toast rule (technique 2) |
-| Standalone links (login page) | text | 44 tall | `button.link.tick-link-44` |
+| Dialog and popover footer buttons (quick add Cancel / Add Task, sync popover Sync Now / Dismiss Errors) | 34 tall | 44 tall, +10 px wide | `.tick-hit` (technique 2) |
+| Alert dialog responses (`AdwAlertDialog`) | 44 tall (libadwaita: 24 + 2 x 10 padding) | same | default; the `.short` layout pads 8 px (40 tall), so `dialog.alert.short .response-area > button { min-height: 28px }` |
+| Header bar buttons in dialogs (Cancel, Save in 4.23) | 34 x 34 | 44 x 44 | header bar rule (technique 2) |
+| Color swatches (4.23) | 24 px dot | 44 x 44 | `.tick-swatch` |
+| Attachment links in comments | file name | full width x 44 | flat button row `button.tick-attachment { min-height: 34px }` (4.8) |
+| Standalone links (login page) | text | 44 tall | `button.link.tick-link-44 { min-height: 34px }` |
 | Links inside descriptions and comments | inline text | text line height | exemption 1 in 1.2.1 |
 
 ---
@@ -587,6 +706,16 @@ the breakpoints sits on the screenshot widths (1280, 600).
 
 At 600 x 800 (narrow screenshots) Tick is in B2: the sidebar is a page, the list fills the
 window, an open task overlays the right 340 px.
+
+**Setters do not stack.** `AdwBreakpointBin` (and the window) apply only one breakpoint at a time:
+the last matching one in the list. "As B1" or "as B2" above describes the result, not
+inheritance. Each breakpoint carries its complete setter set (7.4 pitfall 19):
+
+| Breakpoint | Setters |
+|---|---|
+| B1 | `AdwOverlaySplitView.collapsed = true` |
+| B2 | the B1 setter; `AdwNavigationSplitView.collapsed = true`; sidebar "Add Task" `visible = true`; `TickWindow:narrow = true` (list rows bind to it, because setters cannot reach widgets a list factory builds: view header top margin 24, sidebar "Add ..." buttons always visible, 4.1) |
+| B3 | all B2 setters; detail `min-sidebar-width = 0`, `max-sidebar-width = 500`, `sidebar-width-fraction = 1.0`; detail Back button `visible = true`, Close button `visible = false` |
 
 ### 3.4 Header bars
 
@@ -672,11 +801,20 @@ Tick needs a project tree with drag-to-nest. Revisit when it gains hierarchy.)
 4. Labels (header "Labels", trailing "Add Label").
 5. Filters (header "Filters", trailing "Add Filter").
 
+"Add Project", "Add Label" and "Add Filter" open the dialogs in 4.23.
+
 **Row anatomy** (height 44, side margin 6, radius 9, horizontal padding 12):
 
 ```
-[indent 18 x depth][expander 16 or 16 spacer][gap 9][icon 16 or dot 10 centered in 16][gap 12][name, body, ellipsize end][gap 12][count, caption numeric dimmed]
+[indent 18 x depth][expander 16 or 16 spacer][gap 14][icon 16 or dot 10 centered in 16][gap 12][name, body, ellipsize end][gap 12][count, caption numeric dimmed]
 ```
+
+- The expander arrow is a separate click target inside `GtkTreeExpander`. Its hit area is
+  44 x 44: 14 px transparent left and right borders with -14 px margins (2.7, technique 2) around
+  the 16 px arrow, which already fills the 44 px row height. The 14 px gap (`GtkTreeExpander`'s 4 px border spacing plus a
+  10 px start margin on the row content box, `.tick-sidebar-row-content`) keeps the icon's box out of that area, so clicking the
+  dot or name never toggles. Verify with `Gtk.Widget.pick` 21 px either side of the arrow's
+  center, as for header buttons.
 
 - Icons: Inbox `tick-inbox-symbolic`, Today `tick-today-symbolic` (a calendar page with the day
   number area), Upcoming `x-office-calendar-symbolic`, Search `system-search-symbolic`, Completed
@@ -690,11 +828,17 @@ Tick needs a project tree with drag-to-nest. Revisit when it gains hierarchy.)
 - Counts are always neutral, even when they include overdue tasks. Overdue is visible inside
   the view; the sidebar stays calm.
 
-**Section header** (44 px, not selectable): label in `.caption-heading .dimmed`, left-aligned
-with row icons; trailing: optional "Add ..." `list-add-symbolic` button (shown on hover and
-focus-within of the header, always exposed to AT), then a chevron `pan-down-symbolic` rotating to
+**Section header** (`.tick-sidebar-header`, 44 px, not selectable, no extra top margin): label
+in `.caption-heading .dimmed`, left-aligned with row icons; trailing: optional "Add ..."
+`list-add-symbolic` button (`.tick-icon-44`), then a chevron `pan-down-symbolic` rotating to
 `pan-end` when collapsed. The whole header toggles collapse on click. Collapsed state is saved in
 the settings table.
+
+The "Add ..." button is shown on hover and on focus within the header, and always exposed to AT.
+Touch has two paths of its own: in B2 and B3 (`TickWindow:narrow`, 3.3) the button is always
+visible, and on every width a long-press, right-click or Menu key on the header opens its context
+menu ("Add Project" / "Add Label" / "Add Filter", then "Collapse" or "Expand"). Favorites has no
+add item and no menu.
 
 **States.** rest: transparent; hover: 7 %; pressed: 16 %; selected (current view): 10 %;
 selected + hover: 13 %; focus-visible: 2 px ring inside the row; drop target while dragging a
@@ -713,7 +857,7 @@ Alt+Shift+Left moves it one level out; the context menu also offers "Move to..."
 possible parents). Each move shows the same Undo toast as a drag.
 
 **Accessible names.** Row: "Inbox, 4 tasks" (name plus count). Section header: "Projects,
-expanded". Add buttons: "Add Project".
+expanded". Add buttons: "Add Project". Expander: "Expand Vacation" / "Collapse Vacation".
 
 ### 4.2 View header
 
@@ -759,9 +903,12 @@ The signature control. `GtkCheckButton` with class `.tick-ring` and one of `.p1`
 | pressed | priority color | priority color at 30 % | same |
 | checked (completing) | priority color | priority color 100 % | white (light) / `#1d1d20` (dark), 12 px |
 | completed-pending (recurring, waiting for sync) | as checked | as checked | as checked, plus `AdwSpinner` 12 px in the meta line with "Completing" |
-| disabled (Completed history view) | `currentColor` at 72 % | none | check in `currentColor` at 72 % |
+| disabled (Completed history view) | `--tick-p4` | none | check in `--tick-p4` |
 
-p4 uses `currentColor` at 72 % for the ring and 0 % fill at rest (no tint for "no priority").
+p4 uses `--tick-p4` (2.4.3) for the ring and 0 % fill at rest (no tint for "no priority"); its
+hover, pressed and checked fills are `--tick-p4` at 20 %, 30 % and 100 %, with the same check
+mark colors as the other priorities. The screenshot suite includes a p4 row at rest, hovered and
+checked in both themes (9).
 Focus ring: the 2 px accent ring around the 44 px button, radius 9999.
 
 Accessible name: "Complete task" when unchecked, "Mark as not done" when checked; the row's
@@ -818,9 +965,9 @@ rotated -90 degrees when collapsed, `.dimmed` at rest, accessible name "Collapse
 | focus-visible | 2 px focus ring inside the row (offset -2), radius 9 |
 | pressed | 8 % tint |
 | selected (open in the detail pane) | 10 % tint; selected + hover 13 % |
-| completing | ring fills and the check appears (150 ms), title gets `text-decoration: line-through` and `.dimmed`; after 800 ms the row fades to 0 (250 ms) and is removed; the toast appears (4.13) |
+| completing | ring fills and the check appears (150 ms), title gets `text-decoration: line-through` and `.dimmed`; after 800 ms the row fades to 0 (250 ms) and is removed; the toast appears (4.12) |
 | completed-pending (recurring) | ring filled, title not struck, meta line shows the spinner and "Completing" until the sync returns with the next date; then the ring empties and the due date updates |
-| failed change | trailing `dialog-warning-symbolic` 16 px in `--tick-red`, tooltip with the server message; the row shows the server state (the change was rolled back) |
+| failed change | trailing `dialog-warning-symbolic` 16 px in `--tick-red` with the server message as tooltip; the row shows the server state (the change was rolled back). The tooltip is redundant (2.6): the same message is appended to the row's accessible description ("Not saved: <server message>") and listed in the sync popover (4.14), which the warning in the header bar opens |
 | dragging (source) | the row stays in place at 40 % opacity |
 | drag icon | the row rendered on the floating surface (2.6) at its own width, radius 15, 95 % opacity |
 | drop position | 2 px `--accent-color` line with a 6 px dot at its start, inset by the target depth's indent, between rows; dropping on the right half of a row's content nests it as a sub-task (row gets the inset accent outline instead) |
@@ -851,11 +998,13 @@ Vacation"). The visible meta icons are hidden from AT.
 - Height 44 plus the hairline. Not selectable; focusable.
 - The menu button (Rename, Add Task Here, Delete Section) is visible on hover and on focus within
   the header, and always exposed to AT. On touch, the context menu is reached by long-press.
+  Rename edits the name in place (4.24); Delete Section asks first (4.25).
 - Collapsed: chevron rotates to point at the end edge; the section's tasks are removed from the
   model (not hidden widgets); the count stays visible. State persists per section.
 - The "(No section)" group has no header.
 - After the last task of each section, an "Add task" ghost row (44 px, `list-add-symbolic` in the
-  ring column, "Add task" `.dimmed`) opens quick add with `#Project /Section` prefilled.
+  ring column, "Add task" `.dimmed`) opens quick add with `#Project /Section` prefilled (spaces in
+  names escaped as `\ `, the quick-add syntax in `docs/api/openapi.json`, `POST /api/v1/tasks/quick`).
   Shown only in project views.
 
 Keyboard: the header is in the row focus order; Enter or Space toggles collapse; the Menu key
@@ -887,9 +1036,15 @@ Day header (a non-selectable header row, 7.4 pitfall 14; 56 px tall, top space 1
 | Other | 26 | "Thursday" | none |
 
 Month change: a month header ("December", with the year when it is not the current year) in
-`.title-4`, 36 px above. An empty day shows only its header plus an "Add task" ghost row (which
-prefills the date in the quick-add text: "Thursday" in English, "周四" in Chinese, which the
-server parses).
+`.title-4`, 36 px above. An empty day shows only its header plus an "Add task" ghost row, which
+prefills the quick-add text with the day as an ISO date (`2026-11-26 `), the same in every UI
+language. A weekday word would depend on the user's Todoist language setting (quick add parses
+dates in the account's language) and is ambiguous on the same weekday ("Sunday" typed on a Sunday).
+`docs/api` does not list the accepted date formats, so ISO parsing is unverified: the live smoke
+test `quick_add_iso_date` (`crates/tick-e2e/tests/live.rs`) must create a task from
+`"Smoke 2026-11-26"` and assert `due.date == "2026-11-26"` before this ships. If it fails, the
+fallback is a removable date chip outside the text plus an `item_update` with
+`due: {"date": "YYYY-MM-DD"}` after the quick-add response when the server found no date.
 
 The date part of each task's due chip is dropped (only the time shows). Dragging a task onto
 another day's group reschedules it (keeps the time).
@@ -916,7 +1071,8 @@ with an `AdwClamp` (max 420), padding 18 px sides, 6 px top.
 [space 24]
 [Comments .heading + count]
   comment: [avatar 24][name .heading][gap 9][time .caption .dimmed]
-           [text .body, selectable; attachment links as "file name" links with tick-attachment-symbolic]
+           [text .body, selectable]
+           [attachment: flat button row, 44 tall: tick-attachment-symbolic 16, gap 12, file name .body, ellipsize middle]
 [bottom bar: composer entry "Write a comment", send button 44 x 44 (`tick-send-symbolic`, accessible name "Send Comment")]
 ```
 
@@ -924,14 +1080,21 @@ with an `AdwClamp` (max 420), padding 18 px sides, 6 px top.
   The whole row is a button: hover 4 %, pressed 8 %, focus ring inside. Activating opens the
   matching popover anchored to the value (date picker 4.9, label picker 4.10, priority picker
   4.10, assignee picker = label picker layout with avatars). A clear button (`edit-clear-symbolic`,
-  44 x 44) appears at the row end on hover and focus when the field has a value.
+  44 x 44) appears at the row end on hover and focus when the field has a value. Touch does not
+  need it: every popover the row opens has its own clear path ("No Date", "No Deadline",
+  unchecking labels, "Unassigned"), so the clear button is a shortcut, not the only way.
 - **Title:** always editable (Things-style). Enter commits (no newlines), Escape reverts, focus-out
   commits.
-- **Description:** rendered as `GtkLabel` with Pango markup (bold, italic, `code` in
-  `.monospace`, links in `--accent-color` underlined, bullet and numbered lists as indented lines
-  with "•" or "1."). Click (or Enter when focused) swaps to a `GtkTextView` with the raw text in
+- **Description:** rendered as `GtkLabel` with Pango markup (bold, italic, `code` as
+  `<span font_family="...">` with the system monospace family (2.3; Pango markup cannot use the
+  `.monospace` class), links in `--accent-color` underlined, bullet and numbered lists as
+  indented lines with "•" or "1."). Click (or Enter when focused) swaps to a `GtkTextView` with the raw text in
   the same position and font (crossfade 150 ms). Ctrl+Enter or focus-out saves; Escape reverts.
   Links open on click without entering edit mode.
+- **Attachments:** each existing attachment is its own flat button row (`button.tick-attachment`,
+  44 px tall, full comment width), not an inline link, so it meets the 44 px rule (2.7).
+  Activating opens the file URL with `GtkUriLauncher`. Accessible name "Open attachment
+  report.pdf".
 - **Completed history tasks** open read-only: fields have no hover, the title is not editable.
 
 Keyboard: Tab cycles title, description, field rows, sub-task rows, comments, composer. Escape
@@ -941,7 +1104,7 @@ sends; Enter also sends; Shift+Enter inserts a newline.
 ### 4.9 Date picker popover
 
 Anchored to the field row value, the due item, or the task row (T). Floating surface, width 340,
-padding 12.
+padding 12 (content 316 wide, which fits the 7 x 44 = 308 px calendar).
 
 ```
 [entry: placeholder 'Type a date, e.g. "every Monday"', 44 tall]
@@ -952,24 +1115,47 @@ padding 12.
    [go-next-symbolic]           Next Week     Mon 30 Nov
    [edit-clear-symbolic]        No Date                  (only when a date is set)
 [separator 6]
-[GtkCalendar, 7 x 44 day cells]
+[GtkCalendar, 7 x 44 day cells]                    (or, on short windows, a 44 px "Pick a Date" row)
 ```
 
 - Typed text is sent as `due_string` and parsed by the server (SPEC: no local date parsing).
-  Enter submits; while waiting, the entry shows an `AdwSpinner` as its end icon; the popover
-  closes when the change is queued. Offline: the text is queued like any change.
-- "This Weekend" and "Next Week" resolve with the user's `weekend_start_day` and `next_week`
-  settings; the calendar's first weekday is `start_day`.
+  Enter submits; while waiting, the entry shows a spinner as its secondary icon
+  (`AdwSpinnerPaintable` (1.6) set with `gtk_entry_set_icon_from_paintable`; an entry icon
+  cannot hold a widget such as `AdwSpinner`); the popover closes when the change is queued.
+  Offline: the text is queued like any change.
+- Quick options and calendar days are date arithmetic, not parsing of user text: the client
+  computes the target day and sends `due: {"date": "YYYY-MM-DD"}` (an existing time is kept as
+  the floating form `YYYY-MM-DDTHH:MM:SS`, `docs/api/pages/due-dates.md`). "This Weekend" and
+  "Next Week" resolve with the user's `weekend_start_day` and `next_week` settings
+  (`docs/api/pages/sync_user.md`). What a picked date does to a recurring task is not specified
+  here: match Todoist web and check it in the live smoke tests.
 - Calendar: today's number in `--accent-color`, weight 700; the selected day is a 44 px filled
-  circle `--accent-bg-color` with `--accent-fg-color` text; other-month days use `.dimmed`
-  (72 %, replacing libadwaita's 30 %); the header shows "November 2026" with previous/next month
-  buttons (44 x 44).
-- Deadline uses the same popover with three changes: the entry placeholder is 'Type a date,
-  e.g. "Dec 1"' (deadlines have no time and no recurrence), the quick options are Today,
-  Tomorrow, Next Week and No Deadline, and the typed text is sent as the deadline date string.
+  circle in `--accent-color` with `--tick-on-accent` text (2.4.4; libadwaita's white on
+  `--accent-bg-color` fails AA for 8 of 9 accents); other-month days use `.dimmed` (72 %,
+  replacing libadwaita's 30 %); the header shows "November 2026" with previous/next month
+  buttons (44 x 44). The first day of the week follows the locale: `GtkCalendar` has no
+  first-weekday property, so Todoist's `start_day` setting is not applied (a custom grid would
+  be needed; not in v1).
+- **Height.** With the entry, five quick options and the full calendar the popover is about
+  630 px tall (12 + 44 + 5 x 44 + 13 + 44 header + 20 weekday row + 6 x 44 + 12), more than a
+  1024 x 600 window can show. When the popover opens and the window is shorter than 700 px,
+  the calendar starts collapsed behind a "Pick a Date" row (44 px, `x-office-calendar-symbolic`,
+  chevron at the end); activating it reveals the calendar in place (`GtkRevealer`, crossfade)
+  and moves focus into it. Collapsed height: about 345 px. The content also sits in a
+  `GtkScrolledWindow` with `propagate-natural-height`, so if the compositor still has to shrink
+  the popover, it scrolls instead of clipping.
+- **Deadline** uses the same popover without the entry. Deadlines are a plain
+  `{"date": "YYYY-MM-DD"}` object with no time, no recurrence and no server-side parsing of free
+  text (`docs/api/pages/deadlines.md`), and SPEC forbids parsing dates locally, so there is no
+  text input. Quick options: Today, Tomorrow, Next Week and No Deadline (only when one is set),
+  then the calendar. The client sends `deadline: {"date": "YYYY-MM-DD"}`, or `deadline: null`
+  for No Deadline (the docs state `null` removal only for `due`; confirm it for `deadline` in the
+  live smoke tests). Height: about 545 px with the calendar open (12 + 4 x 44 + 13 + 328 + 12).
+  That fits 600, but the same 700 px rule applies so both popovers behave alike.
 
-Keyboard: focus starts in the entry; Down moves into the quick options, then into the calendar
-(arrow keys move days, Page Up/Down months, Enter picks). Escape closes without changes.
+Keyboard: focus starts in the entry (in the deadline popover: on the first quick option); Down
+moves into the quick options, then into the calendar or the "Pick a Date" row (arrow keys move
+days, Page Up/Down months, Enter picks). Escape closes without changes.
 
 ### 4.10 Label picker and priority picker
 
@@ -994,13 +1180,13 @@ row.
 [entry, .title-4 weight 400, no frame, 44 tall, placeholder "e.g. Call Mom tomorrow 6pm p2 #Family"]
 [token preview: AdwWrapBox of chips, hidden from AT]
 [separator]
-[footer: hint .caption .dimmed][spacer][Cancel .flat][Add Task .suggested-action, disabled while empty]
+[footer: hint .caption .dimmed][spacer][Cancel .flat .tick-hit][Add Task .suggested-action .tick-hit, disabled while empty]
 ```
 
 - **Token highlighting (local, SPEC).** `#project`, `@label` and `p1` to `p4` tokens are found by
   the tick-core highlighter and drawn with Pango attributes on the entry text: background = the
   token tint (accent at 16 % for `#` and `@`; the priority color at 16 % for `pN`), foreground
-  unchanged, weight 600. Primary text on the tint measures 10.40:1 or better in light (worst:
+  and weight unchanged (2.3). Primary text on the tint measures 10.40:1 or better in light (worst:
   red tint) and 9.41:1 or better in dark (worst: blue tint) on the dialog background. Pango needs
   concrete colors: resolve `--accent-bg-color` from `AdwStyleManager:accent-color-rgba` and the
   priority hexes from 2.4.3 for the current theme, and re-apply on theme or accent change. Dates
@@ -1010,9 +1196,9 @@ row.
   `color-mix(in srgb, currentColor 6%, transparent)`, padding 3 x 9. Unknown projects show the
   name with a `dialog-warning-symbolic` 12 px and the hint changes to "No project named "x".
   The task goes to the Inbox."
-- **Prefill.** From a project view: `#Project ` ; from a section ghost row: `#Project /Section ` ;
-  from an Upcoming day: the weekday word. The prefill is real, highlighted text the user can
-  delete.
+- **Prefill.** From a project view: `#Project ` ; from a section ghost row: `#Project /Section `
+  (spaces escaped, 4.5); from an Upcoming day: the ISO date (4.7). The prefill is real,
+  highlighted text the user can delete.
 - **Footer hint:** online "Enter to add, Esc to close"; offline "Offline. The task will be added
   when you're back online."
 - **Submit:** Enter or "Add Task". The dialog stays open and clears for the next task when Ctrl+
@@ -1031,15 +1217,26 @@ row.
 | Delete | "Task deleted" | "Undo" | 5 s |
 | Move by drag to a project | "Moved to Vacation" | "Undo" | 5 s |
 | Quick add outside current view | "Task added" | "Open" | 4 s |
+| Archive a project | "Archived "Vacation"" | "Undo" | 5 s |
 | Change rejected by server | "Couldn't save "Buy milk"" | "Details" (opens the sync popover) | 8 s |
+| Load failed (Completed, server-result filters) | "Couldn't load completed tasks" / "Couldn't update this filter" | "Retry" | 8 s |
 
-Ctrl+Z triggers the visible toast's Undo. Toasts never stack; a new toast replaces the current
-one (`AdwToastPriority.HIGH` for errors).
+Ctrl+Z triggers the visible toast's Undo. Toasts never stack and never come back: a new toast
+replaces the current one. `AdwToastOverlay` does not do this by itself (a `NORMAL` toast waits in
+a queue; a `HIGH` toast pushes the current one back into the queue, so an old Undo toast would
+reappear after an error toast). Tick keeps a reference to the toast it showed last and calls
+`AdwToast::dismiss()` on it before `AdwToastOverlay::add_toast()`. All toasts use `NORMAL`
+priority. Completing several tasks in a row updates the visible toast instead: `set_title("3
+tasks completed")`, then `set_timeout(5)` to restart the countdown. That libadwaita restarts the
+timer on a timeout change is unverified; if it does not, dismiss and add a new toast with the
+new title.
 
 ### 4.13 Empty states
 
 `AdwStatusPage` with `.compact`, icon 64 px symbolic at `.dimmed`, title `.title-2`, description
 `.body .dimmed`, placed 36 px below the view header (the header stays visible). No illustrations.
+The empty state is a model row of its own kind ("empty state", 7.1), the only row after the view
+header, so it scrolls with the header and needs no overlay or `GtkStack`.
 
 | View | Icon | English title / description | Chinese title / description |
 |---|---|---|---|
@@ -1064,18 +1261,23 @@ the view menu). It is hidden when online with nothing pending (the normal case).
 | Pending changes (online or offline) | `network-offline-symbolic` (offline) or `network-transmit-symbolic` (online) | count, `.caption .numeric` | "3 changes waiting to sync" |
 | A change failed | `dialog-warning-symbolic` in `--tick-red` | count of failures | "1 change could not be saved" |
 
-Clicking opens a floating-surface popover (width 320): status line (`.heading`), the list of
-pending and failed changes as 44 px rows ("Complete "Buy milk"", "Rename project "Home""), each
-failed row with the server message in `.caption .dimmed`; footer "Sync Now" (`.suggested-action`
-when online, insensitive offline) and "Dismiss Errors". Failed changes were already rolled back
-(server wins); the list explains what happened.
+The tooltip is redundant (2.6): the same text is the button's accessible description (its
+accessible name is "Sync Status"), and the popover's status line shows it as visible text.
+
+Clicking opens a floating-surface popover (width 320): status line (`.heading`, the tooltip text,
+for example "Offline. Changes are saved on this computer."), the list of pending and failed
+changes as 44 px rows ("Complete "Buy milk"", "Rename project "Home""), each failed row with the
+server message in `.caption .dimmed`; footer "Sync Now" (`.suggested-action .tick-hit` when
+online, insensitive offline) and "Dismiss Errors" (`.tick-hit`). Failed changes were already
+rolled back (server wins); the list explains what happened.
 
 No banner, no blocking dialog. Startup offline renders the cache with the indicator only.
 
 ### 4.15 Search
 
-The Search view replaces the view header title with a `GtkSearchEntry` (`.title-4` size, 44 tall,
-placeholder "Search tasks"), focused on open. Results update while typing (FTS5), as normal task
+The Search view replaces the view header with a "search header" model row (7.1) holding a
+`GtkSearchEntry` (`.tick-entry`, `.title-4` size, 44 tall, placeholder "Search tasks"), focused on
+open. Results update while typing (FTS5), as normal task
 rows with the project item in the meta line; matched words are not highlighted in v1. Escape
 clears the entry; Escape on an empty entry returns to the previous view.
 
@@ -1095,9 +1297,9 @@ window controls only), content centered vertically in an `AdwClamp` (max 400), p
 [space 6]
 [error line .body in --error-color, only on failure]
 [space 12]
-[Log In: .suggested-action .pill, centered, 44 tall, insensitive while empty; AdwSpinner while checking]
+[Log In: .suggested-action .pill, centered, 44 tall (pill padding 10 + 24), insensitive while empty; AdwSpinner while checking]
 [space 18]
-[link button "Find your token in Todoist settings" -> https://app.todoist.com/app/settings/integrations]
+[link button .tick-link-44 "Find your token in Todoist settings" -> https://app.todoist.com/app/settings/integrations]
 [spacer]
 ["Your token is stored in the GNOME keyring." .caption .dimmed, centered, 24 from the bottom]
 ```
@@ -1116,9 +1318,9 @@ connection and try again." Enter in the entry submits.
   before the first window is presented (no flash).
 - Group "Background": `AdwSwitchRow` "Run at Login", subtitle "Keep syncing and sending reminders
   after the window is closed."
-- Group "Account": `AdwButtonRow` "Log Out" with `.destructive-action`; confirms with an
-  `AdwAlertDialog` ("Log out of Tick?" / "The local cache and unsynced changes on this computer
-  will be removed." / Cancel, Log Out).
+- Group "Account": `AdwButtonRow` "Log Out", plain style (libadwaita's `.destructive-action`
+  row text measures 4.38:1 on a dark card, 2.4.4); confirms with an `AdwAlertDialog` (4.25), whose
+  "Log Out" response is the filled destructive button.
 
 ### 4.18 Keyboard shortcuts window
 
@@ -1139,10 +1341,236 @@ inactive while a text field has focus.
 
 Plain `GMenuModel` menus (`popover.menu`) on the floating surface with 44 px items, icons off,
 destructive items last after a separator and labelled clearly ("Delete Project..."; the dialog
-names the consequence). View menu (project): Rename, Color, Add Section, Favorite / Unfavorite,
+names the consequence, 4.25). Rename and Color in a project menu open the Edit Project dialog
+(4.23) with that field focused; when the project is the open view, Rename edits the view title
+in place instead (4.2). View menu (project): Rename, Color, Add Section, Favorite / Unfavorite,
 Archive, Delete. View menu (label, filter): Edit, Favorite / Unfavorite, Delete. Inbox, Today,
 Upcoming, Search and Completed have no view menu in v1; hide the button there instead of
 showing an empty or disabled menu.
+
+### 4.20 Today view
+
+SPEC: Today includes overdue tasks. The structure follows Todoist web:
+
+```
+[view header: "Today", subtitle "Sunday 22 November" + count (overdue included)]
+[day header "Overdue" (4.7: task-past-due-symbolic in --tick-red, count)]   only if any task is overdue
+  overdue task rows
+[day header "Today" (4.7: 22, "Today", "Sunday")]                            only if the Overdue group is shown
+  today's task rows
+  ["Add task" ghost row]
+```
+
+- With nothing overdue there are no group headers: today's tasks follow the view header
+  directly, because the title already says "Today".
+- Order. Overdue: oldest due date first; on the same day, timed tasks by time, then priority
+  (p1 first), then `child_order`. Today: `day_order` ascending (the order users set in Todoist's
+  Today view, `docs/api/pages/sync_tasks.md`); ties, including the default `-1`, by time (timed
+  tasks first, earliest first), then priority, then `child_order`. If Todoist web orders
+  differently, match it (SPEC).
+- Rows are flat in Today: sub-tasks due today are listed at depth 0 like other tasks.
+- Meta line: the due item shows only the time; overdue tasks show their date in `--tick-red`
+  (4.4).
+- Dragging an overdue task into the Today group reschedules it to today and keeps its time;
+  reordering inside the Today group sends `item_update_day_orders`. Keyboard: T (date picker),
+  Alt+Shift+Up/Down (reorder within Today).
+- The ghost row prefills quick add with today's ISO date (4.7).
+- Empty (no overdue and nothing today): the Today empty state (4.13).
+
+### 4.21 Completed view
+
+Read-only history (SPEC: last 30 days, "Load more", cache first).
+
+```
+[view header: "Completed", subtitle "Last 30 days" (after Load More: "Since 23 October")]
+  [refresh line, .caption .dimmed: AdwSpinner 16 + "Updating"]   only while refreshing a shown cache
+[day header (4.7) per completion day, newest first: 22 "Today" / 21 "Yesterday" / 20 "Friday" ...]
+  completed task rows
+[month header (4.7) when the month changes]
+...
+["Load More" row]
+```
+
+- Grouping uses the local completion day (`completed_at`). Day header dim text: the weekday for
+  the last 7 days, then the date (6.3).
+- Row: the task row (4.4) read-only. Ring in its disabled checked state (4.3), title at full
+  contrast and not struck through, meta line = completion time (`.numeric`, "14:05") then the
+  project item. Sub-tasks are flat. Activating opens the detail pane read-only (4.8).
+- Data: `GET /api/v1/tasks/completed/by_completion_date` with `since` = 30 days ago, `until` =
+  now, pages of 50 followed with `next_cursor`. "Load More" fetches the next page; when the
+  current range has no further cursor it moves the range 30 days back (the endpoint allows up to
+  3 months per request).
+- **Load More row:** a model row ("load more", 7.1) holding a full-width flat button, 44 tall
+  (`min-height: 34px` + padding, 2.7), label "Load More" centered. While loading, the label is
+  replaced by an `AdwSpinner` 16 and "Loading" `.dimmed`, and the button is insensitive. Offline it
+  is insensitive (1.2.1 item 4) and the refresh line says "Offline. Showing saved results."
+- **States.**
+
+| State | Shown |
+|---|---|
+| first open, no cache, loading | one "loading" row: `AdwSpinner` 32 centered, "Loading completed tasks" `.dimmed` under it, 36 px below the header |
+| cache shown, refreshing | cached rows at once; the refresh line under the subtitle; rows update in place when the response arrives |
+| loaded, no tasks | the Completed empty state (4.13) |
+| request failed | rows (or the empty view) stay; toast "Couldn't load completed tasks" with "Retry", 8 s (4.12) |
+| offline | cache only, refresh line "Offline. Showing saved results.", Load More insensitive |
+
+### 4.22 Filter views: local and server results
+
+tick-core decides per query whether it is in the supported subset (SPEC). Supported queries are
+evaluated locally: the view opens instantly and works offline, with no extra UI. For a query with
+unsupported syntax, the results come from `GET /api/v1/tasks/filter` and are cached.
+
+```
+[view header: filter name; subtitle: the query in .monospace .dimmed, then the count]
+[source line, .caption .dimmed: "Results from Todoist, updated 14:05"]      server results only
+```
+
+| State (server results) | Shown |
+|---|---|
+| first open, no cache, online | the "loading" row as in 4.21, text "Loading results" |
+| cache shown, refreshing | cached rows at once; source line shows `AdwSpinner` 16 + "Updating" |
+| offline, cache present | cached rows; source line "Offline. Showing results from 14:05." |
+| offline, no cache | empty-state row: `network-offline-symbolic`, "Can't show this filter offline" / "Tick can't evaluate part of this query on this computer. Connect to see results." |
+| server rejects the query (4xx) | empty-state row: `dialog-warning-symbolic`, "Todoist couldn't read this filter" / "Check the query and try again.", button "Edit Filter" (`.pill`, 44 tall) opening 4.23 |
+| network error, cache present | cached rows stay; toast "Couldn't update this filter" with "Retry" |
+
+A task edited inside a server-result view stays in place until the next refresh (Tick does not
+re-evaluate a query it cannot parse), so rows do not jump while the user works.
+
+### 4.23 Project, label and filter dialogs
+
+`AdwDialog`, `content-width 420` (a bottom sheet on narrow windows), opened by "Add Project",
+"Add Label", "Add Filter" (4.1) and by Edit, Rename and Color in context and view menus (4.19).
+
+```
+[header bar: Cancel (start, .flat) | title | Add or Save (end, .suggested-action)]
+[content, padding 18 sides, 6 top, 24 bottom:]
+  [boxed list]
+    [AdwEntryRow "Name"]                                   all three; focused on open
+    [AdwEntryRow "Query", text in .monospace]              filters only
+    [AdwComboRow "Parent Project": None, then projects]    projects only
+    [AdwSwitchRow "Add to Favorites"]                      all three
+  [query hint .caption .dimmed, 6 below the list]         filters only
+  [space 18]
+  ["Color" .heading]
+  [space 6]
+  [color grid (4.23.1)]
+  [selected color name .caption .dimmed, e.g. "Berry Red"]
+```
+
+- Titles: "New Project" / "Edit Project", "New Label" / "Edit Label", "New Filter" /
+  "Edit Filter". The primary button is "Add" for new items and "Save" for edits; it is
+  insensitive while Name (or Query) is empty. Enter in the last entry row activates it
+  (`activates-default`); Escape and Cancel close without saving.
+- Parent Project lists the project tree as "Vacation / Packing" paths and leaves out the project
+  itself and its descendants. Changing it is the dialog form of drag-to-nest (4.1).
+- New items default to the API's `charcoal` color, no parent, not favorite. Rename or Color from
+  a menu opens Edit with that field focused.
+- Query hint (filters), updated while typing by the local parser, no network:
+
+| Query | Hint |
+|---|---|
+| empty | Examples: "today \| overdue", "#Work & p1" |
+| fully supported | Runs on this computer. |
+| contains unsupported syntax | Part of this query is checked by Todoist. Results need a connection. |
+
+- A label name that already exists (case-insensitive) puts the Name row in libadwaita's `.error`
+  state with the caption "A label with this name already exists." and keeps Add insensitive.
+- Saving is optimistic and queued like every change (`project_add`, `project_update`,
+  `label_add`, `filter_update`, ...); the dialog closes at once. A server rejection is a failed
+  change (4.4, 4.14).
+- Accessible names: the rows carry their titles; the dialog is named by its title.
+
+#### 4.23.1 Color picker
+
+The 20 API colors (`docs/api/pages/colors.md`) in API order, as one radio group.
+
+- Widget: `AdwWrapBox` (child and line spacing 0) of 20 `GtkCheckButton`s in one group, class
+  `.tick-swatch`. Each is 44 x 44; its child is a 24 px `.tick-dot .tick-color-<name>` box (the
+  display colors of 2.4.7) and the check indicator is hidden (7.2). At
+  `content-width 420` (384 px inside the padding) that is 8 per line; a 360 px bottom sheet fits
+  7.
+- The grid sits on the plain dialog background, not in a card: the dot colors were tuned to 3:1
+  on the view, sidebar and popover surfaces (2.4.7), which bracket the dialog background in both
+  themes.
+- States: rest: the dot alone. Hover: a 2 px ring in `currentColor` at 72 %, 2 px outside the
+  dot (32 px circle). Checked: the same ring in full `currentColor` (the dialog text color,
+  12:1 or better), and the color's name appears under the grid, so the choice never depends on
+  telling hues apart. Focus-visible: the 2 px accent focus ring around the 44 px cell.
+- Keyboard: Tab enters the group at the checked swatch; arrow keys move between swatches (GTK's
+  focus handling for grouped check buttons; confirm in the first E2E test); Space checks.
+- Accessible name: the color name ("Berry Red"); role radio with the checked state. The dot is
+  decoration.
+
+| API name | English | Chinese |
+|---|---|---|
+| berry_red | Berry Red | 莓红 |
+| red | Red | 红色 |
+| orange | Orange | 橙色 |
+| yellow | Yellow | 黄色 |
+| olive_green | Olive Green | 橄榄绿 |
+| lime_green | Lime Green | 青柠绿 |
+| green | Green | 绿色 |
+| mint_green | Mint Green | 薄荷绿 |
+| teal | Teal | 蓝绿 |
+| sky_blue | Sky Blue | 天蓝 |
+| light_blue | Light Blue | 浅蓝 |
+| blue | Blue | 蓝色 |
+| grape | Grape | 葡萄紫 |
+| violet | Violet | 紫罗兰 |
+| lavender | Lavender | 薰衣草 |
+| magenta | Magenta | 品红 |
+| salmon | Salmon | 鲑红 |
+| charcoal | Charcoal | 炭灰 |
+| grey | Grey | 灰色 |
+| taupe | Taupe | 灰褐 |
+
+### 4.24 Section create and rename
+
+Inline, no dialog (Todoist web and Things both edit section names in place).
+
+- **Add Section** (project view menu) appends a "section editor" model row (7.1) at the end of
+  the project: the section header layout (4.5) with the name replaced by a frameless entry
+  (`.tick-entry`, `.heading` font, placeholder "Section name", hairline below), focused. Enter
+  or focus-out with text creates the section (`section_add`, optimistic) and the row becomes a
+  normal header. Escape, or focus-out while empty, removes the row without a change.
+- **Rename** (section menu, or F2 on a focused header) swaps the header's name for the same
+  entry with the current name selected. Enter or focus-out saves (`section_update`); Escape
+  reverts.
+- The editor is a model item, not a widget swapped inside a recycled row, so scrolling cannot
+  lose it. Accessible name of the entry: "Section name".
+
+### 4.25 Confirmation dialogs
+
+`AdwAlertDialog` for actions that cannot be undone. Responses: "Cancel" (default and close
+response) and the destructive response (`ADW_RESPONSE_DESTRUCTIVE`, filled red, 2.4.4). Escape
+cancels. The body names the consequence with real counts (`ngettext`); a clause whose count is 0
+is dropped.
+
+| Action | Heading | Body | Button |
+|---|---|---|---|
+| Delete project | Delete "Vacation"? | Its 12 tasks and 2 sub-projects will be deleted too. This can't be undone. | Delete Project |
+| Delete section | Delete section "Preparation"? | Its 3 tasks will be deleted too. This can't be undone. | Delete Section |
+| Delete label | Delete label "travel"? | It will be removed from 5 tasks. The tasks stay. | Delete Label |
+| Delete filter | Delete filter "Work today"? | Only the filter is deleted. No tasks change. | Delete Filter |
+| Log out (4.17) | Log out of Tick? | The local cache and unsynced changes on this computer will be removed. | Log Out |
+
+| Action | 标题 | 正文 | 按钮 |
+|---|---|---|---|
+| Delete project | 删除 "Vacation"? | 其中的 12 个任务和 2 个子项目也会被删除. 此操作无法撤销. | 删除项目 |
+| Delete section | 删除分区 "Preparation"? | 其中的 3 个任务也会被删除. 此操作无法撤销. | 删除分区 |
+| Delete label | 删除标签 "travel"? | 它会从 5 个任务上移除, 任务本身会保留. | 删除标签 |
+| Delete filter | 删除过滤器 "Work today"? | 只删除过滤器, 不会改动任何任务. | 删除过滤器 |
+| Log out | 退出 Tick 登录? | 本机的缓存和未同步的更改会被删除. | 退出登录 |
+
+The consequences follow the API: deleting a project deletes its descendants
+(`docs/api/pages/sync_projects.md`), deleting a section deletes its tasks
+(`sync_sections.md`), and deleting a label removes it from every task (`sync_labels.md`,
+`cascade: all`, the default).
+
+No confirmation for actions with Undo: deleting a task (toast, 4.12) and archiving a project.
+Archive shows the toast "Archived "Vacation"" with "Undo" (5 s, `project_unarchive`), and the
+project leaves the sidebar.
 
 ---
 
@@ -1185,6 +1613,9 @@ treats both as "reduce motion":
    `AdwTimedAnimation`s on `opacity` with `follow-enable-animations-setting = false`, so they
    still run. Tick has no movement of its own outside CSS transitions and `scroll_to`, which
    GTK already makes instant. Result: fades kept, movement dropped. (1.2.1, item 5.)
+   CSS color transitions are not `AdwTimedAnimation`s, so the priority-ring fill (150 ms
+   `background-color` transition, 7.2) and the hover tints become instant too. That is accepted
+   (1.2.1, item 5): they recolor a shape in place. Do not rebuild them as timed animations.
 2. `Gtk.Settings:gtk-interface-reduced-motion = reduce` (new in GTK 4.22; CSS
    `@media (prefers-reduced-motion: reduce)`). Tick keeps its fades and drops its own movement:
    chevron rotation transitions are removed inside the media query, and `scroll_to` uses
@@ -1261,7 +1692,26 @@ Formats depend on the user's Todoist settings `date_format` (0 = day first, 1 = 
 | Preferences | Appearance, Follow System, Light, Dark, Run at Login | 外观, 跟随系统, 浅色, 深色, 登录时运行 |
 | Run at Login subtitle | Keep syncing and sending reminders after the window is closed. | 关闭窗口后继续同步并发送提醒. |
 | Detail placeholders | Add a description / Add sub-task / Write a comment | 添加描述 / 添加子任务 / 写评论 |
-| Completed history | Load More | 加载更多 |
+| Completed history | Load More / Loading / Last 30 days / Since 23 October | 加载更多 / 正在加载 / 最近 30 天 / 自 10 月 23 日起 |
+| Loading and refresh | Loading completed tasks / Loading results / Updating | 正在加载已完成的任务 / 正在加载结果 / 正在更新 |
+| Offline with cache | Offline. Showing saved results. / Offline. Showing results from 14:05. | 离线. 显示的是已保存的结果. / 离线. 显示的是 14:05 的结果. |
+| Load errors | Couldn't load completed tasks / Couldn't update this filter / Retry | 无法加载已完成的任务 / 无法更新这个过滤器 / 重试 |
+| Filter source line | Results from Todoist, updated 14:05 | 来自 Todoist 的结果, 更新于 14:05 |
+| Filter error states | Can't show this filter offline / Tick can't evaluate part of this query on this computer. Connect to see results. / Todoist couldn't read this filter / Check the query and try again. / Edit Filter | 离线时无法显示这个过滤器 / Tick 无法在本机计算这个查询的一部分. 联网后即可查看结果. / Todoist 无法识别这个过滤器 / 请检查查询后重试. / 编辑过滤器 |
+| Edit dialog titles | New Project, Edit Project, New Label, Edit Label, New Filter, Edit Filter | 新建项目, 编辑项目, 新建标签, 编辑标签, 新建过滤器, 编辑过滤器 |
+| Edit dialog fields and buttons | Name, Query, Parent Project, None, Add to Favorites, Color, Cancel, Add, Save | 名称, 查询, 上级项目, 无, 添加到收藏, 颜色, 取消, 添加, 保存 |
+| Query hints | Examples: "today \| overdue", "#Work & p1" / Runs on this computer. / Part of this query is checked by Todoist. Results need a connection. | 示例: "today \| overdue", "#Work & p1" / 在本机计算. / 查询的一部分由 Todoist 计算, 需要联网才能看到结果. |
+| Duplicate label | A label with this name already exists. | 已有同名标签. |
+| Section editor | Section name | 分区名称 |
+| Sidebar header menu | Add Project, Add Label, Add Filter, Collapse, Expand | 添加项目, 添加标签, 添加过滤器, 折叠, 展开 |
+| Deadline quick options | Today, Tomorrow, Next Week, No Deadline | 今天, 明天, 下周, 无截止日期 |
+| Short-window calendar row | Pick a Date | 选择日期 |
+| Archive toast | Archived "Vacation" / Undo | 已归档 "Vacation" / 撤销 |
+| Failed change (accessible description) | Not saved: <server message> | 未保存: <server message> |
+| Sync indicator name | Sync Status | 同步状态 |
+| Attachment (accessible name) | Open attachment report.pdf | 打开附件 report.pdf |
+| Color names | 4.23.1 | 4.23.1 |
+| Confirmation dialogs | 4.25 | 4.25 |
 | Notification actions | Complete / Open | 完成 / 打开 |
 
 ---
@@ -1277,8 +1727,8 @@ Formats depend on the user's Todoist settings `date_format` (0 = day first, 1 = 
 | List + detail | `AdwOverlaySplitView` (`sidebar-position: end`) | B1 sets `collapsed`, B3 widths; `show-sidebar` bound to "a task is open" |
 | Breakpoints | `AdwBreakpoint` on the window | conditions in `sp`, inclusive |
 | Pane chrome | `AdwToolbarView` + `AdwHeaderBar` | `top-bar-style: flat` |
-| Sidebar list | `GtkListView` + `GtkTreeListModel` + `GtkTreeExpander`, `.navigation-sidebar` | not `AdwSidebar` (no tree, no drag source in 1.9) |
-| Task list | `GtkListView` (`.tick-task-list`) in `AdwClampScrollable` | one flat model of row items with a kind: view header, section header, day header, month header, task, "Add task" ghost row, "Load more"; the factory builds the widget per kind (pitfall 14) |
+| Sidebar list | `GtkListView` + `GtkTreeListModel` + `GtkTreeExpander`, `.navigation-sidebar` | not `AdwSidebar` (no tree, no drag source in 1.9); expander hit area per 4.1 |
+| Task list | `GtkListView` (`.tick-task-list`) in `AdwClampScrollable` | one flat model of row items with a kind: view header, search header (replaces the view header in Search), section header, section editor (4.24), day header, month header, task, "Add task" ghost row, empty state (4.13), loading (4.21), "Load more"; the factory builds the widget per kind (pitfall 14) |
 | Wrapping meta line | `AdwWrapBox` (1.7) | |
 | Empty states | `AdwStatusPage.compact` | |
 | Quick add, alerts | `AdwDialog`, `AdwAlertDialog` | |
@@ -1286,10 +1736,13 @@ Formats depend on the user's Todoist settings `date_format` (0 = day first, 1 = 
 | Shortcuts | `AdwShortcutsDialog` (1.8) | not `GtkShortcutsWindow` (deprecated) |
 | Toasts | `AdwToast` | `button-label`, `action-name` for Undo |
 | Pickers | `GtkPopover` | floating surface class applies to all popovers |
-| Spinners | `AdwSpinner` (1.6) | |
+| Date picker calendar | `GtkCalendar` | first weekday follows the locale; no property for Todoist's `start_day` (4.9) |
+| Edit dialogs | `AdwDialog` + `AdwEntryRow`, `AdwComboRow`, `AdwSwitchRow` | 4.23; color grid = `AdwWrapBox` of grouped `GtkCheckButton`s |
+| Confirmations | `AdwAlertDialog` | 4.25 |
+| Spinners | `AdwSpinner` (1.6); `AdwSpinnerPaintable` (1.6) inside entries | an entry icon takes a paintable, not a widget |
 | Avatars | `AdwAvatar` | `show-initials: true` |
 | Theme | `AdwStyleManager:color-scheme` | `PREFER_LIGHT` is not used; "Follow System" = `DEFAULT`, Light = `FORCE_LIGHT`, Dark = `FORCE_DARK` |
-| Animations | `AdwTimedAnimation` | `follow-enable-animations-setting` left true |
+| Animations | `AdwTimedAnimation` | `follow-enable-animations-setting = false` for Tick's own fades (5.3); in `TICK_TEST_MODE` set their duration to 0 |
 
 ### 7.2 Starter stylesheet (`crates/tick-gtk/data/style.css`)
 
@@ -1304,6 +1757,28 @@ the floating surface. Popovers did not map in that minimal test, so the
 popover, menu, tooltip and calendar rules are parsed but not yet seen; the first screenshot run
 must check them.
 
+A review round added rules after that render: the extra focus-ring selectors, the accent and
+destructive fills, the content-box hit-target fixes, the sidebar expander and padding, the
+`row.activatable` hover, `--tick-p4`, the calendar margin reset and the swatches. Checked for
+them on GTK 4.22.5 / libadwaita 1.9.4 in headless mutter:
+
+- The whole sheet parses with no `parsing-error`.
+- Pixels: a p4 ring renders `#6b6b6e` at rest and fills `#6b6b6e` when checked on white
+  (`#c0c0c1` on `#1d1d20` in dark). With the old `currentColor` variable the rest ring was
+  `#959597` (2.99:1) and the checked ring rendered white on white in light and `#1d1d20` on
+  `#1d1d20` in dark, so a checked p4 was invisible (7.4 pitfall 17). A `.suggested-action` button
+  fills with the derived `--accent-color` (pink accent: `#a2326c` light, `#ffa0d8` dark).
+- Sizes: `.tick-link-44`, `.tick-attachment` and `.pill` buttons measure 44 tall, an icon button
+  with `.tick-icon-44` 44 x 44, both `GtkSearchEntry` icons 44 x 44, the `AdwPasswordEntryRow`
+  show-text button 44 x 44, and the sidebar expander 44 x 44, with `Gtk.Widget.pick` hitting it
+  21 px left and right of its center.
+- A `GtkListView` row with `activatable = false` has no `.activatable` class; an activatable row
+  has it.
+
+Not yet seen: focus rings on entries, entry rows and calendar days, the selected calendar day,
+destructive buttons, swatches, and every popover rule. The first screenshot run must check
+them.
+
 ```css
 /* ---------- tokens ---------- */
 :root {
@@ -1312,7 +1787,9 @@ must check them.
   --tick-orange: #c36400;
   --tick-blue: #246fe0;
   --tick-green: #007335;
+  --tick-p4: rgb(0 0 6 / 58%);              /* p4 ring: a concrete color, never currentColor */
   --tick-on-fill: #ffffff;                  /* check mark on a filled ring */
+  --tick-on-accent: #ffffff;                /* text on accent and destructive fills (2.4.4) */
   --tick-float-border: rgb(0 0 0 / 14%);
   --tick-float-shadow: 0 1px 5px 1px rgb(0 0 0 / 9%), 0 2px 14px 3px rgb(0 0 0 / 5%);
 }
@@ -1322,7 +1799,9 @@ must check them.
     --tick-orange: #eb8909;
     --tick-blue: #55a0ff;
     --tick-green: #78e9ab;
+    --tick-p4: rgb(255 255 255 / 72%);
     --tick-on-fill: #1d1d20;
+    --tick-on-accent: #1d1d20;
     --tick-float-border: rgb(255 255 255 / 8%);
   }
 }
@@ -1331,8 +1810,40 @@ must check them.
 }
 
 /* ---------- solid focus ring (2.4.5) ---------- */
-*:focus:focus-visible {
+*:focus:focus-visible,
+entry:focus-within,
+spinbutton:focus-within,
+row.entry.focused,
+row.spin.focused,
+calendar > grid > label:focus,
+expander-widget:focus:focus-visible > box > title {
   outline-color: var(--accent-color);
+}
+
+/* ---------- text on accent and destructive fills (2.4.4) ---------- */
+/* libadwaita's white on --accent-bg-color fails AA; fill with the derived color instead.
+   Hover and pressed keep libadwaita's background-image overlays. */
+button.suggested-action,
+button.suggested-action:checked,
+menubutton.suggested-action,
+splitbutton.suggested-action {
+  background-color: var(--accent-color);
+  color: var(--tick-on-accent);
+}
+button.destructive-action,
+button.destructive-action:checked {
+  background-color: var(--destructive-color);
+  color: var(--tick-on-accent);
+}
+/* libadwaita 1.9.4 changes background-color on these states; use overlays like suggested */
+button.destructive-action:hover { background-image: image(color-mix(in srgb, currentColor 10%, transparent)); }
+button.destructive-action:active,
+button.destructive-action.keyboard-activating { background-image: image(rgb(0 0 6 / 20%)); }
+/* a ring inside an accent-colored fill would vanish */
+button.suggested-action:focus:focus-visible,
+button.destructive-action:focus:focus-visible,
+popover calendar > grid > label.day-number:selected:focus {
+  outline-color: var(--tick-on-accent);
 }
 
 /* ---------- 44 px targets (2.7) ---------- */
@@ -1361,10 +1872,29 @@ headerbar splitbutton > menubutton {
 }
 .tick-entry { min-height: 44px; }
 .tick-picker-row { min-height: 44px; }
-button.link.tick-link-44 { min-height: 44px; }
+/* min-height is the content box (7.4 pitfall 18): 34 + 2 x 5 px button padding = 44 */
+button.link.tick-link-44,
+button.tick-attachment { min-height: 34px; }
 popover calendar > header > button {
   min-width: 44px;
   min-height: 44px;
+  padding: 0;
+}
+/* the short alert layout pads 8 px: 28 + 16 = 44 */
+dialog.alert.short .response-area > button { min-height: 28px; }
+/* entry icons and entry-row buttons (unverified node paths, 2.7) */
+entry.tick-entry > image { min-width: 44px; }
+row.entry button.image-button {
+  min-width: 34px;
+  min-height: 34px;
+}
+/* sidebar expander arrow: 16 px icon, 44 x 44 hit area (4.1). Horizontal only: the expander
+   already fills the 44 px row height; a vertical border would reach into the rows above and below */
+.navigation-sidebar treeexpander > expander {
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  margin-left: -14px;
+  margin-right: -14px;
 }
 
 /* ---------- one floating surface (2.6) ---------- */
@@ -1395,8 +1925,14 @@ popover.menu modelbutton { min-height: 44px; }
 /* ---------- sidebar (4.1) ---------- */
 .navigation-sidebar > row {
   min-height: 44px;
-  margin: 0 6px;
+  margin: 0 6px;                            /* libadwaita: 0 6px 2px */
+  padding: 0 12px;                          /* libadwaita: 0 8px */
 }
+.tick-sidebar-header { min-height: 44px; }
+/* row content starts 14 px after the expander arrow: 4 px border-spacing + 10
+   (GTK CSS has no logical margins; or set the widget's margin-start in code) */
+.tick-sidebar-row-content:dir(ltr) { margin-left: 10px; }
+.tick-sidebar-row-content:dir(rtl) { margin-right: 10px; }
 .navigation-sidebar .tick-count { font-variant-numeric: tabular-nums; }
 
 /* ---------- task list (4.4) ---------- */
@@ -1406,8 +1942,9 @@ listview.tick-task-list > row {
   margin: 0 6px;
   border-radius: 9px;
 }
-listview.tick-task-list > row:hover { background-color: color-mix(in srgb, currentColor 4%, transparent); }
-listview.tick-task-list > row:active { background-color: color-mix(in srgb, currentColor 8%, transparent); }
+/* only activatable rows tint; view, day and month headers set activatable = false (pitfall 14) */
+listview.tick-task-list > row.activatable:hover { background-color: color-mix(in srgb, currentColor 4%, transparent); }
+listview.tick-task-list > row.activatable:active { background-color: color-mix(in srgb, currentColor 8%, transparent); }
 listview.tick-task-list > row:selected { background-color: color-mix(in srgb, currentColor 10%, transparent); }
 listview.tick-task-list > row:selected:hover { background-color: color-mix(in srgb, currentColor 13%, transparent); }
 listview.tick-task-list > row:focus:focus-visible { outline-offset: -2px; }
@@ -1433,7 +1970,7 @@ checkbutton.tick-ring {
   min-height: 44px;
   padding: 0;
   border-radius: 9999px;
-  --tick-ring: color-mix(in srgb, currentColor 72%, transparent);
+  --tick-ring: var(--tick-p4);              /* never currentColor: see 7.4 pitfall 17 */
   --tick-ring-rest: transparent;
 }
 checkbutton.tick-ring.p1 { --tick-ring: var(--tick-red); }
@@ -1489,7 +2026,7 @@ checkbutton.tick-ring > check:checked {
   .tick-chevron image { transition: none; }
 }
 
-/* ---------- section and Upcoming headers (4.5, 4.7) ---------- */
+/* ---------- task-list section and Upcoming headers (4.5, 4.7) ---------- */
 .tick-section-header {
   margin-top: 24px;
   min-height: 44px;
@@ -1519,6 +2056,9 @@ checkbutton.tick-ring > check:checked {
 
 /* ---------- date picker calendar (4.9) ---------- */
 popover calendar { border: none; background: none; }
+popover calendar > grid > label {
+  margin: 0;                                /* libadwaita: 3px top and right; 7 x 47 would not fit */
+}
 popover calendar > grid > label.day-number {
   min-width: 44px;
   min-height: 44px;
@@ -1535,9 +2075,38 @@ popover calendar > grid > label.today {
   font-weight: 700;
 }
 popover calendar > grid > label.day-number:selected {
-  background-color: var(--accent-bg-color);
-  color: var(--accent-fg-color);
+  background-color: var(--accent-color);    /* not --accent-bg-color: 2.4.4 */
+  color: var(--tick-on-accent);
 }
+
+/* ---------- color picker swatches (4.23.1) ---------- */
+/* GtkCheckButton whose child is a 24 px .tick-dot.tick-color-<name> box; the indicator is hidden */
+checkbutton.tick-swatch {
+  padding: 10px;                            /* 24 + 2 x 10 = 44 */
+  border-spacing: 0;
+  border-radius: 9999px;
+}
+checkbutton.tick-swatch > check {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  -gtk-icon-source: none;
+}
+checkbutton.tick-swatch > .tick-dot {
+  min-width: 24px;
+  min-height: 24px;
+}
+checkbutton.tick-swatch:hover > .tick-dot {
+  box-shadow: 0 0 0 2px var(--dialog-bg-color), 0 0 0 4px color-mix(in srgb, currentColor 72%, transparent);
+}
+checkbutton.tick-swatch:checked > .tick-dot {
+  box-shadow: 0 0 0 2px var(--dialog-bg-color), 0 0 0 4px currentColor;
+}
+checkbutton.tick-swatch:focus:focus-visible { outline-offset: -2px; }
 
 /* ---------- project colors (2.4.7); class = tick-color-<api name> ---------- */
 .tick-color-berry_red { background-color: #b8255f; }
@@ -1649,9 +2218,13 @@ gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` na
 14. **Headers are model rows, not `GtkListHeader`s.** `GtkListView`'s section headers only
     exist for sections with at least one item, so a collapsed project section and an empty
     Upcoming day would lose their headers, and headers cannot take focus. Put the view header,
-    section headers, day and month headers, ghost rows and "Load more" into the list model as
-    their own item kinds. For those rows set `GtkListItem:selectable = false`; headers and ghost
-    rows stay `focusable` and `activatable` (Enter toggles a section, activates a ghost row).
+    search header, section headers, section editors, day and month headers, ghost rows, empty
+    states, loading rows and "Load more" into the list model as their own item kinds. For those
+    rows set `GtkListItem:selectable = false`. View, search, day and month headers, empty states
+    and loading rows are also `activatable = false` and `focusable = false`: GTK then drops the
+    row's `.activatable` class, so the hover tint (7.2 matches `row.activatable:hover`) skips
+    them. Section headers and ghost rows stay `focusable` and `activatable` (Enter toggles a
+    section, activates a ghost row) and keep the hover tint, since clicking them does something.
     The task-count and selection logic must skip non-task kinds.
 15. **Color-scheme media queries need the provider's scheme.** The auto-loaded `style.css`
     follows `AdwStyleManager` (verified: dark values apply). A `GtkCssProvider` that Tick creates
@@ -1662,6 +2235,27 @@ gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` na
     (newer than 4.22/1.9 at the time of writing); `gtk4` pulls `adwaita-fonts`, and the workflow
     installs `noto-fonts-cjk`, so the font stack resolves the same way. Compare screenshots from
     the same environment only.
+17. **`currentColor` inside a custom property resolves where it is used.** A variable like
+    `--x: color-mix(in srgb, currentColor 72%, transparent)` is substituted as tokens; each
+    property that uses `var(--x)` resolves `currentColor` against its own element. If the same
+    element sets `color: var(--x)`, then `box-shadow` or `background-color` with `var(--x)` mixes
+    the already-mixed color again (72 % of 72 %), and when `color` changes (a checked ring sets
+    `color: var(--tick-on-fill)`) the fill follows it. Custom properties hold concrete colors
+    (`--tick-p4`), never `currentColor`.
+18. **`min-width` and `min-height` size the content box.** Padding and border are added on top.
+    A libadwaita button (5 px vertical padding) with `min-height: 44px` renders 54 px tall. Set
+    `min-height: 34px` on padded buttons, or `padding: 0` with 44 (`.tick-icon-44`).
+19. **One breakpoint at a time.** `AdwBreakpoint` setters do not accumulate: only the last
+    matching breakpoint applies, and leaving it restores the defaults. Every breakpoint lists
+    its full setter set (3.3). Widgets built by a list factory cannot be setter targets; bind
+    them to `TickWindow:narrow`.
+20. **Tooltips are pointer-only in practice.** Do not rely on a tooltip for anything the user
+    needs (2.6). Put the text in the accessible description and somewhere visible.
+21. **Pango markup has no CSS classes.** Styled spans inside a `GtkLabel` (description code,
+    links) use Pango attributes (`font_family`, `underline`, `foreground` with a concrete color),
+    resolved again on theme, accent and font changes.
+22. **`AdwToastOverlay` queues.** `add_toast` does not replace a visible toast. Dismiss the
+    current one first (4.12).
 
 ---
 
@@ -1698,7 +2292,8 @@ A "no" blocks the PR unless the item is marked as a known gap in the PR body.
 - [ ] Task titles are the most prominent text; no cards around tasks; no per-row buttons visible
       at rest except the ring and (for parents) the collapse chevron.
 - [ ] The accent appears only on focus rings, links, the suggested button, the calendar's
-      selected and today days, and drag indicators. Selected rows are neutral grey.
+      selected and today days, and drag indicators. Selected rows are neutral grey. Only
+      activatable rows get a hover tint (view, day and month headers do not).
 - [ ] No colors beyond: accent, red, orange, blue, green (2.4.3), project dots, avatars.
 - [ ] Due dates are in the meta line, not before the title; the Today view shows times only;
       titles start at the same x in every row of a level.
@@ -1708,7 +2303,11 @@ A "no" blocks the PR unless the item is marked as a known gap in the PR body.
 - [ ] Both themes show the same layout; dark is not an inversion (popovers lighter than the view,
       faint light ring on floating surfaces).
 - [ ] Secondary text is readable on hover and selected rows (it uses 72 %, not 55 %).
-- [ ] Priority rings and project dots are visible on every background in both themes.
+- [ ] Priority rings and project dots are visible on every background in both themes. The
+      screenshot set includes a p4 task at rest, hovered and checked, in light and dark.
+- [ ] Text on accent and destructive fills (suggested buttons, the selected calendar day,
+      confirmation buttons) uses `--tick-on-accent` on the derived color, checked with a
+      non-blue accent (yellow is the worst case for libadwaita's default).
 
 **Wide and narrow**
 
@@ -1727,9 +2326,18 @@ A "no" blocks the PR unless the item is marked as a known gap in the PR body.
 
 - [ ] Every control is at least 44 x 44 (rows, ring, header buttons via `.tick-hit`, calendar
       days). E2E AT-SPI extents confirm header buttons.
-- [ ] Focus rings are visible (solid accent) on rows, buttons and calendar days.
-- [ ] Anything that appears on hover also appears on keyboard focus; Escape closes every popover,
-      dialog and the detail pane.
+- [ ] Focus rings are visible (solid accent) on rows, buttons, calendar days, text entries
+      (quick add, search, date entry, composer) and entry rows (login token, dialog fields); on
+      suggested and destructive buttons and the selected calendar day the ring is
+      `--tick-on-accent` inside the fill. Checked by focusing an entry through AT-SPI and
+      sampling the ring pixels.
+- [ ] Hit targets added in review: sidebar expander, dialog and popover footer buttons,
+      attachment rows, color swatches, entry icons and the password row's show-text button are
+      44 x 44 (AT-SPI extents or `Gtk.Widget.pick`).
+- [ ] Anything that appears on hover also appears on keyboard focus and has a touch path
+      (sidebar "Add ..." buttons visible in B2/B3 and in the header's long-press menu); Escape
+      closes every popover, dialog and the detail pane.
+- [ ] No information lives only in a tooltip (failed-change message, sync state).
 - [ ] With "Reduce Animation" on (`gtk-enable-animations = false`) and with
       `prefers-reduced-motion: reduce`, Tick's own elements do not slide or rotate, and its fades
       (row fade-out, title hand-off) remain.
@@ -1740,4 +2348,5 @@ A "no" blocks the PR unless the item is marked as a known gap in the PR body.
       dates as `11 月 22 日 周日`.
 - [ ] Latin letters and digits in Chinese strings come from the UI font, not the CJK font.
 - [ ] Every interactive control has an accessible name (E2E finds it by name).
-- [ ] Empty states use the copy in 4.13; errors say what happened and what to do.
+- [ ] Empty states use the copy in 4.13; errors say what happened and what to do; confirmation
+      dialogs use the copy in 4.25.
