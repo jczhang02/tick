@@ -461,6 +461,7 @@ async fn backs_off_on_429_and_5xx() {
         retry_after: Some(1),
         count: 1,
         path: None,
+        body_contains: None,
     });
     e.enqueue(Command::item_update(
         "6Xtask00000000007",
@@ -493,6 +494,7 @@ async fn backs_off_on_429_and_5xx() {
         retry_after: Some(7),
         count: 1,
         path: None,
+        body_contains: None,
     });
     let err = e.engine.sync_once().await.unwrap_err();
     assert_eq!(err.retry_after(), Some(7));
@@ -502,6 +504,7 @@ async fn backs_off_on_429_and_5xx() {
         retry_after: None,
         count: 2,
         path: None,
+        body_contains: None,
     });
     e.engine
         .sync_with_retry(4, Duration::from_millis(10))
@@ -915,39 +918,72 @@ async fn background_engine_honors_retry_after() {
             break;
         }
     }
+    const RETRY_AFTER: u64 = 5;
     e.server.inject(Failure::Status {
         status: 429,
-        retry_after: Some(2),
+        retry_after: Some(RETRY_AFTER),
         count: 1,
         path: Some("/api/v1/sync".into()),
+        body_contains: None,
     });
     handle.sync_now();
-    let sync_log = || e.server.requests_to("/api/v1/sync");
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !sync_log().iter().any(|r| r.status == 429) {
+    while !e.server.requests().iter().any(|r| r.status == 429) {
         assert!(Instant::now() < deadline, "the 429 never happened");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let limited_at = Instant::now();
-    let count = sync_log().len();
-    // Neither user triggers nor the 100 ms timer may sync inside the retry_after window.
-    for _ in 0..6 {
+    // Neither user triggers, the 100 ms timer nor history/filter requests may reach the API
+    // inside the retry_after window. Poke it for about 2 s, well inside the 5 s window.
+    for _ in 0..8 {
         handle.sync_now();
         handle.set_foreground(false);
         handle.set_foreground(true);
+        handle.load_completed(true);
+        handle.fetch_filter("@home*");
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    assert_eq!(sync_log().len(), count, "synced during the backoff window");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while sync_log().len() == count {
+    let log = e.server.requests();
+    let limited = log.iter().position(|r| r.status == 429).unwrap();
+    assert_eq!(
+        limited,
+        log.len() - 1,
+        "a request went out during the backoff window"
+    );
+    // After the window: the deferred history and filter requests run once, then syncs resume.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let log = e.server.requests();
+        let after = &log[limited + 1..];
+        let has = |path: &str| after.iter().any(|r| r.path == path);
+        if has("/api/v1/sync")
+            && has("/api/v1/tasks/completed/by_completion_date")
+            && has("/api/v1/tasks/filter")
+        {
+            break;
+        }
         assert!(
             Instant::now() < deadline,
-            "sync did not resume after retry_after"
+            "requests did not resume: {after:?}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(limited_at.elapsed() >= Duration::from_millis(1900));
-    assert_eq!(sync_log().last().unwrap().status, 200);
+    let log = e.server.requests();
+    let first_after = &log[limited + 1];
+    // Both times come from the server's request log, so test polling cannot skew them.
+    assert!(
+        first_after.at_ms - log[limited].at_ms >= RETRY_AFTER * 1000,
+        "resumed after {} ms",
+        first_after.at_ms - log[limited].at_ms
+    );
+    assert!(log[limited + 1..].iter().all(|r| r.status == 200));
+    assert_eq!(
+        log[limited + 1..]
+            .iter()
+            .filter(|r| r.path == "/api/v1/tasks/completed/by_completion_date")
+            .count(),
+        1,
+        "deferred requests are deduplicated"
+    );
     handle.shutdown();
 }
 
@@ -960,6 +996,7 @@ async fn rejected_quick_add_does_not_block_the_queue() {
         retry_after: None,
         count: 1,
         path: Some("/api/v1/tasks/quick".into()),
+        body_contains: None,
     });
     let q = Command::quick_add("Forbidden task");
     let temp = q.temp_id.clone().unwrap();
@@ -978,4 +1015,399 @@ async fn rejected_quick_add_does_not_block_the_queue() {
     );
     let quick = e.server.requests_to("/api/v1/tasks/quick");
     assert_eq!(quick.len(), 1);
+}
+
+#[tokio::test]
+async fn edits_with_a_resolved_temp_id_reach_the_server() {
+    let mut e = env().await;
+    e.engine.sync_once().await.unwrap();
+    // The UI has its own connection to the same cache.
+    let mut ui = Store::open(e.store().path().unwrap()).unwrap();
+    ui.set_clock(fixed_clock());
+
+    let add = Command::item_add(json!({"content": "Fresh task", "project_id": seed::INBOX_ID}));
+    let temp = add.temp_id.clone().unwrap();
+    ui.enqueue(add).unwrap();
+    let report = e.engine.sync_once().await.unwrap();
+    let real = report.changes.resolve(&temp).to_owned();
+    assert!(!is_uuid(&real), "{real}");
+    assert!(ui.task(&temp).unwrap().is_none());
+
+    // The detail pane opened right after creating the task still holds the temp id.
+    let changes = ui
+        .enqueue(Command::item_update(
+            &temp,
+            json!({"description": "edited later"}),
+        ))
+        .unwrap();
+    assert_eq!(changes.id_map, vec![(temp.clone(), real.clone())]);
+    assert_eq!(ui.resolve_id(&temp).unwrap(), real);
+    assert_eq!(ui.task(&real).unwrap().unwrap().description, "edited later");
+    // Nested ids are rewritten too.
+    ui.enqueue(Command::note_add(&temp, "a comment")).unwrap();
+
+    e.engine.sync_once().await.unwrap();
+    assert!(
+        e.store().failed_commands().unwrap().is_empty(),
+        "{:?}",
+        e.store().failed_commands()
+    );
+    assert_eq!(e.server_item(&real).unwrap()["description"], "edited later");
+    assert!(
+        e.server
+            .state()
+            .live("notes")
+            .any(|n| n["item_id"] == real.as_str() && n["content"] == "a comment")
+    );
+
+    // The same after a queued quick add.
+    let q = Command::quick_add("Quick one p3");
+    let qtemp = q.temp_id.clone().unwrap();
+    ui.enqueue(q).unwrap();
+    let report = e.engine.sync_once().await.unwrap();
+    let qreal = report.changes.resolve(&qtemp).to_owned();
+    assert_ne!(qreal, qtemp);
+    ui.enqueue(Command::item_update(
+        &qtemp,
+        json!({"content": "Quick one, renamed"}),
+    ))
+    .unwrap();
+    e.engine.sync_once().await.unwrap();
+    assert!(e.store().failed_commands().unwrap().is_empty());
+    assert_eq!(
+        e.server_item(&qreal).unwrap()["content"],
+        "Quick one, renamed"
+    );
+}
+
+#[tokio::test]
+async fn batches_stay_under_the_request_body_limit() {
+    let mut e = env().await;
+    e.engine.sync_once().await.unwrap();
+    // Chinese text: 3 bytes per character in JSON, 9 once form-encoded.
+    let long = "很长的描述".repeat(600);
+    for i in 0..120 {
+        e.enqueue(Command::item_add(json!({
+            "content": format!("Bulk {i}"),
+            "project_id": seed::INBOX_ID,
+            "description": long,
+        })));
+    }
+    let report = e.engine.sync_once().await.unwrap();
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(e.store().pending_count().unwrap(), 0);
+    let sync = e.server.requests_to("/api/v1/sync");
+    assert!(
+        sync.iter().all(|r| r.status == 200),
+        "a request was refused"
+    );
+    assert!(e.sync_requests_with_commands().len() >= 3);
+    let created = e
+        .server
+        .state()
+        .live("items")
+        .filter(|v| {
+            v["content"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("Bulk "))
+        })
+        .count();
+    assert_eq!(created, 120);
+}
+
+#[tokio::test]
+async fn a_request_level_rejection_drops_only_the_bad_command() {
+    let mut e = env().await;
+    e.engine.sync_once().await.unwrap();
+    let before = e.task("6Xtask00000000004").unwrap();
+    // The server refuses every request that carries this text (a whole-request 400).
+    e.server.inject(Failure::Status {
+        status: 400,
+        retry_after: None,
+        count: 100,
+        path: Some("/api/v1/sync".into()),
+        body_contains: Some("poison".into()),
+    });
+    e.enqueue(Command::item_update(
+        "6Xtask00000000007",
+        json!({"content": "First"}),
+    ));
+    e.enqueue(Command::item_update(
+        "6Xtask00000000004",
+        json!({"content": "poison"}),
+    ));
+    e.enqueue(Command::item_update(
+        "6Xtask00000000003",
+        json!({"content": "Third"}),
+    ));
+    e.enqueue(Command::item_update(
+        "6Xtask00000000002",
+        json!({"content": "Fourth"}),
+    ));
+    // An oversized command is refused on its own (413) and dropped the same way.
+    let huge = "x".repeat(1100 * 1024);
+    e.enqueue(Command::item_update(
+        "6Xtask00000000001",
+        json!({"description": huge}),
+    ));
+    e.enqueue(Command::item_update(
+        "6Xtask00000000005",
+        json!({"content": "Last"}),
+    ));
+
+    let report = e.engine.sync_once().await.unwrap();
+    assert_eq!(report.failed.len(), 2, "{:?}", report.failed);
+    assert_eq!(e.store().pending_count().unwrap(), 0);
+    for (id, content) in [
+        ("6Xtask00000000007", "First"),
+        ("6Xtask00000000003", "Third"),
+        ("6Xtask00000000002", "Fourth"),
+        ("6Xtask00000000005", "Last"),
+    ] {
+        assert_eq!(e.server_item(id).unwrap()["content"], content);
+    }
+    let failed = e.store().failed_commands().unwrap();
+    assert_eq!(failed.len(), 2);
+    assert!(failed.iter().any(|f| f.command.args["content"] == "poison"));
+    assert!(failed.iter().any(|f| f.error.contains("413")), "{failed:?}");
+    // Rolled back locally.
+    assert_eq!(e.task("6Xtask00000000004").unwrap().content, before.content);
+    assert!(!e.task("6Xtask00000000001").unwrap().pending);
+    assert!(
+        e.server
+            .requests_to("/api/v1/sync")
+            .iter()
+            .all(|r| r.body.to_string().len() < 2 * 1024 * 1024 || r.status == 413)
+    );
+}
+
+#[tokio::test]
+async fn a_refused_read_keeps_the_queue() {
+    let mut e = env().await;
+    e.engine.sync_once().await.unwrap();
+    e.server.inject(Failure::Status {
+        status: 400,
+        retry_after: None,
+        count: 10,
+        path: Some("/api/v1/sync".into()),
+        body_contains: None,
+    });
+    e.enqueue(Command::item_update(
+        "6Xtask00000000007",
+        json!({"content": "Kept"}),
+    ));
+    let err = e.engine.sync_once().await.unwrap_err();
+    assert!(
+        matches!(err, EngineError::Api(ApiError::Request { status: 400, .. })),
+        "{err:?}"
+    );
+    // The command is not blamed when a request without commands is refused too.
+    assert_eq!(e.store().pending_count().unwrap(), 1);
+    assert!(e.store().failed_commands().unwrap().is_empty());
+    assert_eq!(e.server.requests_to("/api/v1/sync").len(), 3);
+    e.server.state().clear_failures();
+    e.engine.sync_once().await.unwrap();
+    assert_eq!(
+        e.server_item("6Xtask00000000007").unwrap()["content"],
+        "Kept"
+    );
+}
+
+#[tokio::test]
+async fn unreadable_quick_add_answers_are_retried_then_given_up() {
+    let mut e = env().await;
+    e.engine.sync_once().await.unwrap();
+    // A 404 (for example a captive portal) is not a verdict on the text: retry.
+    e.server.inject(Failure::Status {
+        status: 404,
+        retry_after: None,
+        count: 1,
+        path: Some("/api/v1/tasks/quick".into()),
+        body_contains: None,
+    });
+    e.enqueue(Command::quick_add("Water plants"));
+    let err = e.engine.sync_once().await.unwrap_err();
+    assert!(err.is_transient(), "{err:?}");
+    assert_eq!(e.store().pending_count().unwrap(), 1);
+    assert!(e.store().failed_commands().unwrap().is_empty());
+    e.engine.sync_once().await.unwrap();
+    assert_eq!(e.server_items_with_content("Water plants").len(), 1);
+
+    // Going offline is not an attempt.
+    e.enqueue(Command::quick_add("Offline note"));
+    e.server.set_offline(true);
+    for _ in 0..(tick_core::store::MAX_ATTEMPTS + 2) {
+        assert!(e.engine.sync_once().await.is_err());
+    }
+    assert_eq!(e.store().pending_commands().unwrap()[0].attempts, 0);
+    e.server.set_offline(false);
+    e.engine.sync_once().await.unwrap();
+    assert_eq!(e.server_items_with_content("Offline note").len(), 1);
+
+    // A server that keeps failing: the quick add moves to the failed list eventually and the
+    // rest of the queue goes through.
+    e.server.inject(Failure::Status {
+        status: 500,
+        retry_after: None,
+        count: 1000,
+        path: Some("/api/v1/tasks/quick".into()),
+        body_contains: None,
+    });
+    e.enqueue(Command::quick_add("Never accepted"));
+    e.enqueue(Command::item_update(
+        "6Xtask00000000007",
+        json!({"content": "Behind it"}),
+    ));
+    for _ in 1..tick_core::store::MAX_ATTEMPTS {
+        assert!(e.engine.sync_once().await.is_err());
+    }
+    let report = e.engine.sync_once().await.unwrap();
+    assert_eq!(report.failed.len(), 1, "{:?}", report.failed);
+    let failed = e.store().failed_commands().unwrap();
+    assert_eq!(failed[0].command.args["text"], "Never accepted");
+    assert_eq!(
+        e.server_item("6Xtask00000000007").unwrap()["content"],
+        "Behind it"
+    );
+}
+
+#[tokio::test]
+async fn a_command_that_keeps_failing_is_given_up() {
+    let mut e = env().await;
+    e.engine.sync_once().await.unwrap();
+    let before = e.task("6Xtask00000000007").unwrap();
+    e.server.inject(Failure::CommandError {
+        command_type: "item_update".into(),
+        args_contain: Some("Stuck".into()),
+        error: Some(json!({"error": "busy", "http_code": 503, "error_code": 503})),
+        count: 1000,
+    });
+    e.enqueue(Command::item_update(
+        "6Xtask00000000007",
+        json!({"content": "Stuck"}),
+    ));
+    for _ in 1..tick_core::store::MAX_ATTEMPTS {
+        assert!(e.engine.sync_once().await.unwrap_err().is_transient());
+        assert_eq!(e.store().pending_count().unwrap(), 1);
+    }
+    let report = e.engine.sync_once().await.unwrap();
+    assert_eq!(report.failed.len(), 1);
+    assert_eq!(e.store().pending_count().unwrap(), 0);
+    assert!(
+        e.store().failed_commands().unwrap()[0]
+            .error
+            .contains("gave up")
+    );
+    assert_eq!(e.task("6Xtask00000000007").unwrap().content, before.content);
+}
+
+#[tokio::test]
+async fn many_queued_quick_adds_go_out_in_one_cycle() {
+    let mut e = env().await;
+    e.engine.sync_once().await.unwrap();
+    for i in 0..12 {
+        e.enqueue(Command::quick_add(&format!("Offline idea {i}")));
+    }
+    e.engine.sync_once().await.unwrap();
+    assert_eq!(e.store().pending_count().unwrap(), 0);
+    assert_eq!(e.server.requests_to("/api/v1/tasks/quick").len(), 12);
+}
+
+#[tokio::test]
+async fn deferred_commands_wait_for_the_undo_window() {
+    let mut e = env().await;
+    e.engine.sync_once().await.unwrap();
+    let delay = Duration::from_millis(400);
+    e.engine
+        .store_mut()
+        .enqueue_deferred(vec![Command::item_delete("6Xtask00000000007")], delay)
+        .unwrap();
+    // Hidden right away, but not sent.
+    assert!(e.task("6Xtask00000000007").is_none());
+    e.engine.sync_once().await.unwrap();
+    assert!(e.sync_requests_with_commands().is_empty());
+    // Undo inside the window.
+    let uuid = e.store().pending_commands().unwrap()[0]
+        .command
+        .uuid
+        .clone();
+    e.engine.store_mut().discard_queued(&uuid).unwrap();
+    assert!(e.task("6Xtask00000000007").is_some());
+
+    // Order is kept: a later command waits behind a deferred one.
+    e.engine
+        .store_mut()
+        .enqueue_deferred(vec![Command::item_close("6Xtask00000000003")], delay)
+        .unwrap();
+    e.enqueue(Command::item_update(
+        "6Xtask00000000002",
+        json!({"content": "After close"}),
+    ));
+    e.engine.sync_once().await.unwrap();
+    assert!(e.sync_requests_with_commands().is_empty());
+    assert!(e.store().next_deferred_due().unwrap().is_some());
+    tokio::time::sleep(delay + Duration::from_millis(50)).await;
+    assert!(e.store().next_deferred_due().unwrap().is_none());
+    e.engine.sync_once().await.unwrap();
+    let sent = e.sync_requests_with_commands();
+    assert_eq!(sent.len(), 1);
+    let kinds: Vec<&str> = sent[0]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, vec!["item_close", "item_update"]);
+    assert!(e.server_item("6Xtask00000000007").is_some());
+}
+
+#[tokio::test]
+async fn background_engine_sends_deferred_commands_when_due() {
+    let e = env().await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("bg.sqlite3");
+    let config = tick_core::EngineConfig {
+        api_base: e.server.base_url(),
+        token: e.server.token(),
+        db_path: db.clone(),
+        // Long cadences: only the deferred deadline can trigger the second sync in time.
+        foreground_interval: Duration::from_secs(60),
+        background_interval: Duration::from_secs(60),
+        clock: Some(fixed_clock()),
+    };
+    let (handle, events) = tick_core::Engine::spawn(config).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(Instant::now() < deadline, "no first sync");
+        if let Ok(Ok(tick_core::EngineEvent::Status(s))) =
+            tokio::time::timeout(Duration::from_secs(5), events.recv()).await
+            && s.state == ConnState::Online
+        {
+            break;
+        }
+    }
+    let mut ui = Store::open(&db).unwrap();
+    ui.set_clock(fixed_clock());
+    ui.enqueue_deferred(
+        vec![Command::item_delete("6Xtask00000000007")],
+        Duration::from_millis(500),
+    )
+    .unwrap();
+    let enqueued = Instant::now();
+    handle.sync_now();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while e
+        .server
+        .state()
+        .live("items")
+        .any(|v| v["id"] == "6Xtask00000000007")
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the deferred delete was never sent"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(enqueued.elapsed() >= Duration::from_millis(500));
+    handle.shutdown();
 }

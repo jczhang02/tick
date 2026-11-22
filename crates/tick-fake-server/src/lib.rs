@@ -81,6 +81,9 @@ pub enum Failure {
         count: u32,
         #[serde(default)]
         path: Option<String>,
+        /// Only requests whose decoded body (as logged, serialized to JSON) contains this.
+        #[serde(default)]
+        body_contains: Option<String>,
     },
     /// Process the next `/sync` request, then answer with `status` instead of the result
     /// (the client cannot tell whether its commands ran).
@@ -103,6 +106,9 @@ pub enum Failure {
     },
 }
 
+/// Request body limit for POST requests (`docs/api/pages/request-limits.md`).
+pub const MAX_BODY_BYTES: usize = 1024 * 1024;
+
 fn one() -> u32 {
     1
 }
@@ -118,6 +124,8 @@ pub struct LoggedRequest {
     /// Decoded form fields (`commands` and `resource_types` parsed as JSON) or JSON body.
     pub body: Value,
     pub status: u16,
+    /// Arrival time in ms since the server state was created (monotonic clock).
+    pub at_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +154,8 @@ pub struct State {
     pub offline: bool,
     failures: VecDeque<Failure>,
     pub log: Vec<LoggedRequest>,
+    /// Time origin of [`LoggedRequest::at_ms`].
+    epoch: std::time::Instant,
 }
 
 impl State {
@@ -169,6 +179,7 @@ impl State {
             offline: false,
             failures: VecDeque::new(),
             log: Vec::new(),
+            epoch: std::time::Instant::now(),
         };
         seed::empty(&mut s);
         s
@@ -349,9 +360,16 @@ impl State {
         self.offline = false;
     }
 
-    fn take_status_failure(&mut self, path: &str) -> Option<(u16, Option<u64>)> {
+    fn take_status_failure(&mut self, path: &str, body: &str) -> Option<(u16, Option<u64>)> {
         let idx = self.failures.iter().position(|f| match f {
-            Failure::Status { path: p, .. } => p.as_deref().is_none_or(|p| p == path),
+            Failure::Status {
+                path: p,
+                body_contains,
+                ..
+            } => {
+                p.as_deref().is_none_or(|p| p == path)
+                    && body_contains.as_deref().is_none_or(|n| body.contains(n))
+            }
             _ => false,
         })?;
         let Failure::Status {
@@ -468,6 +486,19 @@ fn status_error(status: u16, retry_after: Option<u64>) -> Response {
     error_response(status, tag, code, msg, retry_after)
 }
 
+/// docs/api/pages/request-limits.md: "There is a 1MiB HTTP request body limit on POST
+/// requests." The status and error body for a larger request are not documented; `413` with
+/// the usual error shape is our choice.
+fn too_large() -> Response {
+    error_response(
+        413,
+        "REQUEST_TOO_LARGE",
+        413,
+        "Request body exceeds the 1 MiB limit",
+        None,
+    )
+}
+
 pub(crate) fn bad_request(msg: &str) -> Response {
     error_response(400, "INVALID_ARGUMENT_VALUE", 20, msg, None)
 }
@@ -504,7 +535,10 @@ enum Gate {
 
 /// Common checks for `/api/` requests: log, offline, injected status, bearer token.
 fn gate(st: &mut State, method: &Method, uri: &Uri, headers: &HeaderMap, body: Value) -> Gate {
+    let body_text = body.to_string();
+    let at_ms = st.epoch.elapsed().as_millis() as u64;
     st.log.push(LoggedRequest {
+        at_ms,
         method: method.to_string(),
         path: uri.path().to_owned(),
         query: uri.query().unwrap_or("").to_owned(),
@@ -519,7 +553,7 @@ fn gate(st: &mut State, method: &Method, uri: &Uri, headers: &HeaderMap, body: V
     if st.offline {
         return Gate::Reject(dropped_connection());
     }
-    if let Some((status, retry_after)) = st.take_status_failure(uri.path()) {
+    if let Some((status, retry_after)) = st.take_status_failure(uri.path(), &body_text) {
         set_status(st, status);
         return Gate::Reject(status_error(status, retry_after));
     }
@@ -597,6 +631,9 @@ async fn sync_handler(
     let mut st = lock(&state);
     if let Gate::Reject(r) = gate(&mut st, &method, &uri, &headers, Value::Object(logged)) {
         return r;
+    }
+    if body.len() > MAX_BODY_BYTES {
+        return finish(&mut st, too_large());
     }
     let resp = match run_sync(&mut st, &form) {
         Ok(v) => {
@@ -817,6 +854,9 @@ async fn quick_handler(
     let mut st = lock(&state);
     if let Gate::Reject(r) = gate(&mut st, &method, &uri, &headers, parsed.clone()) {
         return r;
+    }
+    if body.len() > MAX_BODY_BYTES {
+        return finish(&mut st, too_large());
     }
     let resp = match serde_json::from_value::<QuickBody>(parsed) {
         Ok(q) if !q.text.trim().is_empty() => {
@@ -1058,6 +1098,9 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/__test/reset", post(reset_handler))
         .route("/__test/now", post(now_handler))
+        // Accept larger bodies so the handlers can answer oversized requests the documented
+        // way (and log them) instead of axum rejecting them first.
+        .layer(axum::extract::DefaultBodyLimit::max(16 * MAX_BODY_BYTES))
         .with_state(state)
 }
 

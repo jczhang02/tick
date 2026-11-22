@@ -118,6 +118,7 @@ async fn documented_errors() {
         retry_after: Some(3),
         count: 1,
         path: None,
+        body_contains: None,
     });
     let limited = http
         .post(format!("{base}/api/v1/sync"))
