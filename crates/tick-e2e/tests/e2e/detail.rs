@@ -61,6 +61,27 @@ pub async fn pane_title(window: &Node, title: &str) -> Node {
     node
 }
 
+/// Day `day` (25 to 31) of November 2026 in the open calendar: the lower of the two labels
+/// with that number (the first grid row shows the end of October).
+pub async fn november_day(app_node: &Node, day: &str) -> Node {
+    let days = tick_e2e::poll(WAIT, &format!("day {day}"), || async {
+        let all = app_node
+            .find_all(&Query::role(Role::Label).name(day).showing())
+            .await;
+        (all.len() >= 2).then_some(all)
+    })
+    .await
+    .unwrap();
+    let mut best: Option<(i32, Node)> = None;
+    for d in days {
+        let r = d.extents().await.unwrap();
+        if best.as_ref().is_none_or(|(y, _)| r.y > *y) {
+            best = Some((r.y, d));
+        }
+    }
+    best.unwrap().1
+}
+
 /// The detail field row button whose name starts with `field`.
 pub async fn field(window: &Node, field: &str) -> Node {
     window
@@ -1048,23 +1069,7 @@ async fn calendar_day_keeps_the_time() {
     // Paging is not a pick: the picker is still open and nothing was sent.
     assert!(app::commands_sent(&server, "item_update").is_empty());
 
-    // November 25: the second "25" in the grid (the first is 25 October).
-    let days = tick_e2e::poll(WAIT, "day 25", || async {
-        let all = app_node
-            .find_all(&Query::role(Role::Label).name("25").showing())
-            .await;
-        (all.len() >= 2).then_some(all)
-    })
-    .await
-    .unwrap();
-    let mut best = None;
-    for d in days {
-        let r = d.extents().await.unwrap();
-        if best.as_ref().is_none_or(|(y, _)| r.y > *y) {
-            best = Some((r.y, d));
-        }
-    }
-    s.click(&best.unwrap().1).await.unwrap();
+    s.click(&november_day(&app_node, "25").await).await.unwrap();
     wait_item(&server, "w1", "due 25 Nov 14:00", |v| {
         v["due"]["date"] == "2026-11-25T14:00:00"
     })
@@ -1327,4 +1332,50 @@ async fn comment_send_button_newline_and_cancel() {
     pane_title(&window, "Read the article").await;
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(app::commands_sent(&server, "note_update").is_empty());
+}
+
+/// On a short window the calendar starts behind "Pick a Date"; activating it shows the
+/// calendar, and a day picks (4.9).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn short_window_pick_a_date_reveals_the_calendar() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server)
+        .monitor(1024, 600)
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Inbox").await;
+    open_task(&s, &window, "Read the article").await;
+    s.click(&field(&window, "Date").await).await.unwrap();
+    let row = picker_row(&window, "Pick a Date").await;
+    let app_node = window.parent().await.unwrap().unwrap();
+    assert!(
+        app_node
+            .find(&Query::role(Role::Label).name("November 2026").showing())
+            .await
+            .is_none(),
+        "the calendar is shown on a short window"
+    );
+    s.click(&row).await.unwrap();
+    app_node
+        .wait_for(
+            &Query::role(Role::Label).name("November 2026").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    app_node
+        .wait_gone(
+            &Query::role(Role::ListItem).name("Pick a Date").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&november_day(&app_node, "27").await).await.unwrap();
+    wait_item(&server, "i3", "due 27 Nov", |v| {
+        v["due"]["date"] == "2026-11-27"
+    })
+    .await;
 }

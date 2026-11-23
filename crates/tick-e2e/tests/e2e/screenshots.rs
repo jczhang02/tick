@@ -737,6 +737,27 @@ async fn short_window(scheme: ColorScheme) {
         .unwrap();
     tokio::time::sleep(Duration::from_millis(400)).await;
     shoot(&s, &format!("date-picker-short-{}", scheme_name(scheme))).await;
+    // "Pick a Date" reveals the calendar in place; the popover grows (or scrolls).
+    s.click(&crate::detail::picker_row(&window, "Pick a Date").await)
+        .await
+        .unwrap();
+    window
+        .parent()
+        .await
+        .unwrap()
+        .unwrap()
+        .wait_for(
+            &Query::role(Role::Label).name("November 2026").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    shoot(
+        &s,
+        &format!("date-picker-short-open-{}", scheme_name(scheme)),
+    )
+    .await;
 }
 
 /// A few editing surfaces in Chinese.

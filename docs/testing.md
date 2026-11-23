@@ -202,7 +202,9 @@ drag in progress: dimmed source row, drag icon, insertion line), `section-editor
 at the end of the description's first line), `task-menu`, `view-menu`, `title-rename` (F2 on
 a scrolled list scrolls the title back into view), `label-dialog-duplicate`, `filter-dialog`,
 `sidebar-menu`; a 1024 x 600 window:
-`date-picker-short-<scheme>` (the calendar collapsed behind "Pick a Date"); in Chinese:
+`date-picker-short-<scheme>` (the calendar collapsed behind "Pick a Date") and
+`date-picker-short-open-<scheme>` (after "Pick a Date": the popover grows to the window and
+scrolls); in Chinese:
 `detail`, `date-picker`, `delete-project` and `project-dialog` (`<view>-zh-wide-<scheme>`).
 The drag icon is a surface of its own: in test mode the app remembers the `GtkDragIcon` and
 the pointer position, and `app.test-screenshot` draws the icon there, its 20 px margin (room
