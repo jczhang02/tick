@@ -97,6 +97,10 @@ pub fn query_hint(query: &str) -> String {
     }
 }
 
+/// A window action with a string target (an id).
+type IdAction = fn(&TickWindow, &str);
+type PlainAction = fn(&TickWindow);
+
 /// What an edit dialog starts from.
 struct Existing {
     id: String,
@@ -109,7 +113,7 @@ struct Existing {
 
 impl TickWindow {
     pub(crate) fn setup_manage(&self) {
-        let with_id: &[(&str, fn(&TickWindow, &str))] = &[
+        let with_id: &[(&str, IdAction)] = &[
             ("project-rename", |w, id| w.rename_project(id)),
             ("project-color", |w, id| {
                 w.open_entity_dialog(EntityKind::Project, Some(id), DialogFocus::Color)
@@ -155,7 +159,7 @@ impl TickWindow {
             });
             self.add_action(&a);
         }
-        let plain: &[(&str, fn(&TickWindow))] = &[
+        let plain: &[(&str, PlainAction)] = &[
             ("add-project", |w| {
                 w.open_entity_dialog(EntityKind::Project, None, DialogFocus::Name)
             }),
@@ -1131,7 +1135,7 @@ impl TickWindow {
                     .into_iter()
                     .filter(|n| n.project.parent_id.as_deref() == Some(new_parent.as_str()))
                     .map(|n| n.project.id)
-                    .last();
+                    .next_back();
                 self.place_project(id, Some(&new_parent), last_child.as_deref());
             }
             ProjectMove::Out => {
@@ -1185,7 +1189,7 @@ impl TickWindow {
                             && n.project.id != id_c
                     })
                     .map(|n| n.project.id)
-                    .last();
+                    .next_back();
                 w.place_project(&id_c, parent, last.as_deref());
             }
         });
