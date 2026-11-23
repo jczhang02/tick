@@ -15,6 +15,7 @@ mod layout;
 mod login;
 mod manage;
 mod prefs;
+mod reminders;
 mod screenshots;
 mod search;
 mod shortcuts;
