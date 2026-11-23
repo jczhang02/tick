@@ -401,6 +401,20 @@ async fn search_history_and_preferences_have_named_44px_targets() {
         .await
         .unwrap();
     check(&window, "Preferences").await;
+    let log_out = window
+        .wait_for(&Query::role(Role::Button).name("Log Out").showing(), WAIT)
+        .await
+        .unwrap();
+    s.click(&log_out).await.unwrap();
+    window
+        .wait_for(
+            &Query::role(Role::Label).name("Log out of Tick?").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    check(&window, "log-out confirmation").await;
+    s.key(tick_e2e::keysym::ESCAPE).await.unwrap();
     s.key(tick_e2e::keysym::ESCAPE).await.unwrap();
 
     let menu = window

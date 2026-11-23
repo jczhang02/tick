@@ -1043,11 +1043,12 @@ opens its menu.
 Covered in 4.4. Additional rules: collapsing a parent removes descendants from the model;
 expanding restores them; the parent's sub-task count stays visible either way. Dragging a task
 horizontally while dragging changes its depth in 32 px steps (the insertion line indents to show
-the target depth). The steps count from where the drag started (half a step rounds up), on top
+the target depth). The steps count from where the drag started (whole 32 px steps, so a little sideways drift
+during a vertical move changes nothing), on top
 of the spot's own depth (4.4: before a row at its depth, after it at its depth, or as the first
 sub-task of an expanded parent), and stay between the depth of the row below the line (deeper
-would adopt it) and one level under the row above. Over the task's own row the line keeps the
-task's depth, so dragging a row sideways in place nests or un-nests it. The right half of a row
+would adopt it) and one level under the row above. Over the task's own row only a changed depth is a
+drop target, so dragging a row sideways in place nests or un-nests it. The right half of a row
 still nests under that row (4.4).
 
 ### 4.7 Upcoming day groups

@@ -48,7 +48,8 @@ pub(crate) fn line_depth(default: usize, dx: f64, min: usize, max: usize) -> Opt
     if min > max {
         return None;
     }
-    let steps = (dx / INDENT).round() as i64;
+    // Whole steps only: a little sideways drift during a vertical move changes nothing.
+    let steps = (dx / INDENT).trunc() as i64;
     let d = (default as i64 + steps).clamp(min as i64, max as i64);
     Some(d as usize)
 }
@@ -514,6 +515,10 @@ impl TickWindow {
         let min = below.as_deref().map_or(0, depth_of);
         let max = above.as_deref().map_or(0, |a| depth_of(a) + 1);
         let d = line_depth(default, self.drag_dx(x), min, max)?;
+        // Back on its own row at its own depth: nothing to move.
+        if own && d == depth_of(id) {
+            return None;
+        }
         let project = self.project_of_view()?;
         match above {
             Some(a) => {
@@ -1024,8 +1029,9 @@ mod tests {
     fn sideways_steps_of_32_px() {
         // No movement: the spot's own depth.
         assert_eq!(line_depth(0, 0.0, 0, 1), Some(0));
-        // Half a step rounds to a step; one level at most under the row above.
-        assert_eq!(line_depth(0, 16.0, 0, 1), Some(1));
+        // Whole steps only; one level at most under the row above.
+        assert_eq!(line_depth(0, 16.0, 0, 1), Some(0));
+        assert_eq!(line_depth(0, 33.0, 0, 1), Some(1));
         assert_eq!(line_depth(0, 100.0, 0, 1), Some(1));
         assert_eq!(line_depth(2, -40.0, 0, 3), Some(1));
         assert_eq!(line_depth(2, -200.0, 1, 3), Some(1));

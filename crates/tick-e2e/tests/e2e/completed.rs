@@ -275,3 +275,57 @@ async fn reopen_from_the_row_menu() {
     .await
     .unwrap();
 }
+
+/// A task completed on this computer stays in the active data (`checked`): its history row
+/// is still read-only and Reopen still sends `item_uncomplete`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_task_completed_here_is_read_only_in_the_history() {
+    let server = app::server_with(fixture()).await;
+    let s = app::session(&server)
+        .env("TICK_TEST_UNDO_HOLD_MS", "200")
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Work").await;
+    let row = app::task_row(&window, "Still open").await;
+    s.click(&app::inside(&row, Query::role(Role::CheckBox).name("Complete task")).await)
+        .await
+        .unwrap();
+    crate::detail::wait_item(&server, "a1", "completed", |v| v["checked"] == true).await;
+    app::open_view(&s, &window, "Completed").await;
+    let row = app::task_row(&window, "Still open").await;
+    let r = row.extents().await.unwrap();
+    s.input()
+        .await
+        .unwrap()
+        .click(r.x + 120, r.y + 22)
+        .await
+        .unwrap();
+    let title = pane_title(&window, "Still open").await;
+    assert!(!title.has_state(tick_e2e::State::Editable).await.unwrap());
+    s.input()
+        .await
+        .unwrap()
+        .right_click(r.x + 120, r.y + 22)
+        .await
+        .unwrap();
+    let reopen = s
+        .app()
+        .await
+        .unwrap()
+        .wait_for(&Query::role(Role::MenuItem).name("Reopen").showing(), WAIT)
+        .await
+        .unwrap();
+    crate::a11y::check(&s.app().await.unwrap(), "history row menu").await;
+    s.click(&reopen).await.unwrap();
+    tick_e2e::poll(WAIT, "item_uncomplete a1", || async {
+        app::commands_sent(&server, "item_uncomplete")
+            .into_iter()
+            .find(|c| c["args"]["id"] == "a1")
+    })
+    .await
+    .unwrap();
+    crate::detail::wait_item(&server, "a1", "reopened", |v| v["checked"] == false).await;
+}

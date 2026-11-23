@@ -368,3 +368,99 @@ async fn log_out_returns_to_login_and_clears_the_cache() {
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(app::requests(&server, "/api/v1/sync").len(), n);
 }
+
+/// Ctrl+W closes (hides) the window; the app keeps running.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ctrl_w_closes_the_window() {
+    let (_server, mut s, _window) = start(|b| b).await;
+    s.chord(&[keysym::CONTROL_L, u32::from(b'w')])
+        .await
+        .unwrap();
+    s.app()
+        .await
+        .unwrap()
+        .wait_gone(&Query::role(Role::Frame), WAIT)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(s.app_running());
+}
+
+/// Left collapses a parent's sub-tasks (or moves to the parent), Right expands them (4.4).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn left_and_right_collapse_and_expand() {
+    let (server, s, window) = start(|b| b).await;
+    app::open_view(&s, &window, "Work").await;
+    app::wait_tasks(
+        &window,
+        &[
+            "Book the venue",
+            "Plan the deck",
+            "Collect metrics",
+            "Clean up flags",
+        ],
+    )
+    .await;
+    // Focus the sub-task, Left: its parent.
+    let child = app::task_row(&window, "Collect metrics").await;
+    let r = child.extents().await.unwrap();
+    s.input()
+        .await
+        .unwrap()
+        .click(r.x + 150, r.y + 22)
+        .await
+        .unwrap();
+    s.key(keysym::ESCAPE).await.unwrap();
+    s.key(keysym::LEFT).await.unwrap();
+    let parent = app::task_row(&window, "Plan the deck").await;
+    tick_e2e::poll(WAIT, "parent focused", || async {
+        parent
+            .has_state(tick_e2e::State::Focused)
+            .await
+            .ok()
+            .filter(|f| *f)
+    })
+    .await
+    .unwrap();
+    // Left again: collapsed; Right: expanded.
+    s.key(keysym::LEFT).await.unwrap();
+    app::wait_tasks(
+        &window,
+        &["Book the venue", "Plan the deck", "Clean up flags"],
+    )
+    .await;
+    crate::detail::wait_item(&server, "w1", "collapsed", |v| v["is_collapsed"] == true).await;
+    s.key(keysym::RIGHT).await.unwrap();
+    app::wait_tasks(
+        &window,
+        &[
+            "Book the venue",
+            "Plan the deck",
+            "Collect metrics",
+            "Clean up flags",
+        ],
+    )
+    .await;
+}
+
+/// Narrow: Alt+Left goes back from a view to the sidebar.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn alt_left_goes_back() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server).narrow().start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::sidebar(&window).await;
+    app::open_view(&s, &window, "Inbox").await;
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    s.chord(&[keysym::ALT_L, keysym::LEFT]).await.unwrap();
+    window
+        .wait_gone(&Query::role(Role::List).name("Tasks").showing(), WAIT)
+        .await
+        .unwrap();
+    app::sidebar(&window).await;
+}

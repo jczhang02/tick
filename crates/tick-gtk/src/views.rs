@@ -206,12 +206,16 @@ impl TickWindow {
 
     /// Reopen a completed task from the history (detail pane ring, row menu).
     pub(crate) fn reopen_completed(&self, id: &str) {
-        let archived = {
+        // Only in the history cache, or still in the active data as completed (completed
+        // on this computer).
+        let completed = {
             let store = self.store();
-            store.task(id).ok().flatten().is_none()
-                && store.completed_task(id).ok().flatten().is_some()
+            match store.task(id).ok().flatten() {
+                Some(t) => t.checked,
+                None => store.completed_task(id).ok().flatten().is_some(),
+            }
         };
-        if archived {
+        if completed {
             self.enqueue(vec![Command::item_uncomplete(id)]);
             let toast = adw::Toast::builder()
                 .title(gettext("Task reopened"))

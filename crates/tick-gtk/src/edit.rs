@@ -218,9 +218,21 @@ impl TickWindow {
             let store = imp.store.borrow();
             let Some(store) = store.as_ref() else { return };
             // A history task has no active row: read-only from the history cache (4.21).
-            match detail::load(store, &id) {
-                Ok(None) if self.view_is_read_only() => detail::load_completed(store, &id),
-                other => other,
+            // A history row is read-only even when the task is still in the active data
+            // (completed on this computer, or a recurring task's earlier completion).
+            if self.view_is_read_only() {
+                match detail::load_completed(store, &id) {
+                    Ok(None) => detail::load(store, &id).map(|d| {
+                        d.map(|mut d| {
+                            d.read_only = true;
+                            d.checked = true;
+                            d
+                        })
+                    }),
+                    other => other,
+                }
+            } else {
+                detail::load(store, &id)
             }
         };
         if let Ok(Some(d)) = &data {
@@ -295,7 +307,7 @@ impl TickWindow {
 
     /// Uncheck a task: take back a completion in progress, else reopen it.
     fn reopen(&self, id: &str) {
-        if self.store().task(id).ok().flatten().is_none() {
+        if self.store().task(id).ok().flatten().is_none() || self.view_is_read_only() {
             // Only in the completed history.
             self.reopen_completed(id);
             return;
