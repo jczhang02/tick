@@ -955,6 +955,22 @@ impl TickWindow {
             imp.refresh_pending.set(true);
             return;
         }
+        // A view opened by a temp id (a project just created) may have been replaced by the
+        // server before its change event arrived: follow the recorded mapping.
+        let resolved = match self.current_view() {
+            ViewId::Project(id) => self.live_id(&id),
+            ViewId::Label(id) => self.live_id(&id),
+            ViewId::Filter(id) => self.live_id(&id),
+            _ => String::new(),
+        };
+        if let Some(pair) = match self.current_view() {
+            ViewId::Project(id) | ViewId::Label(id) | ViewId::Filter(id) if id != resolved => {
+                Some((id, resolved))
+            }
+            _ => None,
+        } {
+            self.remap_view(&[pair]);
+        }
         let view = self.current_view();
         self.update_failed_map();
         let built = {

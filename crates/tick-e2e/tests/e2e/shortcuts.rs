@@ -190,7 +190,7 @@ async fn context_menu_by_keyboard_and_pointer() {
         .right_click(r.x + 150, r.y + 20)
         .await
         .unwrap();
-    menu_choose(&s, &window, 4).await;
+    menu_choose(&s, &window, 3).await;
     s.click(&picker_row(&window, "Priority 3").await)
         .await
         .unwrap();
