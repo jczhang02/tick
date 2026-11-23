@@ -659,35 +659,48 @@ async fn editing(scheme: ColorScheme, narrow: bool) {
     shoot(&s, &name("project-dialog")).await;
     esc().await;
     if !narrow {
-        let add = window
-            .wait_for(&Query::role(Role::Button).name("Add Label").showing(), WAIT)
+        let app_node = window.parent().await.unwrap().unwrap();
+        // The Labels and Filters headers are below the fold of the demo sidebar.
+        let add = sidebar_button(&s, &window, "Add Label").await;
+        s.click(&add).await.unwrap();
+        app_node
+            .wait_for(&Query::role(Role::Dialog).name("New Label"), WAIT)
             .await
             .unwrap();
-        s.click(&add).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(400)).await;
         s.type_text("Waiting").await.unwrap();
-        shoot(&s, &name("label-dialog-duplicate")).await;
-        esc().await;
-        // The Filters header is below the fold of the demo sidebar.
-        let sb = app::sidebar(&window).await.extents().await.unwrap();
-        input.move_to(sb.x + 100, sb.y + 300).await.unwrap();
-        input.scroll(20).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let add = window
+        // The duplicate name state (4.23): the caption shows under the list.
+        app_node
             .wait_for(
-                &Query::role(Role::Button).name("Add Filter").showing(),
+                &Query::role(Role::Label)
+                    .name("A label with this name already exists.")
+                    .showing(),
                 WAIT,
             )
             .await
             .unwrap();
+        shoot(&s, &name("label-dialog-duplicate")).await;
+        esc().await;
+        app_node
+            .wait_gone(&Query::role(Role::Dialog).name("New Label"), WAIT)
+            .await
+            .unwrap();
+        let add = sidebar_button(&s, &window, "Add Filter").await;
         s.click(&add).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        app_node
+            .wait_for(&Query::role(Role::Dialog).name("New Filter"), WAIT)
+            .await
+            .unwrap();
         s.type_text("Due soon").await.unwrap();
         s.key(keysym::TAB).await.unwrap();
         s.type_text("due before: next week & p1").await.unwrap();
         shoot(&s, &name("filter-dialog")).await;
         esc().await;
+        app_node
+            .wait_gone(&Query::role(Role::Dialog).name("New Filter"), WAIT)
+            .await
+            .unwrap();
         // The sidebar context menu of a project.
+        let sb = app::sidebar(&window).await.extents().await.unwrap();
         input.move_to(sb.x + 100, sb.y + 300).await.unwrap();
         input.scroll(-20).await.unwrap();
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -995,4 +1008,35 @@ async fn features_narrow_dark() {
     if full() {
         features(ColorScheme::Dark, true).await;
     }
+}
+
+/// The sidebar button named `name`, scrolled into the visible part of the sidebar. A row
+/// just below the fold still reports `showing` (a click at its extents lands on whatever is
+/// there); one further down is not built yet.
+async fn sidebar_button(s: &Session, window: &Node, name: &str) -> Node {
+    let input = s.input().await.unwrap();
+    let sidebar = app::sidebar(window).await;
+    let sb = sidebar.extents().await.unwrap();
+    for _ in 0..60 {
+        let step = match sidebar
+            .find(&Query::role(Role::Button).name(name).showing())
+            .await
+        {
+            Some(button) => {
+                let b = button.extents().await.unwrap();
+                if b.y >= sb.y && b.y + b.height <= sb.y + sb.height {
+                    return button;
+                }
+                if b.y < sb.y { -1 } else { 1 }
+            }
+            None => 1,
+        };
+        input.move_to(sb.x + 100, sb.y + 300).await.unwrap();
+        input.scroll(step).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    panic!(
+        "{name} does not scroll into the sidebar:\n{}",
+        sidebar.dump().await
+    );
 }
