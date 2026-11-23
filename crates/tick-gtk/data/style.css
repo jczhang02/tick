@@ -508,13 +508,15 @@ dialog.tick-quick-add sheet {
 tooltip.background { box-shadow: none; }
 
 /* ---------- detail pane (4.8) ---------- */
-/* the detail pane uses the view background, like the list (2.4.1). Set on the split view's
-   pane node itself: its inset 1 px box-shadow is the pane separator (2.4.1), and a background
-   on a child would paint over it. */
-overlay-split-view.tick-detail-split > .sidebar-pane {
+/* the detail pane uses the view background, like the list (2.4.1). That background covers
+   the split view's own 1 px separator (an inset box-shadow on the pane node), so the docked
+   pane draws the same line itself; the overlay (B1 to B3) has libadwaita's shadow. */
+.tick-detail-pane {
   background-color: var(--view-bg-color);
   color: var(--view-fg-color);
 }
+.tick-detail-pane.tick-docked:dir(ltr) { box-shadow: inset 1px 0 var(--secondary-sidebar-border-color); }
+.tick-detail-pane.tick-docked:dir(rtl) { box-shadow: inset -1px 0 var(--secondary-sidebar-border-color); }
 /* the assignee's 20 px avatar centered on the 16 px icon column of the field rows (4.8) */
 .tick-field-avatar { margin: 0 -2px; }
 /* project crumb: a flat 44 px button */

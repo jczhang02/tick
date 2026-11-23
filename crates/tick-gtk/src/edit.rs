@@ -73,7 +73,20 @@ impl TickWindow {
             });
         }));
         imp.detail_bin.set_child(Some(&detail.root));
-        imp.detail_split.add_css_class("tick-detail-split");
+        imp.detail_view.add_css_class("tick-detail-pane");
+        // Docked, the pane draws the split view's 1 px separator itself (its view background
+        // covers the pane node's); the overlay has libadwaita's shadow instead.
+        let view = imp.detail_view.get();
+        let docked = move |split: &adw::OverlaySplitView| {
+            if split.is_collapsed() {
+                view.remove_css_class("tick-docked");
+            } else {
+                view.add_css_class("tick-docked");
+            }
+        };
+        docked(&imp.detail_split);
+        imp.detail_split
+            .connect_collapsed_notify(move |split| docked(split));
         imp.detail_view.add_bottom_bar(&detail.composer);
         let _ = imp.detail.set(detail);
         // Closing the overlay (a click on the list in B1-B3) closes the task too.
