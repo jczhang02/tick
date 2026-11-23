@@ -151,11 +151,13 @@ fn popover(width: i32, name: &str) -> gtk::Popover {
     p
 }
 
-fn list() -> gtk::ListBox {
-    gtk::ListBox::builder()
+fn list(name: &str) -> gtk::ListBox {
+    let l = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .css_classes(["tick-picker-list"])
-        .build()
+        .build();
+    l.update_property(&[gtk::accessible::Property::Label(name)]);
+    l
 }
 
 /// A 44 px picker row: `[lead 16][gap 12][label][trailing dim]`.
@@ -304,7 +306,7 @@ pub fn date_picker(
         content.append(&e);
         e
     });
-    let options = list();
+    let options = list(&gettext("Quick options"));
     let mut quick: Vec<(&str, String, NaiveDate)> = vec![
         ("weather-clear-symbolic", gettext("Today"), info.today),
         (
@@ -391,7 +393,7 @@ pub fn date_picker(
         .reveal_child(true)
         .build();
     // "Pick a Date" row for short windows (4.9).
-    let pick_row_list = list();
+    let pick_row_list = list(&gettext("Pick a Date"));
     let pick_row = row(
         Some(icon("x-office-calendar-symbolic")),
         &gettext("Pick a Date"),
@@ -435,6 +437,7 @@ pub fn date_picker(
     }
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
+        .focusable(false)
         .propagate_natural_height(true)
         .child(&content)
         .build();
@@ -458,7 +461,7 @@ pub fn date_picker(
 pub fn priority_picker(current: u8, on_pick: impl Fn(u8) + 'static) -> gtk::Popover {
     let pop = popover(220, &gettext("Priority"));
     let on_pick: Rc<dyn Fn(u8)> = Rc::new(on_pick);
-    let options = list();
+    let options = list(&gettext("Priority"));
     for p in 1..=4u8 {
         let ring = gtk::Box::builder()
             .halign(gtk::Align::Center)
@@ -593,7 +596,7 @@ pub fn label_picker(
         "Search or create a label",
     ))]);
     content.append(&search);
-    let listbox = list();
+    let listbox = list(&gettext("Labels"));
     let state: Rc<RefCell<Vec<(LabelOption, gtk::ListBoxRow, gtk::Image)>>> = Rc::default();
     let on_toggle: Rc<dyn Fn(String, bool)> = Rc::new(on_toggle);
     let on_create: Rc<dyn Fn(String)> = Rc::new(on_create);
@@ -717,6 +720,7 @@ pub fn label_picker(
     type_to_search(&listbox, &search);
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
+        .focusable(false)
         .propagate_natural_height(true)
         .max_content_height(360)
         .child(&listbox)
@@ -746,7 +750,7 @@ pub fn assignee_picker(
     on_pick: impl Fn(Option<String>) + 'static,
 ) -> gtk::Popover {
     let pop = popover(300, &gettext("Assignee"));
-    let listbox = list();
+    let listbox = list(&gettext("Assignee"));
     let mut ids = Vec::new();
     let mut all = vec![Person {
         id: None,
@@ -777,6 +781,7 @@ pub fn assignee_picker(
     }
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
+        .focusable(false)
         .propagate_natural_height(true)
         .max_content_height(420)
         .child(&listbox)
@@ -821,7 +826,7 @@ pub fn move_picker(
         "Search projects",
     ))]);
     content.append(&search);
-    let listbox = list();
+    let listbox = list(&gettext("Projects"));
     let mut rows = Vec::new();
     for o in &options {
         // Sections sit under their project, indented, without an icon of their own.
@@ -887,6 +892,7 @@ pub fn move_picker(
     type_to_search(&listbox, &search);
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
+        .focusable(false)
         .propagate_natural_height(true)
         .max_content_height(420)
         .child(&listbox)

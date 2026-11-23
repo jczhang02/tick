@@ -732,6 +732,7 @@ impl TickWindow {
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
+        crate::menus::quiet_scrollers(&dialog);
         let weak = self.downgrade();
         let id = id.to_owned();
         dialog.connect_response(None, move |_, r| {
@@ -759,6 +760,7 @@ impl TickWindow {
         danger.append(Some(&gettext("Delete Task")), Some("win.task-delete"));
         menu.append_section(None, &danger);
         let pop = gtk::PopoverMenu::from_model(Some(&menu));
+        crate::menus::name_items(&pop);
         pop.set_has_arrow(false);
         pop.set_position(gtk::PositionType::Bottom);
         let list = self.imp().task_list.get();

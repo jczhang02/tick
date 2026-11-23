@@ -301,6 +301,7 @@ impl TickWindow {
             return;
         };
         let pop = gtk::PopoverMenu::from_model(Some(&menu));
+        crate::menus::name_items(&pop);
         pop.set_has_arrow(false);
         pop.set_position(gtk::PositionType::Bottom);
         crate::pickers::present(pop.upcast_ref(), sb.list(), Some(rect));
@@ -313,6 +314,7 @@ impl TickWindow {
         let button = self.imp().view_menu_button.get();
         button.set_visible(menu.is_some());
         button.set_menu_model(menu.as_ref());
+        crate::menus::name_button(&button);
     }
 
     // ---- dialogs (4.23) ----
@@ -440,6 +442,7 @@ impl TickWindow {
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
             .build();
+        list.update_property(&[gtk::accessible::Property::Label(&title)]);
         let name = adw::EntryRow::builder()
             .title(gettext("Name"))
             .activates_default(true)
@@ -456,20 +459,61 @@ impl TickWindow {
         });
         let parents = (kind == EntityKind::Project)
             .then(|| self.parent_choices(existing.as_ref().map(|e| e.id.as_str())));
-        let parent_row = parents.as_ref().map(|choices| {
-            let names: Vec<&str> = choices.iter().map(|(_, n)| n.as_str()).collect();
-            let model = gtk::StringList::new(&names);
-            let row = adw::ComboRow::builder()
-                .title(gettext("Parent Project"))
-                .model(&model)
+        // Parent Project: a row that opens the parent picker (the "Move to..." layout), the
+        // dialog form of drag-to-nest (4.23).
+        let parent_sel: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(
+            existing.as_ref().and_then(|e| e.parent.clone()),
+        ));
+        if let Some(choices) = parents.as_ref() {
+            let current = choices
+                .iter()
+                .find(|(id, _)| *id == *parent_sel.borrow())
+                .map(|(_, n)| n.clone())
+                .unwrap_or_else(|| gettext("None"));
+            let value = gtk::Label::builder()
+                .label(&current)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .css_classes(["dimmed"])
                 .build();
-            let current = existing.as_ref().and_then(|e| e.parent.clone());
-            if let Some(i) = choices.iter().position(|(id, _)| *id == current) {
-                row.set_selected(i as u32);
-            }
+            let row = adw::ActionRow::builder()
+                .title(gettext("Parent Project"))
+                .activatable(true)
+                .build();
+            row.add_suffix(&value);
+            row.add_suffix(
+                &gtk::Image::builder()
+                    .icon_name("pan-down-symbolic")
+                    .accessible_role(gtk::AccessibleRole::Presentation)
+                    .build(),
+            );
+            let choices = choices.clone();
+            let sel = parent_sel.clone();
+            let value_w = value.downgrade();
+            row.connect_activated(move |r| {
+                let options: Vec<crate::pickers::MoveOption> = choices
+                    .iter()
+                    .map(|(id, name)| crate::pickers::MoveOption {
+                        project_id: id.clone().unwrap_or_default(),
+                        section_id: None,
+                        name: name.clone(),
+                        color: String::new(),
+                        depth: 0,
+                        current: *id == *sel.borrow(),
+                    })
+                    .collect();
+                let sel = sel.clone();
+                let value_w = value_w.clone();
+                let pop = crate::pickers::move_picker(options, move |o| {
+                    sel.replace((!o.project_id.is_empty()).then(|| o.project_id.clone()));
+                    if let Some(v) = value_w.upgrade() {
+                        v.set_label(&o.name);
+                    }
+                });
+                pop.set_position(gtk::PositionType::Bottom);
+                crate::pickers::present(&pop, r, None);
+            });
             list.append(&row);
-            row
-        });
+        }
         let favorite = adw::SwitchRow::builder()
             .title(gettext("Add to Favorites"))
             .build();
@@ -560,6 +604,7 @@ impl TickWindow {
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_height(true)
+            .focusable(false)
             .child(&content)
             .build();
         view.set_content(Some(&scroller));
@@ -643,7 +688,7 @@ impl TickWindow {
             let name = name.downgrade();
             let query = query.as_ref().map(|q| q.downgrade());
             let favorite = favorite.downgrade();
-            let parent_row = parent_row.as_ref().map(|p| p.downgrade());
+            let parent_sel = parent_sel.clone();
             let existing = existing.map(Rc::new);
             save.connect_clicked(move |b| {
                 if !b.is_sensitive() {
@@ -666,12 +711,7 @@ impl TickWindow {
                     .and_then(|q| q.upgrade())
                     .map(|q| q.text().trim().to_owned())
                     .unwrap_or_default();
-                let parent = parent_row.as_ref().and_then(|p| p.upgrade()).and_then(|p| {
-                    parents
-                        .as_ref()
-                        .and_then(|c| c.get(p.selected() as usize))
-                        .and_then(|(id, _)| id.clone())
-                });
+                let parent = parent_sel.borrow().clone();
                 let color = selected.borrow().clone();
                 w.save_entity(
                     kind,
@@ -926,6 +966,7 @@ impl TickWindow {
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
+        crate::menus::quiet_scrollers(&dialog);
         let weak = self.downgrade();
         dialog.connect_response(None, move |_, r| {
             if r == "delete"

@@ -354,6 +354,7 @@ impl TaskDetail {
             .build();
         let root = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
+            .focusable(false)
             .child(&clamp)
             .build();
 
@@ -1056,6 +1057,7 @@ impl TaskDetail {
             button.update_property(&[gtk::accessible::Property::Label(&gettext(
                 "Comment Actions",
             ))]);
+            crate::menus::name_button(&button);
             let actions = gtk::gio::SimpleActionGroup::new();
             let weak = Rc::downgrade(self);
             let id = c.id.clone();

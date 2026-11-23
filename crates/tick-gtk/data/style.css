@@ -527,6 +527,7 @@ textview.tick-description-edit:focus-within {
 label.tick-description {
   padding: 6px 0;
   border-radius: 9px;
+  min-height: 32px;                         /* a click target: 32 + 2 x 6 = 44 (2.7) */
 }
 label.tick-description:focus:focus-visible { outline-offset: 2px; }
 /* field rows: hover 4 %, pressed 8 %, focus ring inside (4.8) */

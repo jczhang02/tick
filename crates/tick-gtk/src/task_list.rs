@@ -561,6 +561,7 @@ fn section_header(s: &SectionHeader, ctx: &RenderCtx) -> gtk::Widget {
         &gettext("{name} section menu"),
         &[("name", &s.name)],
     ))]);
+    crate::menus::name_button(&button);
     line.append(&button);
     root.append(&line);
     root.upcast()

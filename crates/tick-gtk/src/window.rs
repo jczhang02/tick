@@ -99,6 +99,10 @@ mod imp {
         #[template_child]
         pub view_menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
+        pub main_menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub detail_menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
         pub detail_view: TemplateChild<adw::ToolbarView>,
         #[template_child]
         pub detail_bin: TemplateChild<adw::Bin>,
@@ -226,6 +230,8 @@ impl TickWindow {
         win.setup_detail();
         win.setup_manage();
         win.setup_dnd();
+        crate::menus::name_button(&win.imp().main_menu_button);
+        crate::menus::name_button(&win.imp().detail_menu_button);
         win.setup_actions();
         win.setup_keys();
         win.setup_focus_guard();

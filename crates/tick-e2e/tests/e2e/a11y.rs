@@ -46,6 +46,11 @@ async fn audit(root: &Node) -> Vec<String> {
         if role == Role::Panel {
             continue;
         }
+        // Links inside rendered text (descriptions) are exemption 1 in DESIGN 1.2.1: GTK 4.22
+        // exposes them as unnamed objects with no real extents.
+        if role == Role::Link {
+            continue;
+        }
         let interactive = states.contains(State::Focusable) || ACTIONABLE.contains(&role);
         // Rows that are not focusable are display-only (view, day and month headers).
         if !interactive || (role == Role::ListItem && !states.contains(State::Focusable)) {
@@ -58,7 +63,13 @@ async fn audit(root: &Node) -> Vec<String> {
         }
         // Lists and scroll panes are containers, not targets; text fields measure the
         // whole row or entry they sit in.
-        let container = matches!(role, Role::List | Role::ScrollPane | Role::Frame);
+        // Labels are text: a focusable one is selectable text (comments), read, not
+        // clicked. The one label that is a click target, the description, is measured on
+        // its own in `editing_surfaces_have_named_44px_targets`.
+        let container = matches!(
+            role,
+            Role::List | Role::ScrollPane | Role::Frame | Role::Label
+        );
         if let Some(r) = rect
             && !container
             && (r.width < 44 || r.height < 44)
@@ -195,4 +206,149 @@ async fn narrow_pages_have_named_44px_targets() {
     )
     .await;
     check(&window, "narrow list").await;
+}
+
+/// The detail pane, every picker, the menus and the dialogs (`DESIGN.md` 4.8 to 4.10,
+/// 4.19, 4.23, 4.25).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn editing_surfaces_have_named_44px_targets() {
+    let mut f = app::fixture();
+    f["projects"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!(
+            {"id": "pt", "name": "Team", "color": "green", "shared": true, "child_order": 3}
+        ));
+    f["collaborators"] = serde_json::json!([
+        {"id": "u2", "full_name": "Ana Silva", "email": "ana@example.com"}
+    ]);
+    f["collaborator_states"] =
+        serde_json::json!([{"project_id": "pt", "user_id": "u2", "state": "active"}]);
+    f["items"].as_array_mut().unwrap().extend([
+        serde_json::json!({"id": "t1", "project_id": "pt", "content": "Draft the agenda",
+                           "description": "See **notes** at https://example.com",
+                           "child_order": 1}),
+        serde_json::json!({"id": "t2", "project_id": "pt", "parent_id": "t1",
+                           "content": "Book a room", "child_order": 1}),
+    ]);
+    f["notes"] = serde_json::json!([
+        {"id": "n1", "item_id": "t1", "content": "Room 4 is free.", "posted_uid": "u2",
+         "file_attachment": {"file_name": "plan.pdf", "file_url": "https://example.com/plan.pdf"}}
+    ]);
+    let server = app::server_with(f).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Team").await;
+    crate::detail::open_task(&s, &window, "Draft the agenda").await;
+    check(&window, "detail pane").await;
+    // The description is a click target (it opens the editor): 44 px tall even as one line.
+    // (The list row's description preview has the same text; the pane's is the one at
+    // the window's end.)
+    let mut best = None;
+    for n in window
+        .find_all(
+            &Query::role(Role::Label)
+                .name_contains("See notes")
+                .showing(),
+        )
+        .await
+    {
+        let r = n.extents().await.unwrap();
+        if best.as_ref().is_none_or(|b: &tick_e2e::Rect| r.x > b.x) {
+            best = Some(r);
+        }
+    }
+    let d = best.expect("description label");
+    assert!(d.height >= 44, "{d:?}");
+
+    for field in ["Date", "Deadline", "Priority", "Labels", "Assignee"] {
+        s.click(&crate::detail::field(&window, field).await)
+            .await
+            .unwrap();
+        window
+            .wait_for(&Query::role(Role::List).showing(), WAIT)
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        check(&window, &format!("{field} picker")).await;
+        s.key(tick_e2e::keysym::ESCAPE).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+    let crumb = window
+        .wait_for(
+            &Query::role(Role::Button).name_contains("Move to").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&crumb).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    check(&window, "move picker").await;
+    s.key(tick_e2e::keysym::ESCAPE).await.unwrap();
+
+    // The task context menu and the view menu: items are named (4.19).
+    let row = app::task_row(&window, "Draft the agenda").await;
+    let r = row.extents().await.unwrap();
+    s.input()
+        .await
+        .unwrap()
+        .right_click(r.x + 150, r.y + 20)
+        .await
+        .unwrap();
+    window
+        .wait_for(&Query::role(Role::MenuItem).name("Open").showing(), WAIT)
+        .await
+        .unwrap();
+    check(&window, "task menu").await;
+    s.key(tick_e2e::keysym::ESCAPE).await.unwrap();
+    let view_menu = window
+        .wait_for(&Query::role(Role::Button).name("View Menu").showing(), WAIT)
+        .await
+        .unwrap();
+    s.click(&view_menu).await.unwrap();
+    window
+        .wait_for(
+            &Query::role(Role::MenuItem).name("Add Section").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    check(&window, "view menu").await;
+
+    // Delete Project...: the confirmation.
+    let delete = window
+        .wait_for(
+            &Query::role(Role::MenuItem)
+                .name("Delete Project...")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&delete).await.unwrap();
+    window
+        .wait_for(
+            &Query::role(Role::Button).name("Delete Project").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    check(&window, "delete confirmation").await;
+    s.key(tick_e2e::keysym::ESCAPE).await.unwrap();
+
+    // The project dialog with its color grid.
+    let add = window
+        .wait_for(
+            &Query::role(Role::Button).name("Add Project").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&add).await.unwrap();
+    window
+        .wait_for(&Query::role(Role::RadioButton).name("Teal").showing(), WAIT)
+        .await
+        .unwrap();
+    check(&window, "project dialog").await;
 }
