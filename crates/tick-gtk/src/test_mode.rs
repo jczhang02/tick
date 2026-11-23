@@ -17,7 +17,7 @@ thread_local! {
     static DRAG: std::cell::RefCell<DragState> = const { std::cell::RefCell::new(None) };
 }
 
-/// A drag began with `icon` grabbed at (`hx`, `hy`) (screenshots of a drag in progress).
+/// A drag began with `icon` (the `GtkDragIcon`) grabbed at (`hx`, `hy`) (screenshots of a drag in progress).
 pub fn set_drag_icon(icon: &gtk::Widget, hx: f64, hy: f64) {
     if !enabled() {
         return;
@@ -100,6 +100,7 @@ fn save_screenshot(window: &gtk::Window, path: &Path) -> Result<(), String> {
         if let Some((icon, (hx, hy), (px, py))) = d.as_ref()
             && let Some(icon) = icon.upgrade()
         {
+            // The drag icon's root: its surface, margins (and shadow) included.
             let w = icon.width().max(1);
             let h = icon.height().max(1);
             let paintable = gtk::WidgetPaintable::new(Some(&icon));

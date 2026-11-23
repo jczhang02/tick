@@ -93,7 +93,19 @@ pub fn present(
         let p = p.clone();
         glib::idle_add_local_once(move || p.unparent());
     });
-    popover.popup();
+    if popover.is::<gtk::PopoverMenu>() {
+        // A new menu shows the separators between its sections from an idle callback: a menu
+        // shown before that measures without them and is cut off at the bottom (4.19).
+        let p = popover.clone();
+        glib::idle_add_local_full(glib::Priority::LOW, move || {
+            if p.parent().is_some() {
+                p.popup();
+            }
+            glib::ControlFlow::Break
+        });
+    } else {
+        popover.popup();
+    }
 }
 
 /// Keep `popover` within `max` px of height: its scrolled content scrolls instead (4.9).
@@ -324,9 +336,12 @@ pub fn date_picker(
     }
     quick.push(("go-next-symbolic", gettext("Next Week"), info.next_week()));
     let mut actions: Vec<DateChoice> = Vec::new();
+    let next_week = gettext("Next Week");
     for (icon_name, label, date) in quick {
         // The resolved day on the right: a weekday within the week, else the date (4.9).
-        let right = if (date - info.today).num_days() < 7 {
+        // "Next Week" always shows its date: on a Sunday it is the same weekday as
+        // "Tomorrow" and would read like the same day.
+        let right = if (date - info.today).num_days() < 7 && label != next_week {
             format::weekday_short(date.weekday())
         } else {
             fill(
@@ -368,7 +383,16 @@ pub fn date_picker(
             .build(),
     );
 
-    let calendar = gtk::Calendar::builder().build();
+    // GtkCalendar's own heading has month and year steppers; Tick shows one "November 2026"
+    // heading with previous and next month buttons (4.9).
+    // Seven 44 px day columns (4.9, 2.7). GtkCalendar's grid measures the hidden week-number
+    // column too (8 columns) but allocates 7: the cells ask for 38 px in CSS (8 x 38 = 304)
+    // and the calendar is given 7 x 44 = 308, so each day gets exactly 44.
+    let calendar = gtk::Calendar::builder()
+        .show_heading(false)
+        .halign(gtk::Align::Center)
+        .width_request(308)
+        .build();
     calendar.update_property(&[gtk::accessible::Property::Label(&gettext("Calendar"))]);
     if let Some(d) = info.current.or(Some(info.today))
         && let Some(dt) =
@@ -376,9 +400,15 @@ pub fn date_picker(
     {
         calendar.set_date(&dt);
     }
+    // Set while the month buttons move the calendar: that is not a pick.
+    let paging = Rc::new(std::cell::Cell::new(false));
     {
         let pick = pick.clone();
+        let paging = paging.clone();
         calendar.connect_day_selected(move |c| {
+            if paging.get() {
+                return;
+            }
             let d = c.date();
             if let Some(date) =
                 NaiveDate::from_ymd_opt(d.year(), d.month() as u32, d.day_of_month() as u32)
@@ -387,9 +417,79 @@ pub fn date_picker(
             }
         });
     }
+    // Collapsed, the calendar is hidden, not only unrevealed: a crossfading revealer keeps
+    // its child's height, and the popover would keep the full calendar's height.
+    let heading = gtk::Label::builder()
+        .xalign(0.0)
+        .hexpand(true)
+        .margin_start(12)
+        .css_classes(["heading"])
+        .build();
+    let month_button = |icon_name: &str, name: &str, step: i32| {
+        let b = gtk::Button::builder()
+            .icon_name(icon_name)
+            .tooltip_text(name)
+            .css_classes(["flat", "tick-icon-44"])
+            .build();
+        b.update_property(&[gtk::accessible::Property::Label(name)]);
+        let calendar = calendar.downgrade();
+        let paging = paging.clone();
+        b.connect_clicked(move |_| {
+            let Some(c) = calendar.upgrade() else { return };
+            let d = c.date();
+            // The same day in the next or previous month, clamped to its length.
+            let (y, m) = (d.year(), d.month() - 1 + step);
+            let (y, m) = (y + m.div_euclid(12), m.rem_euclid(12) + 1);
+            let last = (28..=31)
+                .rev()
+                .find(|day| NaiveDate::from_ymd_opt(y, m as u32, *day).is_some())
+                .unwrap_or(28);
+            let day = d.day_of_month().min(last as i32);
+            if let Ok(dt) = glib::DateTime::from_local(y, m, day, 0, 0, 0.0) {
+                paging.set(true);
+                c.set_date(&dt);
+                paging.set(false);
+            }
+        });
+        b
+    };
+    let header = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .build();
+    header.append(&heading);
+    header.append(&month_button(
+        "go-previous-symbolic",
+        &gettext("Previous Month"),
+        -1,
+    ));
+    header.append(&month_button("go-next-symbolic", &gettext("Next Month"), 1));
+    let update_heading = {
+        let heading = heading.downgrade();
+        move |c: &gtk::Calendar| {
+            let d = c.date();
+            if let (Some(h), Some(date)) = (
+                heading.upgrade(),
+                NaiveDate::from_ymd_opt(d.year(), d.month() as u32, 1),
+            ) {
+                h.set_label(&format::month_year(date));
+            }
+        }
+    };
+    update_heading(&calendar);
+    {
+        // Page Up/Down and other-month days move the calendar too.
+        let u = update_heading.clone();
+        calendar.connect_notify_local(Some("month"), move |c, _| u(c));
+        calendar.connect_notify_local(Some("year"), move |c, _| update_heading(c));
+    }
+    let calendar_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .build();
+    calendar_box.append(&header);
+    calendar_box.append(&calendar);
     let revealer = gtk::Revealer::builder()
         .transition_type(gtk::RevealerTransitionType::Crossfade)
-        .child(&calendar)
+        .child(&calendar_box)
         .reveal_child(true)
         .build();
     // "Pick a Date" row for short windows (4.9).
@@ -410,6 +510,7 @@ pub fn date_picker(
         pick_row_list.connect_row_activated(move |l, _| {
             l.set_visible(false);
             if let (Some(r), Some(c)) = (revealer.upgrade(), calendar.upgrade()) {
+                r.set_visible(true);
                 r.set_reveal_child(true);
                 c.grab_focus();
             }
@@ -418,19 +519,22 @@ pub fn date_picker(
     content.append(&pick_row_list);
     content.append(&revealer);
     {
+        // Decided when the popover is realized, before it measures itself for the first
+        // time: a short window, or little room at the anchor (see `limit_height`).
         let revealer = revealer.downgrade();
         let pick_row_list = pick_row_list.downgrade();
-        pop.connect_map(move |p| {
-            // A short window, or little room at the anchor (see `limit_height`).
+        pop.connect_realize(move |p| {
             let limited = p
                 .child()
                 .and_downcast::<gtk::ScrolledWindow>()
                 .is_some_and(|s| (0..560).contains(&s.max_content_height()));
             let short = limited
-                || p.root()
+                || p.parent()
+                    .and_then(|w| w.root())
                     .is_some_and(|r| r.upcast_ref::<gtk::Widget>().height() < SHORT_WINDOW);
             if let (Some(r), Some(l)) = (revealer.upgrade(), pick_row_list.upgrade()) {
                 r.set_reveal_child(!short);
+                r.set_visible(!short);
                 l.set_visible(short);
             }
         });
@@ -806,6 +910,8 @@ pub struct MoveOption {
     pub color: String,
     pub depth: usize,
     pub current: bool,
+    /// The Inbox (its own icon instead of a color dot).
+    pub inbox: bool,
 }
 
 /// "Move to..." (4.4, 4.8): projects and their sections, with a search entry.
@@ -829,9 +935,17 @@ pub fn move_picker(
     let listbox = list(&gettext("Projects"));
     let mut rows = Vec::new();
     for o in &options {
-        // Sections sit under their project, indented, without an icon of their own.
+        // Sections sit under their project with a dimmed "/" (as in "Work / Backlog"), so
+        // they do not read as sub-projects; the Inbox has its own icon (4.1).
         let lead = if o.section_id.is_some() {
-            gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast()
+            gtk::Label::builder()
+                .label("/")
+                .css_classes(["dimmed"])
+                .accessible_role(gtk::AccessibleRole::Presentation)
+                .build()
+                .upcast()
+        } else if o.inbox {
+            icon("tick-inbox-symbolic")
         } else {
             dot(&o.color)
         };

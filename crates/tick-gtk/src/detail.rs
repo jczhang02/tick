@@ -102,6 +102,7 @@ pub struct DetailData {
 struct FieldRow {
     root: gtk::Box,
     button: gtk::Button,
+    icon_holder: adw::Bin,
     icon: gtk::Image,
     value: gtk::Label,
     extra: gtk::Label,
@@ -129,7 +130,8 @@ pub struct TaskDetail {
     sub_entry: gtk::Entry,
     comments_count: gtk::Label,
     comments: gtk::Box,
-    comment_entry: gtk::Entry,
+    /// The composer's multi-line text (Enter sends, Shift+Enter breaks the line; 4.8).
+    comment_view: gtk::TextView,
     /// A comment being edited (its rows are not rebuilt meanwhile).
     editing_comment: RefCell<Option<String>>,
     /// The monospace family for code spans (2.3).
@@ -238,6 +240,8 @@ impl TaskDetail {
             .accepts_tab(false)
             .top_margin(9)
             .bottom_margin(9)
+            .left_margin(9)
+            .right_margin(9)
             .css_classes(["title-3", "tick-title-edit"])
             .build();
         title.update_property(&[gtk::accessible::Property::Label(&gettext("Task title"))]);
@@ -259,6 +263,8 @@ impl TaskDetail {
             .accepts_tab(false)
             .top_margin(6)
             .bottom_margin(6)
+            .left_margin(9)
+            .right_margin(9)
             .css_classes(["body", "tick-description-edit"])
             .build();
         desc_view.update_property(&[gtk::accessible::Property::Label(&gettext("Description"))]);
@@ -341,10 +347,13 @@ impl TaskDetail {
         let comments_count = label("", &["caption", "dimmed", "numeric"]);
         com_head.append(&comments_count);
         content.append(&com_head);
+        // The 24 px avatars and the 8 px gap after them put the comment text on the title's
+        // column (12 + 24 + 8 = 44, 4.8).
         let comments = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(12)
             .margin_top(6)
+            .margin_start(12)
             .build();
         content.append(&comments);
 
@@ -368,15 +377,54 @@ impl TaskDetail {
             .margin_bottom(6)
             .css_classes(["tick-composer"])
             .build();
-        let comment_entry = gtk::Entry::builder()
-            .placeholder_text(gettext("Write a comment"))
+        // A multi-line field drawn like an entry: a text view (grows to 6 lines, then
+        // scrolls) with a placeholder label on top while it is empty.
+        let comment_view = gtk::TextView::builder()
+            .wrap_mode(gtk::WrapMode::WordChar)
+            .accepts_tab(false)
             .hexpand(true)
-            .css_classes(["tick-entry"])
+            .top_margin(12)
+            .bottom_margin(12)
+            .left_margin(9)
+            .right_margin(9)
+            .css_classes(["body"])
             .build();
-        comment_entry.update_property(&[gtk::accessible::Property::Label(&gettext(
+        comment_view.update_property(&[gtk::accessible::Property::Label(&gettext(
             "Write a comment",
         ))]);
-        composer.append(&comment_entry);
+        let comment_scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(140)
+            .focusable(false)
+            .child(&comment_view)
+            .build();
+        let placeholder = gtk::Label::builder()
+            .label(gettext("Write a comment"))
+            .xalign(0.0)
+            .halign(gtk::Align::Start)
+            .valign(gtk::Align::Start)
+            .margin_start(9)
+            .margin_top(12)
+            .can_target(false)
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .css_classes(["body", "dimmed"])
+            .build();
+        let field = gtk::Overlay::builder()
+            .child(&comment_scroller)
+            .hexpand(true)
+            .css_classes(["tick-composer-field"])
+            .build();
+        field.add_overlay(&placeholder);
+        {
+            let placeholder = placeholder.downgrade();
+            comment_view.buffer().connect_changed(move |b| {
+                if let Some(p) = placeholder.upgrade() {
+                    p.set_visible(b.char_count() == 0);
+                }
+            });
+        }
+        composer.append(&field);
         let send = gtk::Button::builder()
             .icon_name("tick-send-symbolic")
             .valign(gtk::Align::Center)
@@ -407,7 +455,7 @@ impl TaskDetail {
             sub_entry,
             comments_count,
             comments,
-            comment_entry,
+            comment_view,
             editing_comment: RefCell::default(),
             mono: RefCell::new(monospace_family()),
             reverting: Cell::new(false),
@@ -475,6 +523,7 @@ impl TaskDetail {
         FieldRow {
             root,
             button,
+            icon_holder,
             icon: icon_w,
             value,
             extra,
@@ -673,21 +722,31 @@ impl TaskDetail {
         });
         self.sub_entry.add_controller(keys);
 
-        // Composer: Enter sends (4.8).
+        // Composer: Enter or Ctrl+Enter sends, Shift+Enter breaks the line (4.8).
         let send_comment = {
             let weak = Rc::downgrade(self);
             move || {
                 let Some(d) = weak.upgrade() else { return };
-                let text = d.comment_entry.text().trim().to_owned();
+                let text = buffer_text(&d.comment_view).trim().to_owned();
                 if text.is_empty() {
                     return;
                 }
-                d.comment_entry.set_text("");
+                d.comment_view.buffer().set_text("");
                 d.commands(|id| vec![Command::note_add(id, &text)]);
             }
         };
+        let keys = gtk::EventControllerKey::new();
         let s = send_comment.clone();
-        self.comment_entry.connect_activate(move |_| s());
+        keys.connect_key_pressed(move |_, key, _, mods| {
+            if matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter)
+                && !mods.contains(gtk::gdk::ModifierType::SHIFT_MASK)
+            {
+                s();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        self.comment_view.add_controller(keys);
         send.connect_clicked(move |_| send_comment());
 
         let weak = Rc::downgrade(self);
@@ -778,6 +837,17 @@ impl TaskDetail {
         }
     }
 
+    /// The open task's temp id `old` was replaced by the server's `new` (`id_map`): it is
+    /// the same task, so nothing the user is editing is reset. Call before [`Self::set_data`]
+    /// with the data read under the new id.
+    pub fn rename_id(&self, old: &str, new: &str) {
+        if let Some(d) = self.data.borrow_mut().as_mut()
+            && d.id == old
+        {
+            d.id = new.to_owned();
+        }
+    }
+
     /// Show `data` (or nothing). A different task resets every editor; the same task is
     /// updated in place, leaving what the user is editing alone.
     pub fn set_data(self: &Rc<Self>, data: Option<DetailData>) {
@@ -795,7 +865,7 @@ impl TaskDetail {
             self.desc_stack.set_visible_child_name("view");
             self.sub_entry.set_visible(false);
             self.sub_entry.set_text("");
-            self.comment_entry.set_text("");
+            self.comment_view.buffer().set_text("");
             self.editing_comment.replace(None);
             self.root.vadjustment().set_value(0.0);
         }
@@ -929,9 +999,26 @@ impl TaskDetail {
             }
             Field::Assignee => {
                 row.root.set_visible(d.shared);
+                // The person's 20 px avatar in the icon column (4.8); the icon when unassigned.
                 match &d.assignee {
-                    Some(n) => (n.clone(), true, vec![]),
-                    None => (gettext("Unassigned"), false, vec![]),
+                    Some(n) => {
+                        // Decoration: the row's name already says who (accessible-role is
+                        // construct-only).
+                        let avatar = glib::Object::builder::<adw::Avatar>()
+                            .property("size", 20)
+                            .property("text", n)
+                            .property("show-initials", true)
+                            .property("accessible-role", gtk::AccessibleRole::Presentation)
+                            .build();
+                        avatar.add_css_class("tick-field-avatar");
+
+                        row.icon_holder.set_child(Some(&avatar));
+                        (n.clone(), true, vec![])
+                    }
+                    None => {
+                        row.icon_holder.set_child(Some(&row.icon));
+                        (gettext("Unassigned"), false, vec![])
+                    }
                 }
             }
             Field::Move => (d.crumb.clone(), true, vec![]),
@@ -1025,7 +1112,7 @@ impl TaskDetail {
     fn comment_widget(self: &Rc<Self>, c: &CommentRow) -> gtk::Widget {
         let root = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .spacing(12)
+            .spacing(8)
             .css_classes(["tick-comment"])
             .build();
         let avatar = adw::Avatar::new(24, Some(&c.author), true);
@@ -1219,6 +1306,29 @@ fn comment_menu() -> gtk::gio::Menu {
     menu
 }
 
+/// A date in a field row, where there is room: "Today", "Tomorrow", "Yesterday", else the
+/// weekday and the date ("Tue 24 Nov", "11 月 24 日 周二"; 4.8, 6.3).
+fn field_date(
+    date: chrono::NaiveDate,
+    today: chrono::NaiveDate,
+    settings: crate::format::DateSettings,
+) -> String {
+    use crate::format;
+    match (date - today).num_days() {
+        -1..=1 => format::date_short(date, today, settings),
+        _ => fill(
+            &gettext("{weekday} {date}"),
+            &[
+                (
+                    "weekday",
+                    &format::weekday_short(chrono::Datelike::weekday(&date)),
+                ),
+                ("date", &format::date_plain(date, today, settings)),
+            ],
+        ),
+    }
+}
+
 /// Read the open task's pane data from the store; `None` when the task is gone.
 pub fn load(store: &tick_core::Store, id: &str) -> tick_core::store::Result<Option<DetailData>> {
     use crate::format::{self, DateSettings};
@@ -1258,19 +1368,7 @@ pub fn load(store: &tick_core::Store, id: &str) -> tick_core::store::Result<Opti
         } else {
             DueState::Other
         };
-        let date = match (d.date - today).num_days() {
-            -1..=1 => format::date_short(d.date, today, settings),
-            _ => fill(
-                &gettext("{weekday} {date}"),
-                &[
-                    (
-                        "weekday",
-                        &format::weekday_short(chrono::Datelike::weekday(&d.date)),
-                    ),
-                    ("date", &format::date_plain(d.date, today, settings)),
-                ],
-            ),
-        };
+        let date = field_date(d.date, today, settings);
         let text = match d.time {
             Some(tm) => fill(
                 &crate::i18n::pgettext("due", "{date} {time}"),
@@ -1302,7 +1400,7 @@ pub fn load(store: &tick_core::Store, id: &str) -> tick_core::store::Result<Opti
     });
     let deadline = t.item.deadline.as_ref().and_then(|dl| {
         let date = chrono::NaiveDate::parse_from_str(dl.date.get(..10)?, "%Y-%m-%d").ok()?;
-        Some((format::date_short(date, today, settings), date < today))
+        Some((field_date(date, today, settings), date < today))
     });
     let subtasks = store
         .subtasks(id)?

@@ -6,6 +6,14 @@
 //! directly, and links are `<a href>` so GTK draws them with its `link` node (accent color,
 //! underline) and opens them on click.
 
+/// Whether a link may become a clickable `<a>`: only web and mail links. A description can
+/// come from another collaborator of a shared project; `file:`, `smb:` or a custom scheme
+/// handler must not open from a click on its text.
+pub fn safe_link(url: &str) -> bool {
+    let u = url.trim_start().to_ascii_lowercase();
+    u.starts_with("http://") || u.starts_with("https://") || u.starts_with("mailto:")
+}
+
 /// Escape text for Pango markup.
 pub fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -93,7 +101,7 @@ fn inline(text: &str, mono: &str) -> String {
         {
             let label: String = chars[i + 1..close].iter().collect();
             let url: String = chars[close + 2..end].iter().collect();
-            if !url.is_empty() && !url.contains(' ') {
+            if !url.is_empty() && !url.contains(' ') && safe_link(&url) {
                 flush(&mut plain, &mut out);
                 out.push_str(&format!(
                     "<a href=\"{}\">{}</a>",
@@ -187,6 +195,23 @@ mod tests {
             "at <a href=\"https://example.com/x\">https://example.com/x</a>."
         );
         assert_eq!(p("**bold _and italic_**"), "<b>bold <i>and italic</i></b>");
+    }
+
+    #[test]
+    fn only_web_and_mail_links_are_clickable() {
+        assert_eq!(
+            p("[mail](mailto:a@b.org)"),
+            "<a href=\"mailto:a@b.org\">mail</a>"
+        );
+        assert_eq!(p("[x](HTTP://x.org)"), "<a href=\"HTTP://x.org\">x</a>");
+        for bad in [
+            "[notes](file:///etc/passwd)",
+            "[share](smb://host/share)",
+            "[app](x-handler:run)",
+            "[js](javascript:alert(1))",
+        ] {
+            assert!(!p(bad).contains("<a "), "{bad} -> {}", p(bad));
+        }
     }
 
     #[test]

@@ -36,11 +36,11 @@ pub struct UndoAction {
     pub gone: Rc<dyn Fn(&TickWindow)>,
 }
 
-/// Arguments of `due` for a picked date (4.9): a calendar day keeps an existing time as
-/// the floating `YYYY-MM-DDTHH:MM:SS`; typed text goes to the server as `string`.
-pub fn due_args(task: &Task, choice: &DateChoice) -> Value {
+/// Arguments of `due` for a picked date (4.9): a calendar day keeps the task's existing
+/// `time` as the floating `YYYY-MM-DDTHH:MM:SS`; typed text goes to the server as `string`.
+pub fn due_args(time: Option<chrono::NaiveTime>, choice: &DateChoice) -> Value {
     match choice {
-        DateChoice::Date(d) => match task.due.and_then(|x| x.time) {
+        DateChoice::Date(d) => match time {
             Some(t) => {
                 json!({ "date": format!("{}T{}", d.format("%Y-%m-%d"), t.format("%H:%M:%S")) })
             }
@@ -73,7 +73,7 @@ impl TickWindow {
             });
         }));
         imp.detail_bin.set_child(Some(&detail.root));
-        imp.detail_view.add_css_class("tick-detail-pane");
+        imp.detail_split.add_css_class("tick-detail-split");
         imp.detail_view.add_bottom_bar(&detail.composer);
         let _ = imp.detail.set(detail);
         // Closing the overlay (a click on the list in B1-B3) closes the task too.
@@ -179,10 +179,14 @@ impl TickWindow {
     /// here or elsewhere) closes the pane.
     pub(crate) fn refresh_detail(&self) {
         let imp = self.imp();
-        let Some(id) = imp.open_task.borrow().clone() else {
+        let Some(old) = imp.open_task.borrow().clone() else {
             return;
         };
-        let id = self.live_id(&id);
+        let id = self.live_id(&old);
+        if id != old {
+            // The server replaced a temp id: still the same task for the pane's editors.
+            self.detail().rename_id(&old, &id);
+        }
         imp.open_task.replace(Some(id.clone()));
         let data = {
             let store = imp.store.borrow();
@@ -299,7 +303,9 @@ impl TickWindow {
         None
     }
 
-    fn present_popover(&self, pop: &gtk::Popover, anchor: Anchor) {
+    /// Show a picker at `anchor`. `below`: always under (or over) the anchor, never beside
+    /// it (the project crumb's "Move to...", whose list reads from the crumb down).
+    fn present_popover(&self, pop: &gtk::Popover, anchor: Anchor, below: bool) {
         let (parent, rect): (gtk::Widget, Option<gtk::gdk::Rectangle>) = match anchor {
             Anchor::Widget(w) => (w, None),
             Anchor::Row(key) => {
@@ -324,7 +330,7 @@ impl TickWindow {
         match area {
             // A detail field row with room on its left (the pane sits at the window's end
             // edge): open towards the list, where the popover can slide to fit vertically.
-            Some(a) if rect.is_none() && a.x() >= 360.0 => {
+            Some(a) if rect.is_none() && a.x() >= 360.0 && !below => {
                 pop.set_position(gtk::PositionType::Left);
             }
             // Otherwise below (or above) the anchor, scrolling inside when it is taller than
@@ -374,12 +380,14 @@ impl TickWindow {
                 let info = self.date_info(task.due.map(|d| d.date));
                 pickers::date_picker(info, false, move |c| {
                     let Some(w) = weak.upgrade() else { return };
+                    // The temp id may have been replaced while the picker was open.
+                    let id = w.live_id(&id);
                     let Some(t) = w.store().task(&id).ok().flatten() else {
                         return;
                     };
                     w.enqueue(vec![Command::item_update(
                         &id,
-                        json!({ "due": due_args(&t, &c) }),
+                        json!({ "due": due_args(t.due.and_then(|d| d.time), &c) }),
                     )]);
                 })
             }
@@ -485,7 +493,7 @@ impl TickWindow {
                 })
             }
         };
-        self.present_popover(&pop, anchor);
+        self.present_popover(&pop, anchor, field == Field::Move);
     }
 
     fn move_options(&self, task: &Task) -> Vec<MoveOption> {
@@ -505,6 +513,7 @@ impl TickWindow {
                 color: p.color.clone(),
                 depth: n.depth,
                 current: task.project_id == p.id && task.section_id.is_none(),
+                inbox: p.inbox_project,
             });
             for s in store.sections(&p.id).unwrap_or_default() {
                 if s.is_archived {
@@ -517,6 +526,7 @@ impl TickWindow {
                     name: s.name,
                     color: p.color.clone(),
                     depth: n.depth + 1,
+                    inbox: false,
                 });
             }
         }
@@ -524,6 +534,8 @@ impl TickWindow {
     }
 
     fn toggle_label(&self, id: &str, name: &str, checked: bool) {
+        // The picker holds the id it opened with: follow a replaced temp id.
+        let id = &self.live_id(id);
         let Some(task) = self.store().task(id).ok().flatten() else {
             return;
         };
@@ -539,6 +551,7 @@ impl TickWindow {
     }
 
     fn create_label_on(&self, id: &str, name: &str) {
+        let id = &self.live_id(id);
         let Some(task) = self.store().task(id).ok().flatten() else {
             return;
         };
@@ -565,6 +578,7 @@ impl TickWindow {
     /// Move a task to a project (or a section of it) with the "Moved to ..." Undo toast
     /// (4.12): "Move to..." (V) and a drop on a sidebar project.
     pub(crate) fn move_task_to(&self, id: &str, project_id: &str, section_id: Option<&str>) {
+        let id = &self.live_id(id);
         let (task, name) = {
             let store = self.store();
             let Some(task) = store.task(id).ok().flatten() else {
@@ -719,6 +733,11 @@ impl TickWindow {
     }
 
     pub(crate) fn open_uri(&self, uri: &str) {
+        // Only web and mail links (and attachment URLs, which are https) ever open.
+        if !crate::markdown::safe_link(uri) {
+            eprintln!("tick: not opening a link with an unsupported scheme");
+            return;
+        }
         if test_mode::enabled() {
             // The isolated test session has no URI handler: report what would open.
             eprintln!("TICK_OPEN_URI={uri}");
@@ -793,5 +812,60 @@ impl TickWindow {
         if let Some(rect) = self.row_rect(&row.key()) {
             self.task_menu(rect);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDate, NaiveTime};
+
+    fn day() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    #[test]
+    fn a_picked_day_keeps_the_time_as_a_floating_date() {
+        let t = NaiveTime::from_hms_opt(14, 0, 0);
+        assert_eq!(
+            due_args(t, &DateChoice::Date(day())),
+            json!({ "date": "2026-11-25T14:00:00" })
+        );
+        let t = NaiveTime::from_hms_opt(9, 5, 30);
+        assert_eq!(
+            due_args(t, &DateChoice::Date(day())),
+            json!({ "date": "2026-11-25T09:05:30" })
+        );
+        assert_eq!(
+            due_args(None, &DateChoice::Date(day())),
+            json!({ "date": "2026-11-25" })
+        );
+    }
+
+    #[test]
+    fn typed_text_and_clearing() {
+        assert_eq!(
+            due_args(None, &DateChoice::Text("every monday".into())),
+            json!({ "string": "every monday" })
+        );
+        // Text keeps no time of its own: the server parses it.
+        assert_eq!(
+            due_args(
+                NaiveTime::from_hms_opt(14, 0, 0),
+                &DateChoice::Text("fri".into())
+            ),
+            json!({ "string": "fri" })
+        );
+        assert_eq!(due_args(None, &DateChoice::Clear), Value::Null);
+    }
+
+    #[test]
+    fn deadlines_are_plain_dates() {
+        assert_eq!(
+            deadline_args(&DateChoice::Date(day())),
+            json!({ "date": "2026-11-25" })
+        );
+        assert_eq!(deadline_args(&DateChoice::Clear), Value::Null);
+        assert_eq!(deadline_args(&DateChoice::Text("x".into())), Value::Null);
     }
 }

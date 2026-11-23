@@ -286,15 +286,14 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
             }
             let d1 = ctx.dispatch.clone();
             let d2 = ctx.dispatch.clone();
-            let title = t.title.clone();
-            let p = t.p;
+            let shown = t.clone();
             let weak = w.downgrade();
             crate::dnd::drag_source(
                 &w,
                 format!("{}{}", crate::dnd::TASK, t.id),
                 move || {
                     let width = weak.upgrade().map_or(-1, |w| w.width());
-                    drag_icon(&title, p, width)
+                    drag_icon(&shown, width)
                 },
                 move || d1(RowAction::DragBegin),
                 move || d2(RowAction::DragEnd),
@@ -574,15 +573,23 @@ fn section_editor(id: Option<String>, name: &str, ctx: &RenderCtx) -> gtk::Widge
         .css_classes(["tick-section-header"])
         .build();
     let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    let slot = gtk::Box::builder()
+    // The chevron column, as in a header (a new section has nothing to collapse yet).
+    let chevron = gtk::Image::builder()
+        .icon_name("pan-down-symbolic")
         .width_request(44)
+        .height_request(44)
+        .css_classes(["dimmed"])
         .accessible_role(gtk::AccessibleRole::Presentation)
         .build();
-    line.append(&slot);
+    line.append(&chevron);
+    // The name column ends where a header's menu button starts, so the hairline does too.
+    // The hairline hangs 2 px lower than a header's, under the focus ring; 2 px more top
+    // margin keeps the name on the header's line.
     let column = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .valign(gtk::Align::Center)
-        .margin_top(3)
+        .margin_top(5)
+        .margin_end(44)
         .hexpand(true)
         .build();
     let d1 = ctx.dispatch.clone();
@@ -603,7 +610,7 @@ fn section_editor(id: Option<String>, name: &str, ctx: &RenderCtx) -> gtk::Widge
     );
     column.append(&entry);
     let rule = hairline(0);
-    rule.set_margin_top(2);
+    rule.set_margin_top(4);
     column.append(&rule);
     line.append(&column);
     root.append(&line);
@@ -903,24 +910,32 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
     root.upcast()
 }
 
-/// The drag icon (4.4): the row's ring and title on the floating surface, at its width.
-fn drag_icon(title: &str, p: u8, width: i32) -> gtk::Widget {
+/// The drag icon (4.4): the row as it is drawn in the list (ring, title, meta line and
+/// trailing avatar) on the floating surface, at the row's width. Nothing in it reacts.
+fn drag_icon(t: &TaskRow, width: i32) -> gtk::Widget {
+    let shown = TaskRow {
+        depth: 0,
+        fading: false,
+        completing: false,
+        has_children: false,
+        chevron_slot: false,
+        ..t.clone()
+    };
+    let ctx = RenderCtx {
+        dispatch: Rc::new(|_| {}),
+        narrow: Rc::default(),
+        task_bound: Rc::default(),
+        header_height: Rc::default(),
+    };
+    let row = task_row(&shown, &ctx);
+    row.set_can_target(false);
+    row.set_hexpand(true);
     let root = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .width_request(width)
         .css_classes(["tick-drag-icon"])
         .build();
-    let ring = gtk::CheckButton::builder()
-        .valign(gtk::Align::Center)
-        .can_target(false)
-        .css_classes(["tick-ring".to_owned(), format!("p{p}")])
-        .build();
-    root.append(&ring);
-    let l = label(title, &["body"]);
-    l.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    l.set_margin_end(12);
-    l.set_hexpand(true);
-    root.append(&l);
+    root.append(&row);
     root.upcast()
 }
 

@@ -452,7 +452,7 @@ impl TickWindow {
             let q = adw::EntryRow::builder()
                 .title(gettext("Query"))
                 .activates_default(true)
-                .css_classes(["monospace"])
+                .css_classes(["tick-query"])
                 .build();
             list.append(&q);
             q
@@ -499,6 +499,7 @@ impl TickWindow {
                         color: String::new(),
                         depth: 0,
                         current: *id == *sel.borrow(),
+                        inbox: false,
                     })
                     .collect();
                 let sel = sel.clone();
@@ -601,8 +602,11 @@ impl TickWindow {
         content.append(&color_label);
         let view = adw::ToolbarView::new();
         view.add_top_bar(&header);
+        // No vertical scrolling: the dialog grows with lines that appear while it is open
+        // (the duplicate-name error, a two-line query hint) and keeps its bottom padding.
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_height(true)
             .focusable(false)
             .child(&content)
@@ -830,6 +834,11 @@ impl TickWindow {
         }
         self.imp().ui.borrow_mut().renaming_title = true;
         self.refresh_rows();
+        // The title is the list's first row: bring it into view (F2 from a scrolled list).
+        let list = self.imp().task_list.get();
+        if list.model().is_some_and(|m| m.n_items() > 0) {
+            list.scroll_to(0, gtk::ListScrollFlags::NONE, None);
+        }
     }
 
     pub(crate) fn commit_title(&self, name: Option<String>) {
@@ -1005,11 +1014,7 @@ impl TickWindow {
                 &[("tasks", &tasks), ("projects", &subs)],
             ),
         };
-        let body = [first, gettext("This can't be undone.")]
-            .into_iter()
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let body = sentences(&[first, gettext("This can't be undone.")]);
         let id = id.to_owned();
         self.confirm(
             &fill(&gettext("Delete \"{name}\"?"), &[("name", &p.name)]),
@@ -1029,15 +1034,15 @@ impl TickWindow {
             };
             (s, store.section_task_count(id).unwrap_or(0))
         };
-        let mut body = String::new();
-        if n > 0 {
-            body = fill(
+        let first = if n > 0 {
+            fill(
                 &gettext("Its {tasks} will be deleted too."),
                 &[("tasks", &ncount("{n} task", "{n} tasks", n))],
-            );
-            body.push(' ');
-        }
-        body.push_str(&gettext("This can't be undone."));
+            )
+        } else {
+            String::new()
+        };
+        let body = sentences(&[first, gettext("This can't be undone.")]);
         let id = id.to_owned();
         self.confirm(
             &fill(&gettext("Delete section \"{name}\"?"), &[("name", &s.name)]),
@@ -1211,6 +1216,7 @@ impl TickWindow {
                 name,
                 color: "charcoal".into(),
                 depth: 0,
+                inbox: false,
             })
             .collect();
         let weak = self.downgrade();
@@ -1276,6 +1282,21 @@ impl TickWindow {
             e.project_id = r.clone();
         }
     }
+}
+
+/// The sentences of a confirmation body, empty ones dropped (4.25). Chinese puts each on a line
+/// of its own: Pango may break CJK text between any two characters, and a wrapped sentence
+/// would split a word ("此操 / 作无法撤销").
+fn sentences(parts: &[String]) -> String {
+    // Translators: two sentences of a confirmation body. Chinese: "{first}\n{second}" (a line
+    // break between them).
+    let pair = crate::i18n::pgettext("sentences", "{first} {second}");
+    parts
+        .iter()
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .reduce(|a, b| fill(&pair, &[("first", &a), ("second", &b)]))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

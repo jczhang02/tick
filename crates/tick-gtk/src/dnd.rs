@@ -698,6 +698,9 @@ fn sidebar_item(row: &gtk::Widget) -> Option<SidebarItem> {
         .and_downcast::<SidebarItem>()
 }
 
+/// The margin around a drag icon's surface, for its floating shadow.
+const ICON_MARGIN: i32 = 20;
+
 /// A drag source for a row: `payload` on drag, `icon` as the drag icon (floating surface,
 /// 4.4), and the source row dimmed to 40 % while it is dragged.
 pub fn drag_source(
@@ -719,13 +722,20 @@ pub fn drag_source(
     let w = widget.downgrade();
     source.connect_drag_begin(move |_, drag| {
         let icon_widget = icon();
+        // Room around the floating surface for its shadow (2.5): the drag icon's surface is
+        // exactly its child's size, and a shadow past it would be cut off.
+        icon_widget.set_margin_start(ICON_MARGIN);
+        icon_widget.set_margin_end(ICON_MARGIN);
+        icon_widget.set_margin_top(ICON_MARGIN);
+        icon_widget.set_margin_bottom(ICON_MARGIN);
         let (hx, _) = hot.get();
         let di = gtk::DragIcon::for_drag(drag);
         di.set_child(Some(&icon_widget));
         // The icon hangs just below the pointer, so the insertion line at the pointer stays
         // visible (a centered icon would cover it).
-        drag.set_hotspot(hx as i32, -6);
-        crate::test_mode::set_drag_icon(&icon_widget, hx, -6.0);
+        let (hx, hy) = (hx as i32 + ICON_MARGIN, ICON_MARGIN - 6);
+        drag.set_hotspot(hx, hy);
+        crate::test_mode::set_drag_icon(di.upcast_ref(), f64::from(hx), f64::from(hy));
         // The source row (the list's row widget) stays in place at 40 % (4.4).
         let row = w
             .upgrade()
