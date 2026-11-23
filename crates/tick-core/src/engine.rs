@@ -29,7 +29,12 @@ use serde_json::Value;
 
 use crate::api::{ApiError, Client, RESOURCE_TYPES};
 use crate::command::QUICK_ADD;
-use crate::store::{Changes, Clock, Kind, MAX_ATTEMPTS, QueuedCommand, Store, StoreError, wall_ms};
+use std::ops::Bound;
+
+use crate::store::{
+    Changes, Clock, CompletedRange, Kind, MAX_ATTEMPTS, QueuedCommand, Store, StoreError,
+    completed_stamp, wall_ms,
+};
 
 /// Maximum commands per `/sync` request (`docs/api/pages/request-limits.md`).
 pub const MAX_BATCH: usize = 100;
@@ -234,9 +239,13 @@ struct CompletedPager {
     since: chrono::DateTime<chrono::Utc>,
     until: chrono::DateTime<chrono::Utc>,
     cursor: Option<String>,
-    /// Upper bound (`completed_at`, exclusive) of what the next page covers: the window's
-    /// end for its first page, else the oldest completion of the previous page.
+    /// Upper bound ([`completed_stamp`]) of what the next page covers: the window's end
+    /// (exclusive) for its first page, else the oldest completion of the previous page
+    /// (inclusive: the server may put more completions of that instant on this page).
     upper: String,
+    upper_inclusive: bool,
+    /// Ids the previous pages returned at `upper` (kept when this page lacks them).
+    at_upper: Vec<String>,
     windows: u32,
 }
 
@@ -259,7 +268,7 @@ fn rfc3339(t: chrono::DateTime<chrono::Utc>) -> String {
 
 /// An instant written like the API's `completed_at` (`2025-01-21T21:28:43.841504Z`), so
 /// cached rows compare with it as strings.
-fn completed_stamp(t: chrono::DateTime<chrono::Utc>) -> String {
+fn completed_stamp_at(t: chrono::DateTime<chrono::Utc>) -> String {
     t.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()
 }
 
@@ -563,7 +572,9 @@ impl SyncEngine {
                 since: now - chrono::Duration::days(COMPLETED_WINDOW_DAYS),
                 until,
                 cursor: None,
-                upper: completed_stamp(until),
+                upper: completed_stamp_at(until),
+                upper_inclusive: false,
+                at_upper: Vec::new(),
                 windows: 1,
             });
         }
@@ -586,32 +597,65 @@ impl SyncEngine {
         let next = page.next_cursor.filter(|c| !c.is_empty());
         // The page holds every completion from its oldest one (or, as the window's last
         // page, from the window's start) up to `upper`: cached rows in that range that it
-        // does not hold are gone on the server.
-        let oldest = page
+        // does not hold are gone on the server. With more pages to come, the oldest instant
+        // itself is left out: the next page may hold more completions of it.
+        let stamped: Vec<(String, String)> = page
             .items
             .iter()
-            .filter_map(|v| v.get("completed_at").and_then(Value::as_str))
-            .min()
-            .map(str::to_owned);
+            .filter_map(|v| {
+                let id = match v.get("id")? {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                let at = v.get("completed_at").and_then(Value::as_str)?;
+                Some((id, completed_stamp(at)))
+            })
+            .collect();
+        let oldest = stamped.iter().map(|(_, at)| at.clone()).min();
+        let since_stamp = completed_stamp_at(pager.since);
         let lower = match (&next, &oldest) {
-            (None, _) => completed_stamp(pager.since),
-            (Some(_), Some(o)) => o.clone(),
-            (Some(_), None) => pager.upper.clone(),
+            (None, _) => Some(Bound::Included(since_stamp.as_str())),
+            (Some(_), Some(o)) => Some(Bound::Excluded(o.as_str())),
+            // More pages but no stamps on this one: it vouches for nothing.
+            (Some(_), None) => None,
         };
-        let changes = self
-            .store
-            .cache_completed_range(&page.items, Some((&lower, &pager.upper)))?;
+        let upper = if pager.upper_inclusive {
+            Bound::Included(pager.upper.as_str())
+        } else {
+            Bound::Excluded(pager.upper.as_str())
+        };
+        let range = lower.map(|lower| CompletedRange {
+            lower,
+            upper,
+            keep: &pager.at_upper,
+        });
+        let changes = self.store.cache_completed_range(&page.items, range)?;
         self.emit_changes(&changes);
         match next {
             Some(c) => {
                 pager.cursor = Some(c);
-                pager.upper = lower;
+                if let Some(o) = oldest {
+                    let here = stamped
+                        .iter()
+                        .filter(|(_, at)| *at == o)
+                        .map(|(id, _)| id.clone());
+                    if pager.upper_inclusive && o == pager.upper {
+                        // A whole page of the same instant: the earlier ones still count.
+                        pager.at_upper.extend(here);
+                    } else {
+                        pager.at_upper = here.collect();
+                    }
+                    pager.upper = o;
+                    pager.upper_inclusive = true;
+                }
             }
             None => {
                 pager.until = pager.since;
                 pager.since -= chrono::Duration::days(COMPLETED_WINDOW_DAYS);
                 pager.cursor = None;
-                pager.upper = completed_stamp(pager.until);
+                pager.upper = completed_stamp_at(pager.until);
+                pager.upper_inclusive = false;
+                pager.at_upper.clear();
                 pager.windows += 1;
             }
         }
