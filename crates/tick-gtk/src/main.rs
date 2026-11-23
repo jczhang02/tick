@@ -53,7 +53,8 @@ fn main() -> glib::ExitCode {
         glib::Char::from(0),
         glib::OptionFlags::NONE,
         glib::OptionArg::None,
-        "Start without showing the window (Run at Login)",
+        // Translators: the description of `tick --background` in `tick --help`.
+        &gettext("Start without showing the window (Run at Login)"),
         None,
     );
     app.connect_handle_local_options(|_, options| {

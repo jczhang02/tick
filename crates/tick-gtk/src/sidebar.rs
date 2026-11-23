@@ -2,7 +2,7 @@
 //! `GtkTreeListModel` of system views, favorites, the project tree, labels and filters.
 //!
 //! While a task or project is dragged over a collapsed project, the project expands after
-//! 600 ms ([`Sidebar::hover_drag`]).
+//! 600 ms (`TickWindow::hover_expand` in `dnd.rs`).
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
