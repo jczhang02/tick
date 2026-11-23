@@ -58,6 +58,7 @@ pub struct SessionBuilder {
     width: u32,
     height: u32,
     env: Vec<(String, String)>,
+    args: Vec<String>,
     app_bin: Option<PathBuf>,
     app_id: String,
     launch: bool,
@@ -76,6 +77,7 @@ impl Default for SessionBuilder {
                 // Ctrl+Shift+U hex input; the default Wayland context ignores it.
                 ("GTK_IM_MODULE".into(), "gtk-im-context-simple".into()),
             ],
+            args: Vec::new(),
             app_bin: None,
             app_id: TICK_APP_ID.into(),
             launch: true,
@@ -103,6 +105,12 @@ impl SessionBuilder {
         let key = key.into();
         self.env.retain(|(k, _)| *k != key);
         self.env.push((key, value.into()));
+        self
+    }
+
+    /// Adds a command-line argument for the app (every launch, e.g. `--background`).
+    pub fn arg(mut self, arg: impl Into<String>) -> Self {
+        self.args.push(arg.into());
         self
     }
 
@@ -290,6 +298,7 @@ pub struct Session {
     _slot: OwnedSemaphorePermit,
     base_env: Vec<(String, String)>,
     app_env: Vec<(String, String)>,
+    app_args: Vec<String>,
     app_bin: PathBuf,
     app_id: String,
     app_log_offset: u64,
@@ -435,6 +444,7 @@ impl Session {
             _slot: slot,
             base_env,
             app_env: opts.env,
+            app_args: opts.args,
             app_bin,
             app_id: opts.app_id,
             app_log_offset: 0,
@@ -460,7 +470,8 @@ impl Session {
             .open(&log_path)?;
         self.app_log_offset = log.metadata()?.len();
         let mut cmd = Command::new(&self.app_bin);
-        cmd.env_clear()
+        cmd.args(&self.app_args)
+            .env_clear()
             .envs(self.base_env.iter().cloned())
             .env("WAYLAND_DISPLAY", WAYLAND_DISPLAY)
             .env("GDK_BACKEND", "wayland")

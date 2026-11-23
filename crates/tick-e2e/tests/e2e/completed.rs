@@ -230,10 +230,19 @@ async fn read_only_detail_and_reopen() {
     })
     .await
     .unwrap();
-    // Gone from the history, open again in the project.
+    // Gone from the history, open again in the project; the pane closed with its row.
     app::task_list(&window)
         .await
         .wait_gone(&Query::role(Role::ListItem).name("Done 03"), WAIT)
+        .await
+        .unwrap();
+    window
+        .wait_gone(
+            &Query::role(Role::CheckBox)
+                .name("Mark as not done")
+                .showing(),
+            WAIT,
+        )
         .await
         .unwrap();
     crate::detail::wait_item(&server, "d03", "reopened", |v| v["checked"] == false).await;
@@ -328,4 +337,49 @@ async fn a_task_completed_here_is_read_only_in_the_history() {
     .await
     .unwrap();
     crate::detail::wait_item(&server, "a1", "reopened", |v| v["checked"] == false).await;
+}
+
+/// A history request the server fails: a toast says so and its "Retry" asks again (4.21).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_load_offers_retry() {
+    let (server, s, window) = start().await;
+    let path = "/api/v1/tasks/completed/by_completion_date";
+    server.inject(tick_fake_server::Failure::Status {
+        status: 500,
+        retry_after: None,
+        count: 1,
+        path: Some(path.into()),
+        body_contains: None,
+    });
+    app::open_view(&s, &window, "Completed").await;
+    window
+        .wait_for(
+            &Query::role(Role::Label)
+                .name("Couldn't load completed tasks")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let failed = app::requests(&server, path);
+    assert_eq!(failed.len(), 1, "{failed:?}");
+    assert_eq!(failed[0].status, 500);
+    let list = app::task_list(&window).await;
+    assert!(
+        list.find(&Query::role(Role::ListItem).name("Done 00"))
+            .await
+            .is_none()
+    );
+    let retry = window
+        .wait_for(&Query::role(Role::Button).name("Retry").showing(), WAIT)
+        .await
+        .unwrap();
+    s.click(&retry).await.unwrap();
+    // After the backoff of the 500, the request goes out again and the rows come.
+    list.wait_for(&Query::role(Role::ListItem).name("Done 00"), WAIT)
+        .await
+        .unwrap();
+    let all = app::requests(&server, path);
+    assert_eq!(all.len(), 2, "{all:?}");
+    assert_eq!(history_requests(&server).len(), 1);
 }

@@ -78,6 +78,7 @@
 | `TICK_TOKEN` | Use this token instead of the keyring (tests, CI). |
 | `TICK_TEST_MODE=1` | Maximize the window, export `app.test-screenshot`, print `TICK_FIRST_DATA_FRAME_MS`, disable animations. |
 | `TICK_NOW` | Fixed "now" (RFC 3339) for deterministic Today/Upcoming and screenshots. |
+| `TICK_NOW_ADVANCE=1` | With `TICK_NOW`: the clock starts at `TICK_NOW` when the process first reads it and then runs (reminder timer tests). |
 | `TICK_SYNC_INTERVAL_MS` | Override the 15 s foreground sync interval (tests use a short one). |
 | `TICK_BACKGROUND_SYNC_MS` | Override the 5 min sync interval while the window is hidden (tests). |
 | `TICK_COLOR_SCHEME` | `light` or `dark`, overrides the saved theme (screenshots). |

@@ -129,7 +129,8 @@ async fn quits_on_ctrl_q() {
   and prints the paths and log tails (`app.log`, `mutter.log`, `dbus.log`). `TICK_E2E_KEEP=1`
   always keeps it. CI uploads the logs of failed sessions as the `e2e-logs` artifact.
 - Builder options: `.narrow()` (600x800), `.monitor(w, h)`, `.color_scheme(..)`, `.now(..)`,
-  `.locale(..)`, `.env(k, v)`, `.api(base_url, token)`, `.no_launch()`,
+  `.locale(..)`, `.env(k, v)`, `.arg(..)` (a command-line argument, e.g. `--background`),
+  `.api(base_url, token)`, `.no_launch()`,
   `.fake_portal(PortalMode::Grant | Deny | NoBackground)`.
 - Fake Background portal (opt-in): the harness owns `org.freedesktop.portal.Desktop` on the
   private bus and records `RequestBackground` calls (`Session::portal().calls()`); `Grant`

@@ -1,6 +1,7 @@
 //! Reminders and background running (`SPEC.md` Data 5): time-based reminders notify once
 //! with "Complete" and "Open", Complete works while the window is hidden, Open shows the
-//! task, nothing repeats after a restart, and a closed window keeps syncing.
+//! task, nothing repeats after a restart, a reminder coming due while the app runs fires
+//! from the timer, a closed window keeps syncing, and `--background` starts without one.
 
 use std::time::Duration;
 
@@ -214,17 +215,7 @@ async fn closed_window_keeps_syncing_and_ctrl_q_quits() {
     assert!(s.app_running());
 
     // Shown again (a second launch activates the running app), Ctrl+Q quits.
-    let platform: std::collections::HashMap<&str, zbus::zvariant::Value<'_>> = Default::default();
-    s.bus()
-        .call_method(
-            Some("dev.chengrui.Tick"),
-            "/dev/chengrui/Tick",
-            Some("org.freedesktop.Application"),
-            "Activate",
-            &(platform,),
-        )
-        .await
-        .unwrap();
+    activate(&s).await;
     s.app()
         .await
         .unwrap()
@@ -236,4 +227,98 @@ async fn closed_window_keeps_syncing_and_ctrl_q_quits() {
         .unwrap();
     let status = s.wait_app_exit(WAIT).await.unwrap();
     assert!(status.success(), "{status}");
+}
+
+/// Asks the running app to activate (what a second `tick` launch does).
+async fn activate(s: &Session) {
+    let platform: std::collections::HashMap<&str, zbus::zvariant::Value<'_>> = Default::default();
+    s.bus()
+        .call_method(
+            Some("dev.chengrui.Tick"),
+            "/dev/chengrui/Tick",
+            Some("org.freedesktop.Application"),
+            "Activate",
+            &(platform,),
+        )
+        .await
+        .unwrap();
+}
+
+/// Whether the app shows a window: a never-shown window may keep the app off the AT-SPI
+/// registry altogether, which counts as none.
+async fn shows_a_window(s: &Session) -> bool {
+    match tokio::time::timeout(Duration::from_secs(3), s.app()).await {
+        Ok(Ok(app)) => app.find(&Query::role(Role::Frame)).await.is_some(),
+        _ => false,
+    }
+}
+
+/// `tick --background` (Run at Login): no window, syncing at once, reminders as usual; a
+/// second launch shows the window.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_start_syncs_and_reminds_without_a_window() {
+    let server = app::server_with(fixture()).await;
+    let s = app::session(&server)
+        .arg("--background")
+        .start()
+        .await
+        .unwrap();
+    app::wait_first_sync(&server).await;
+    notification(&s, "Call the bank").await;
+    notification(&s, "Water the garden").await;
+    assert!(!shows_a_window(&s).await, "--background shows no window");
+    // No first frame to report either: nothing was painted.
+    assert!(!s.app_log().contains("TICK_FIRST_DATA_FRAME_MS"));
+    activate(&s).await;
+    s.app()
+        .await
+        .unwrap()
+        .wait_for(&Query::role(Role::Frame).name("Tick"), WAIT)
+        .await
+        .unwrap();
+}
+
+/// A reminder that comes due while the app runs fires from the timer, on time and once
+/// (`TICK_NOW_ADVANCE` lets the fixed clock run; no sync comes in between).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reminder_fires_on_time_while_running() {
+    let f = json!({
+        "items": [
+            {"id": "t1", "content": "Take the cake out", "child_order": 1,
+             "due": {"date": "2026-11-22T10:00:00", "string": "today 10:00", "is_recurring": false}}
+        ],
+        "reminders": [
+            {"id": "n1", "item_id": "t1", "type": "absolute",
+             "due": {"date": "2026-11-22T09:00:10", "string": "9:00:10", "is_recurring": false}}
+        ]
+    });
+    let server = app::server_with(f).await;
+    let launched = std::time::Instant::now();
+    let s = app::session(&server)
+        .env("TICK_NOW_ADVANCE", "1")
+        .env("TICK_SYNC_INTERVAL_MS", "600000")
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::wait_tasks(&window, &["Take the cake out"]).await;
+    let synced = launched.elapsed();
+    assert!(
+        synced < Duration::from_secs(9),
+        "the first sync took {synced:?}: too late to tell the timer from the start check"
+    );
+    assert!(s.notifications().sent().is_empty(), "{:?}", titles(&s));
+    let n = s
+        .notifications()
+        .wait_for(Duration::from_secs(20), |n| n.title == "Take the cake out")
+        .await
+        .unwrap();
+    let at = launched.elapsed();
+    assert!(at >= Duration::from_secs(9), "fired early, after {at:?}");
+    assert!(at < Duration::from_secs(16), "fired late, after {at:?}");
+    assert_eq!(n.buttons.len(), 2);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(titles(&s), ["Take the cake out"]);
+    assert_eq!(app::requests(&server, "/api/v1/sync").len(), 1);
 }
