@@ -44,31 +44,11 @@ impl TickWindow {
         let Some(app) = self.application() else {
             return;
         };
-        let (schedule, enabled, settings) = {
-            let store = self.store();
-            let now = store.now();
-            let schedule = match store.reminder_schedule(&now) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("tick: reading reminders: {e}");
-                    return;
-                }
-            };
-            let enabled = store.desktop_reminders_enabled().unwrap_or(true);
-            let user = store.user().ok().flatten();
-            (schedule, enabled, DateSettings::from_user(user.as_ref()))
-        };
-        if enabled && !schedule.due.is_empty() {
-            for r in &schedule.due {
-                self.send_reminder(&app, r, settings);
-            }
-            if let Err(e) = self.store().mark_reminders_fired(&schedule.due) {
-                eprintln!("tick: remembering sent reminders: {e}");
-            }
-        }
+        let next = self.send_due_reminders(&app);
+        // Armed on every path, a failed read included: a hidden window with no changes
+        // coming has nothing else to check again.
         let now = self.store().now().utc();
-        let wait = schedule
-            .next
+        let wait = next
             .and_then(|n| (n - now).to_std().ok())
             .map_or(MAX_WAIT, |d| d.min(MAX_WAIT))
             .max(Duration::from_secs(1));
@@ -80,6 +60,33 @@ impl TickWindow {
             }
         });
         imp.reminder_timer.replace(Some(id));
+    }
+
+    /// Send the reminders that are due now; returns when the next one is.
+    fn send_due_reminders(&self, app: &gtk::Application) -> Option<chrono::DateTime<chrono::Utc>> {
+        let (schedule, enabled, settings) = {
+            let store = self.store();
+            let now = store.now();
+            let schedule = match store.reminder_schedule(&now) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("tick: reading reminders: {e}");
+                    return None;
+                }
+            };
+            let enabled = store.desktop_reminders_enabled().unwrap_or(true);
+            let user = store.user().ok().flatten();
+            (schedule, enabled, DateSettings::from_user(user.as_ref()))
+        };
+        if enabled && !schedule.due.is_empty() {
+            for r in &schedule.due {
+                self.send_reminder(app, r, settings);
+            }
+            if let Err(e) = self.store().mark_reminders_fired(&schedule.due) {
+                eprintln!("tick: remembering sent reminders: {e}");
+            }
+        }
+        schedule.next
     }
 
     fn send_reminder(
