@@ -1095,8 +1095,9 @@ fn search_header(query: &str, count: usize, ctx: &RenderCtx) -> gtk::Widget {
     let root = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .margin_top(if ctx.narrow.get() { 24 } else { 48 })
+        // The entry lines up with the rows below: its left edge with the rings, its right
+        // edge with the end of the row content (an avatar's right edge).
         .margin_start(12)
-        .margin_end(12)
         .css_classes(["tick-view-header", "tick-search-header"])
         .build();
     let entry = gtk::SearchEntry::builder()
