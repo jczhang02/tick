@@ -912,6 +912,8 @@ impl TaskDetail {
             gtk::accessible::Property::Description(&data.title),
         ]);
         self.set_read_only(data.read_only);
+        self.desc_stack
+            .set_visible(!(data.read_only && data.description.trim().is_empty()));
 
         // Title: never under the user's cursor.
         // Being edited: focused with uncommitted text (after Enter the buffer equals the
@@ -981,6 +983,13 @@ impl TaskDetail {
         self.desc_label.set_focusable(!ro);
         self.sub_ghost.set_visible(!ro);
         self.composer.set_visible(!ro);
+        // The history has no sub-tasks or comments to show.
+        for head in [self.sub_heading.parent(), self.comments_count.parent()]
+            .into_iter()
+            .flatten()
+        {
+            head.set_visible(!ro);
+        }
     }
 
     fn update_field(&self, f: Field, row: &FieldRow, d: &DetailData) {
@@ -1549,6 +1558,36 @@ pub fn load_completed(
         Some(s) => format!("{pname} / {}", s.name),
         None => pname,
     };
+    // The date it had when it was completed, without due-state colors.
+    let now = store.now();
+    let today = now.today();
+    let settings = crate::format::DateSettings::from_user(store.user()?.as_ref());
+    let due = item
+        .due
+        .as_ref()
+        .and_then(|d| d.date.as_deref())
+        .and_then(|d| tick_core::clock::resolve_due_date(d, now.offset()))
+        .map(|d| {
+            let date = field_date(d.date, today, settings);
+            FieldDue {
+                text: match d.time {
+                    Some(tm) => fill(
+                        &crate::i18n::pgettext("due", "{date} {time}"),
+                        &[
+                            ("date", &date),
+                            ("time", &crate::format::time(tm, settings)),
+                        ],
+                    ),
+                    None => date,
+                },
+                recurrence: None,
+                state: DueState::Other,
+            }
+        });
+    let deadline = item.deadline.as_ref().and_then(|dl| {
+        let date = chrono::NaiveDate::parse_from_str(dl.date.get(..10)?, "%Y-%m-%d").ok()?;
+        Some((field_date(date, today, settings), false))
+    });
     Ok(Some(DetailData {
         id: item.id.clone(),
         title: item.content.clone(),
@@ -1558,8 +1597,8 @@ pub fn load_completed(
         crumb,
         color,
         shared: false,
-        due: None,
-        deadline: None,
+        due,
+        deadline,
         labels: item.labels.clone(),
         assignee: None,
         subtasks: Vec::new(),

@@ -867,8 +867,8 @@ async fn features(scheme: ColorScheme, narrow: bool) {
         .unwrap();
     shoot(&s, &name("search")).await;
     s.key(keysym::ESCAPE).await.unwrap();
-    s.type_text("milk").await.unwrap();
-    wait_row(&window, "No results for \"milk\"").await;
+    s.type_text("zebra").await.unwrap();
+    wait_row(&window, "No results for \"zebra\"").await;
     shoot(&s, &name("search-none")).await;
     s.key(keysym::ESCAPE).await.unwrap();
 

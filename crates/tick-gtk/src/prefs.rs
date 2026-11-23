@@ -46,6 +46,7 @@ impl TickWindow {
             let check = gtk::CheckButton::builder()
                 .valign(gtk::Align::Center)
                 .active(saved.as_deref().unwrap_or("system") == value)
+                .css_classes(["tick-row-radio"])
                 .build();
             check.update_property(&[gtk::accessible::Property::Label(&title)]);
             if let Some(f) = &first {
@@ -105,6 +106,10 @@ impl TickWindow {
         page.add(&account);
 
         dialog.add(&page);
+        dialog.connect_map(|d| {
+            let d = d.clone();
+            glib::idle_add_local_once(move || name_lists(d.upcast_ref(), None));
+        });
         dialog.present(Some(self));
     }
 
@@ -281,6 +286,28 @@ impl TickWindow {
         if crate::test_mode::enabled() {
             eprintln!("TICK_LOGGED_OUT=1");
         }
+    }
+}
+
+/// libadwaita 1.9 leaves each group's boxed list unnamed and the page's scrolled window in
+/// the focus order with nothing to say: name the lists after their group, take the scroller
+/// out of the focus order.
+fn name_lists(w: &gtk::Widget, group: Option<&str>) {
+    let title = w
+        .downcast_ref::<adw::PreferencesGroup>()
+        .map(|g| g.title().to_string());
+    let group = title.as_deref().or(group);
+    if let Some(list) = w.downcast_ref::<gtk::ListBox>()
+        && let Some(g) = group
+    {
+        list.update_property(&[gtk::accessible::Property::Label(g)]);
+    } else if let Some(sw) = w.downcast_ref::<gtk::ScrolledWindow>() {
+        sw.set_focusable(false);
+    }
+    let mut c = w.first_child();
+    while let Some(x) = c {
+        name_lists(&x, group);
+        c = x.next_sibling();
     }
 }
 
