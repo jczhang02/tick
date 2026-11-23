@@ -82,9 +82,20 @@ impl TickRow {
     }
 }
 
-/// Update `store` to show `rows`: rows with unchanged keys in the common prefix and suffix
-/// are updated in place; the middle is spliced.
-pub fn update_store(store: &gio::ListStore, rows: Vec<Row>) {
+/// Largest middle part (old x new rows) the keyed diff solves exactly; larger changes (a
+/// new view fills an empty list, so this is rare) splice the whole middle.
+const MAX_DIFF_CELLS: usize = 4_000_000;
+
+/// Update `store` to show `rows`, keyed by [`Row::key`]: rows whose key stays keep their
+/// object (updated in place), so selection, focus and the scroll position survive. Only
+/// rows that appear, disappear or move are spliced.
+///
+/// After trimming the common prefix and suffix, the rest is a longest common subsequence
+/// of keys. `prefer` (the selected row's key) weighs more than all other rows together:
+/// when a reorder could keep either the moved row or its neighbors in place, the selected
+/// row stays and its neighbors move around it (a `ListStore` has no move, so a moved
+/// object is removed and inserted again, which drops its widget and keyboard focus).
+pub fn update_store(store: &gio::ListStore, rows: Vec<Row>, prefer: Option<&str>) {
     let old: Vec<TickRow> = (0..store.n_items())
         .filter_map(|i| store.item(i).and_downcast::<TickRow>())
         .collect();
@@ -102,21 +113,148 @@ pub fn update_store(store: &gio::ListStore, rows: Vec<Row>) {
     {
         suffix += 1;
     }
+    let old_mid = &old_keys[prefix..old_keys.len() - suffix];
+    let new_mid = &new_keys[prefix..new_keys.len() - suffix];
+    let pairs = if old_mid.len() * new_mid.len() <= MAX_DIFF_CELLS {
+        keyed_lcs(old_mid, new_mid, prefer)
+    } else {
+        Vec::new()
+    };
     let new_len = rows.len();
-    let mut rows = rows.into_iter().enumerate();
-    let mut middle = Vec::new();
-    for (i, row) in rows.by_ref() {
-        if i < prefix {
-            old[i].set_row(row);
-        } else if i < new_len - suffix {
-            middle.push(TickRow::new(row));
-        } else {
-            let j = old.len() - (new_len - i);
-            old[j].set_row(row);
+    let old_len = old.len();
+    let mut rows: Vec<Option<Row>> = rows.into_iter().map(Some).collect();
+    // Unchanged ends: update in place.
+    for i in 0..prefix {
+        if let Some(r) = rows[i].take() {
+            old[i].set_row(r);
         }
     }
-    let removed = old.len() - prefix - suffix;
-    if removed > 0 || !middle.is_empty() {
-        store.splice(prefix as u32, removed as u32, &middle);
+    for k in 0..suffix {
+        if let Some(r) = rows[new_len - 1 - k].take() {
+            old[old_len - 1 - k].set_row(r);
+        }
+    }
+    // Matched middle rows: update in place.
+    for &(i, j) in &pairs {
+        if let Some(r) = rows[prefix + j].take() {
+            old[prefix + i].set_row(r);
+        }
+    }
+    // Splice the gaps between matches, from the end so earlier positions stay valid.
+    let mut bounds: Vec<(isize, isize)> = vec![(-1, -1)];
+    bounds.extend(pairs.iter().map(|&(i, j)| (i as isize, j as isize)));
+    bounds.push((old_mid.len() as isize, new_mid.len() as isize));
+    for w in bounds.windows(2).rev() {
+        let (pi, pj) = w[0];
+        let (ci, cj) = w[1];
+        let old_start = (pi + 1) as usize;
+        let removed = (ci - pi - 1) as usize;
+        let added: Vec<TickRow> = ((pj + 1) as usize..cj as usize)
+            .filter_map(|j| rows[prefix + j].take().map(TickRow::new))
+            .collect();
+        if removed > 0 || !added.is_empty() {
+            store.splice((prefix + old_start) as u32, removed as u32, &added);
+        }
+    }
+}
+
+/// Matched `(old, new)` index pairs of a longest common subsequence of keys, where a match
+/// of `prefer` counts more than every other match together.
+fn keyed_lcs(old: &[String], new: &[String], prefer: Option<&str>) -> Vec<(usize, usize)> {
+    let (n, m) = (old.len(), new.len());
+    if n == 0 || m == 0 {
+        return Vec::new();
+    }
+    let heavy = (n.min(m) as u32) + 1;
+    let w = |i: usize| {
+        if Some(old[i].as_str()) == prefer {
+            heavy
+        } else {
+            1
+        }
+    };
+    // dp[i][j]: best weight of old[i..] against new[j..].
+    let cols = m + 1;
+    let mut dp = vec![0u32; (n + 1) * cols];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            let skip = dp[(i + 1) * cols + j].max(dp[i * cols + j + 1]);
+            dp[i * cols + j] = if old[i] == new[j] {
+                skip.max(w(i) + dp[(i + 1) * cols + j + 1])
+            } else {
+                skip
+            };
+        }
+    }
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < n && j < m {
+        if old[i] == new[j] && dp[i * cols + j] == w(i) + dp[(i + 1) * cols + j + 1] {
+            out.push((i, j));
+            i += 1;
+            j += 1;
+        } else if dp[(i + 1) * cols + j] >= dp[i * cols + j + 1] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keyed_lcs;
+
+    fn k(s: &str) -> Vec<String> {
+        s.chars().map(|c| c.to_string()).collect()
+    }
+
+    #[test]
+    fn lcs_keeps_the_preferred_row() {
+        // "c" moves to the front: without a preference the others stay.
+        assert_eq!(keyed_lcs(&k("abc"), &k("cab"), None), vec![(0, 1), (1, 2)]);
+        // With "c" selected, "c" stays and "a", "b" move around it.
+        assert_eq!(keyed_lcs(&k("abc"), &k("cab"), Some("c")), vec![(2, 0)]);
+        assert_eq!(
+            keyed_lcs(&k("abcd"), &k("abxd"), None),
+            vec![(0, 0), (1, 1), (3, 3)]
+        );
+        assert!(keyed_lcs(&k(""), &k("ab"), None).is_empty());
+    }
+
+    fn ghosts(keys: &str) -> Vec<crate::rows::Row> {
+        keys.chars()
+            .map(|c| crate::rows::Row::Ghost {
+                key: c.to_string(),
+                prefill: String::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn update_store_keeps_objects_by_key() {
+        use gtk::prelude::*;
+        let store = gtk::gio::ListStore::new::<super::TickRow>();
+        super::update_store(&store, ghosts("abcde"), None);
+        let before: Vec<super::TickRow> = (0..5)
+            .map(|i| store.item(i).and_downcast().unwrap())
+            .collect();
+        super::update_store(&store, ghosts("adbcxe"), Some("d"));
+        let keys: Vec<String> = (0..store.n_items())
+            .map(|i| {
+                store
+                    .item(i)
+                    .and_downcast::<super::TickRow>()
+                    .unwrap()
+                    .key()
+            })
+            .collect();
+        assert_eq!(keys, ["a", "d", "b", "c", "x", "e"]);
+        let same = |pos: u32, old: usize| {
+            store.item(pos).and_downcast::<super::TickRow>().unwrap() == before[old]
+        };
+        // The preferred row kept its object; so did the untouched ends.
+        assert!(same(1, 3) && same(0, 0) && same(5, 4));
     }
 }

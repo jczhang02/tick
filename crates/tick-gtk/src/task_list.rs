@@ -26,6 +26,172 @@ pub enum RowAction {
     ToggleSection(String),
     /// An "Add task" ghost row: open quick add with this text.
     Ghost(String),
+    /// A click on a task row: open it in the detail pane.
+    Open(String),
+    /// Right-click or long-press on a row: its context menu at (x, y) in list coordinates.
+    Menu {
+        key: String,
+        x: f64,
+        y: f64,
+    },
+    /// The inline section editor: save (`id` `None`: a new section) or cancel (4.24).
+    SectionCommit {
+        id: Option<String>,
+        name: String,
+    },
+    SectionCancel,
+    /// The in-place project title editor (4.2): start, save, cancel.
+    RenameTitle,
+    TitleCommit(String),
+    TitleCancel,
+    /// A task row drag started or ended.
+    DragBegin,
+    DragEnd,
+}
+
+/// A frameless inline editor: Enter or focus-out commits, Escape cancels. `select` selects
+/// the text on focus (a rename).
+fn inline_entry(
+    text: &str,
+    placeholder: &str,
+    classes: &[&str],
+    select: bool,
+    commit: impl Fn(String) + 'static,
+    cancel: impl Fn() + 'static,
+) -> gtk::Entry {
+    let entry = gtk::Entry::builder()
+        .text(text)
+        .placeholder_text(placeholder)
+        .hexpand(true)
+        .css_classes(classes.iter().map(|c| c.to_string()).collect::<Vec<_>>())
+        .build();
+    entry.update_property(&[gtk::accessible::Property::Label(placeholder)]);
+    let done = Rc::new(Cell::new(false));
+    let commit = Rc::new(commit);
+    let cancel = Rc::new(cancel);
+    {
+        let done = done.clone();
+        let commit = commit.clone();
+        entry.connect_activate(move |e| {
+            if !done.replace(true) {
+                commit(e.text().trim().to_owned());
+            }
+        });
+    }
+    let keys = gtk::EventControllerKey::new();
+    {
+        let done = done.clone();
+        let cancel = cancel.clone();
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                if !done.replace(true) {
+                    cancel();
+                }
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+    }
+    entry.add_controller(keys);
+    let focus = gtk::EventControllerFocus::new();
+    {
+        let done = done.clone();
+        focus.connect_leave(move |c| {
+            // Focus-out after the row was already finished (or while it is rebuilt) is not a
+            // user decision.
+            let Some(e) = c.widget().and_downcast::<gtk::Entry>() else {
+                return;
+            };
+            if !e.is_mapped() || done.replace(true) {
+                return;
+            }
+            let text = e.text().trim().to_owned();
+            if text.is_empty() {
+                cancel();
+            } else {
+                commit(text);
+            }
+        });
+    }
+    entry.add_controller(focus);
+    entry.connect_map(move |e| {
+        let e = e.clone();
+        glib::idle_add_local_once(move || {
+            e.grab_focus();
+            if select {
+                e.select_region(0, -1);
+            } else {
+                e.set_position(-1);
+            }
+        });
+    });
+    entry
+}
+
+/// Whether `w` (picked under the pointer) is inside a button of the row (ring, chevron).
+fn in_button(w: Option<gtk::Widget>, row: &gtk::Widget) -> bool {
+    let mut cur = w;
+    while let Some(c) = cur {
+        if &c == row {
+            return false;
+        }
+        if c.is::<gtk::Button>() || c.is::<gtk::CheckButton>() {
+            return true;
+        }
+        cur = c.parent();
+    }
+    false
+}
+
+/// Open on click, context menu on right-click and long-press (4.4).
+fn row_gestures(root: &gtk::Box, id: &str, key: &str, ctx: &RenderCtx) {
+    let click = gtk::GestureClick::new();
+    click.set_button(gtk::gdk::BUTTON_PRIMARY);
+    let dispatch = ctx.dispatch.clone();
+    let id_c = id.to_owned();
+    click.connect_released(move |g, n, x, y| {
+        let Some(w) = g.widget() else { return };
+        if n != 1 || in_button(w.pick(x, y, gtk::PickFlags::DEFAULT), &w) {
+            return;
+        }
+        dispatch(RowAction::Open(id_c.clone()));
+    });
+    root.add_controller(click);
+    let menu_at = {
+        let dispatch = ctx.dispatch.clone();
+        let key = key.to_owned();
+        move |w: &gtk::Widget, x: f64, y: f64| {
+            let Some(list) = w.ancestor(gtk::ListView::static_type()) else {
+                return;
+            };
+            if let Some(p) = w.compute_point(&list, &gtk::graphene::Point::new(x as f32, y as f32))
+            {
+                dispatch(RowAction::Menu {
+                    key: key.clone(),
+                    x: f64::from(p.x()),
+                    y: f64::from(p.y()),
+                });
+            }
+        }
+    };
+    let right = gtk::GestureClick::new();
+    right.set_button(gtk::gdk::BUTTON_SECONDARY);
+    let m = menu_at.clone();
+    right.connect_pressed(move |g, _, x, y| {
+        g.set_state(gtk::EventSequenceState::Claimed);
+        if let Some(w) = g.widget() {
+            m(&w, x, y);
+        }
+    });
+    root.add_controller(right);
+    let long = gtk::GestureLongPress::new();
+    long.set_touch_only(true);
+    long.connect_pressed(move |g, x, y| {
+        if let Some(w) = g.widget() {
+            menu_at(&w, x, y);
+        }
+    });
+    root.add_controller(long);
 }
 
 pub type Dispatch = Rc<dyn Fn(RowAction)>;
@@ -97,6 +263,7 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
     let (selectable, interactive) = match &row {
         Row::Task(_) => (true, true),
         Row::SectionHeader(_) | Row::Ghost { .. } => (false, true),
+        Row::SectionEditor { .. } => (false, false),
         _ => (false, false),
     };
     li.set_selectable(selectable);
@@ -113,12 +280,31 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
         Row::MonthHeader { title, .. } => month_header(title),
         Row::Task(t) => {
             ctx.task_bound.set(true);
-            task_row(t, ctx)
+            let w = task_row(t, ctx);
+            if let Some(b) = w.downcast_ref::<gtk::Box>() {
+                row_gestures(b, &t.id, &t.key, ctx);
+            }
+            let d1 = ctx.dispatch.clone();
+            let d2 = ctx.dispatch.clone();
+            let shown = t.clone();
+            let weak = w.downgrade();
+            crate::dnd::drag_source(
+                &w,
+                format!("{}{}", crate::dnd::TASK, t.id),
+                move || {
+                    let width = weak.upgrade().map_or(-1, |w| w.width());
+                    drag_icon(&shown, width)
+                },
+                move || d1(RowAction::DragBegin),
+                move || d2(RowAction::DragEnd),
+            );
+            w
         }
         Row::Ghost { prefill, .. } => ghost_row(prefill, ctx),
         Row::Empty(e) => empty_row(e),
         Row::Loading { text, .. } => loading_row(text),
         Row::SourceLine { text, spinner, .. } => source_line(text, *spinner),
+        Row::SectionEditor { id, name, .. } => section_editor(id.clone(), name, ctx),
     };
     // The key lets keyboard navigation map the focused row back to its model position.
     widget.set_widget_name(&obj.key());
@@ -154,6 +340,7 @@ fn accessible_text(row: &Row) -> (String, String) {
         Row::DayHeader(d) => (d.label.clone(), d.dim.clone().unwrap_or_default()),
         Row::Empty(e) => (e.title.clone(), e.description.clone()),
         Row::Loading { text, .. } | Row::SourceLine { text, .. } => (text.clone(), String::new()),
+        Row::SectionEditor { .. } => (gettext("Section name"), String::new()),
     }
 }
 
@@ -199,10 +386,35 @@ fn view_header(h: &ViewHeader, ctx: &RenderCtx) -> gtk::Widget {
         img.set_pixel_size(20);
         title_box.append(&img);
     }
-    let title = label(&h.title, &["title-1"]);
-    title.set_wrap(true);
-    title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    title_box.append(&title);
+    if h.editing {
+        let d1 = ctx.dispatch.clone();
+        let d2 = ctx.dispatch.clone();
+        let entry = inline_entry(
+            &h.title,
+            &gettext("Project name"),
+            &["title-1", "tick-title-entry"],
+            true,
+            move |name| d1(RowAction::TitleCommit(name)),
+            move || d2(RowAction::TitleCancel),
+        );
+        title_box.append(&entry);
+    } else {
+        let title = label(&h.title, &["title-1"]);
+        title.set_wrap(true);
+        title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        if h.renamable {
+            // Double-click renames the project in place (4.2).
+            let click = gtk::GestureClick::new();
+            let dispatch = ctx.dispatch.clone();
+            click.connect_pressed(move |_, n, _, _| {
+                if n == 2 {
+                    dispatch(RowAction::RenameTitle);
+                }
+            });
+            title.add_controller(click);
+        }
+        title_box.append(&title);
+    }
     root.append(&title_box);
 
     let sub = gtk::Box::builder()
@@ -322,6 +534,89 @@ fn section_header(s: &SectionHeader, ctx: &RenderCtx) -> gtk::Widget {
     column.append(&name_row);
     let rule = hairline(0);
     rule.set_margin_top(2);
+    column.append(&rule);
+    line.append(&column);
+    // Rename, Add Task Here, Delete Section (4.5): shown on hover and focus, always in AT.
+    let menu = gio::Menu::new();
+    let target = Some(s.id.to_variant());
+    let item = |label: &str, action: &str| {
+        let i = gio::MenuItem::new(Some(label), None);
+        i.set_action_and_target_value(Some(action), target.as_ref());
+        i
+    };
+    menu.append_item(&item(&gettext("Rename"), "win.section-rename"));
+    menu.append_item(&item(&gettext("Add Task Here"), "win.section-add-task"));
+    let danger = gio::Menu::new();
+    danger.append_item(&item(&gettext("Delete Section..."), "win.section-delete"));
+    menu.append_section(None, &danger);
+    let button = gtk::MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .menu_model(&menu)
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "tick-icon-44", "tick-reveal"])
+        .tooltip_text(gettext("Section Menu"))
+        .build();
+    button.update_property(&[gtk::accessible::Property::Label(&fill(
+        &gettext("{name} section menu"),
+        &[("name", &s.name)],
+    ))]);
+    crate::menus::name_button(&button);
+    line.append(&button);
+    root.append(&line);
+    root.upcast()
+}
+
+/// The inline section editor (4.24): the section header layout with an entry for the name.
+fn section_editor(id: Option<String>, name: &str, ctx: &RenderCtx) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["tick-section-header"])
+        .build();
+    if id.is_none() {
+        // A new section is the project's last row: room under it, so scrolling it into view
+        // does not leave it on the window's bottom edge (4.24).
+        root.set_margin_bottom(48);
+    }
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    // The chevron column, as in a header (a new section has nothing to collapse yet).
+    let chevron = gtk::Image::builder()
+        .icon_name("pan-down-symbolic")
+        .width_request(44)
+        .height_request(44)
+        .css_classes(["dimmed"])
+        .accessible_role(gtk::AccessibleRole::Presentation)
+        .build();
+    line.append(&chevron);
+    // The name column ends where a header's menu button starts, so the hairline does too.
+    // The hairline hangs 2 px lower than a header's, 2 px under the focus ring (which pads
+    // the text by 6 px, style.css); the top margin balances the box so the name stays on the
+    // header's line.
+    let column = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .valign(gtk::Align::Center)
+        .margin_top(9)
+        .margin_end(44)
+        .hexpand(true)
+        .build();
+    let d1 = ctx.dispatch.clone();
+    let d2 = ctx.dispatch.clone();
+    let rename = id.is_some();
+    let entry = inline_entry(
+        name,
+        &gettext("Section name"),
+        &["heading", "tick-entry", "tick-section-entry"],
+        rename,
+        move |name| {
+            d1(RowAction::SectionCommit {
+                id: id.clone(),
+                name,
+            })
+        },
+        move || d2(RowAction::SectionCancel),
+    );
+    column.append(&entry);
+    let rule = hairline(0);
+    rule.set_margin_top(8);
     column.append(&rule);
     line.append(&column);
     root.append(&line);
@@ -475,6 +770,84 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
         desc.set_margin_top(2);
         content.append(&desc);
     }
+    if let Some(meta) = meta_line(t) {
+        content.append(&meta);
+    }
+    root.append(&content);
+    let trailing = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .valign(gtk::Align::Center)
+        .margin_start(12)
+        .build();
+    if let Some(msg) = &t.failed {
+        let warn = icon("dialog-warning-symbolic", &["tick-failed"]);
+        warn.set_tooltip_text(Some(msg));
+        trailing.append(&warn);
+    }
+    if let Some(name) = &t.assignee {
+        let a = adw::Avatar::new(20, Some(name), true);
+        a.upcast_ref::<gtk::Widget>()
+            .update_property(&[gtk::accessible::Property::Label(&fill(
+                &gettext("Assigned to {name}"),
+                &[("name", name)],
+            ))]);
+        trailing.append(&a);
+    }
+    if t.has_children {
+        let chevron = gtk::Button::builder()
+            .icon_name("pan-down-symbolic")
+            .css_classes(["flat", "tick-icon-44", "tick-chevron", "dimmed"])
+            .build();
+        let name = if t.collapsed {
+            chevron.add_css_class("collapsed");
+            gettext("Expand sub-tasks")
+        } else {
+            gettext("Collapse sub-tasks")
+        };
+        chevron.update_property(&[gtk::accessible::Property::Label(&name)]);
+        let dispatch = ctx.dispatch.clone();
+        let id = t.id.clone();
+        chevron.connect_clicked(move |_| dispatch(RowAction::ToggleSubtasks(id.clone())));
+        trailing.append(&chevron);
+    } else if t.chevron_slot {
+        // Keep the chevron column so avatars line up with the parents' (4.4).
+        let slot = gtk::Box::builder()
+            .width_request(44)
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .build();
+        trailing.append(&slot);
+    }
+    if trailing.first_child().is_some() {
+        root.append(&trailing);
+    }
+
+    if t.fading {
+        // libadwaita skips an animation whose widget is not mapped (it jumps to the end):
+        // start the fade once the row is on screen. Test mode uses no duration (5.3).
+        let duration = if crate::test_mode::enabled() { 0 } else { 250 };
+        let target = adw::PropertyAnimationTarget::new(&root, "opacity");
+        let anim = adw::TimedAnimation::new(&root, 1.0, 0.0, duration, target);
+        anim.set_easing(adw::Easing::EaseOutCubic);
+        anim.set_follow_enable_animations_setting(false);
+        if root.is_mapped() {
+            anim.play();
+        } else {
+            let pending = std::cell::RefCell::new(Some(anim));
+            root.connect_map(move |_| {
+                if let Some(a) = pending.borrow_mut().take() {
+                    a.play();
+                }
+            });
+        }
+    }
+    root.upcast()
+}
+
+/// A task's meta line (4.4): due, deadline, sub-tasks, comments, labels, project, each with
+/// its 12 px icon; `.dimmed` on individual items only (7.4 pitfall 1). `None` when empty.
+/// Shared by the task list and the detail pane's sub-task rows (4.8).
+pub fn meta_line(t: &TaskRow) -> Option<adw::WrapBox> {
     let meta = adw::WrapBox::builder()
         .child_spacing(12)
         .line_spacing(2)
@@ -546,78 +919,35 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
         meta.append(&b);
         has_meta = true;
     }
-    if has_meta {
-        content.append(&meta);
-    }
-    root.append(&content);
+    has_meta.then_some(meta)
+}
 
-    let trailing = gtk::Box::builder()
+/// The drag icon (4.4): the row as it is drawn in the list (ring, title, meta line and
+/// trailing avatar) on the floating surface, at the row's width. Nothing in it reacts.
+fn drag_icon(t: &TaskRow, width: i32) -> gtk::Widget {
+    let shown = TaskRow {
+        depth: 0,
+        fading: false,
+        completing: false,
+        has_children: false,
+        chevron_slot: false,
+        ..t.clone()
+    };
+    let ctx = RenderCtx {
+        dispatch: Rc::new(|_| {}),
+        narrow: Rc::default(),
+        task_bound: Rc::default(),
+        header_height: Rc::default(),
+    };
+    let row = task_row(&shown, &ctx);
+    row.set_can_target(false);
+    row.set_hexpand(true);
+    let root = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
-        .spacing(6)
-        .valign(gtk::Align::Center)
-        .margin_start(12)
+        .width_request(width)
+        .css_classes(["tick-drag-icon"])
         .build();
-    if let Some(msg) = &t.failed {
-        let warn = icon("dialog-warning-symbolic", &["tick-failed"]);
-        warn.set_tooltip_text(Some(msg));
-        trailing.append(&warn);
-    }
-    if let Some(name) = &t.assignee {
-        let a = adw::Avatar::new(20, Some(name), true);
-        a.upcast_ref::<gtk::Widget>()
-            .update_property(&[gtk::accessible::Property::Label(&fill(
-                &gettext("Assigned to {name}"),
-                &[("name", name)],
-            ))]);
-        trailing.append(&a);
-    }
-    if t.has_children {
-        let chevron = gtk::Button::builder()
-            .icon_name("pan-down-symbolic")
-            .css_classes(["flat", "tick-icon-44", "tick-chevron", "dimmed"])
-            .build();
-        let name = if t.collapsed {
-            chevron.add_css_class("collapsed");
-            gettext("Expand sub-tasks")
-        } else {
-            gettext("Collapse sub-tasks")
-        };
-        chevron.update_property(&[gtk::accessible::Property::Label(&name)]);
-        let dispatch = ctx.dispatch.clone();
-        let id = t.id.clone();
-        chevron.connect_clicked(move |_| dispatch(RowAction::ToggleSubtasks(id.clone())));
-        trailing.append(&chevron);
-    } else if t.chevron_slot {
-        // Keep the chevron column so avatars line up with the parents' (4.4).
-        let slot = gtk::Box::builder()
-            .width_request(44)
-            .accessible_role(gtk::AccessibleRole::Presentation)
-            .build();
-        trailing.append(&slot);
-    }
-    if trailing.first_child().is_some() {
-        root.append(&trailing);
-    }
-
-    if t.fading {
-        // libadwaita skips an animation whose widget is not mapped (it jumps to the end):
-        // start the fade once the row is on screen. Test mode uses no duration (5.3).
-        let duration = if crate::test_mode::enabled() { 0 } else { 250 };
-        let target = adw::PropertyAnimationTarget::new(&root, "opacity");
-        let anim = adw::TimedAnimation::new(&root, 1.0, 0.0, duration, target);
-        anim.set_easing(adw::Easing::EaseOutCubic);
-        anim.set_follow_enable_animations_setting(false);
-        if root.is_mapped() {
-            anim.play();
-        } else {
-            let pending = std::cell::RefCell::new(Some(anim));
-            root.connect_map(move |_| {
-                if let Some(a) = pending.borrow_mut().take() {
-                    a.play();
-                }
-            });
-        }
-    }
+    root.append(&row);
     root.upcast()
 }
 
@@ -666,6 +996,18 @@ fn empty_row(e: &EmptyState) -> gtk::Widget {
     description.set_justify(gtk::Justification::Center);
     description.set_xalign(0.5);
     root.append(&description);
+    if let Some(id) = &e.edit_filter {
+        // The rejected server filter (4.22): fix the query in the Edit Filter dialog.
+        let button = gtk::Button::builder()
+            .label(gettext("Edit Filter"))
+            .halign(gtk::Align::Center)
+            .margin_top(12)
+            .css_classes(["pill"])
+            .action_name("win.filter-edit")
+            .action_target(&id.to_variant())
+            .build();
+        root.append(&button);
+    }
     root.upcast()
 }
 

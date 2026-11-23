@@ -59,6 +59,46 @@ fn build(app: &adw::Application) {
         .build();
     app.add_action_entries([complete, open]);
 
+    // Drag and drop probe: dragging "Drag source" onto "Drop target" sets the status.
+    let source = gtk::Label::builder()
+        .label("Drag source")
+        .height_request(60)
+        .build();
+    let drag = gtk::DragSource::new();
+    drag.set_actions(gtk::gdk::DragAction::MOVE);
+    drag.connect_prepare(|_, _, _| {
+        Some(gtk::gdk::ContentProvider::for_value(&"probe-42".to_value()))
+    });
+    drag.connect_drag_begin(glib::clone!(
+        #[weak]
+        status,
+        move |_, d| {
+            status.set_label("dragging");
+            let icon = gtk::DragIcon::for_drag(d);
+            icon.set_child(Some(&gtk::Label::new(Some("Drag icon"))));
+        }
+    ));
+    source.add_controller(drag);
+    let target = gtk::Label::builder()
+        .label("Drop target")
+        .height_request(60)
+        .build();
+    let drop = gtk::DropTarget::new(glib::Type::STRING, gtk::gdk::DragAction::MOVE);
+    drop.connect_drop(glib::clone!(
+        #[weak]
+        status,
+        #[upgrade_or]
+        false,
+        move |_, v, _, _| {
+            status.set_label(&format!(
+                "dropped {}",
+                v.get::<String>().unwrap_or_default()
+            ));
+            true
+        }
+    ));
+    target.add_controller(drop);
+
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(12)
@@ -69,6 +109,8 @@ fn build(app: &adw::Application) {
     content.append(&entry);
     content.append(&send);
     content.append(&status);
+    content.append(&source);
+    content.append(&target);
 
     let view = adw::ToolbarView::new();
     view.add_top_bar(&adw::HeaderBar::new());

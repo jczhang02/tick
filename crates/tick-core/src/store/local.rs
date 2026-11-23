@@ -591,6 +591,22 @@ pub(crate) fn apply_command(
                 )?;
             }
         }
+        "project_reorder" => {
+            if let Some(list) = a.get("projects").and_then(Value::as_array) {
+                for p in list {
+                    if let (Some(id), Some(order)) = (str_arg(p, "id"), p.get("child_order")) {
+                        set_fields(
+                            tx,
+                            Kind::Project,
+                            id,
+                            &[("child_order", order.clone()), ("order_key", Value::Null)],
+                            now,
+                            ch,
+                        )?;
+                    }
+                }
+            }
+        }
         "project_archive" => {
             if let Some(id) = str_arg(a, "id") {
                 for p in project_subtree(tx, id)? {

@@ -58,19 +58,34 @@ template $TickWindow: Adw.ApplicationWindow {
                 }
               }
 
-              content: Gtk.ScrolledWindow {
-                hscrollbar-policy: never;
-                focusable: false;
+              content: Gtk.Overlay sidebar_overlay {
+                child: Gtk.ScrolledWindow {
+                  hscrollbar-policy: never;
+                  focusable: false;
 
-                child: Gtk.ListView sidebar_list {
-                  styles [
-                    "navigation-sidebar",
-                  ]
+                  child: Gtk.ListView sidebar_list {
+                    styles [
+                      "navigation-sidebar",
+                    ]
 
-                  accessibility {
-                    label: _("Views");
-                  }
+                    accessibility {
+                      label: _("Views");
+                    }
+                  };
                 };
+
+                [overlay]
+                Gtk.Box sidebar_drop_line {
+                  visible: false;
+                  can-target: false;
+                  halign: start;
+                  valign: start;
+                  accessible-role: presentation;
+
+                  styles [
+                    "tick-drop-indicator",
+                  ]
+                }
               };
             };
           };
@@ -82,6 +97,8 @@ template $TickWindow: Adw.ApplicationWindow {
             child: Adw.OverlaySplitView detail_split {
               sidebar-position: end;
               show-sidebar: false;
+              // Escape closes a picker first, then the pane (TickWindow handles it), never both.
+              pin-sidebar: true;
               min-sidebar-width: 340;
               max-sidebar-width: 420;
               sidebar-width-fraction: 0.38;
@@ -109,6 +126,17 @@ template $TickWindow: Adw.ApplicationWindow {
                   }
 
                   [end]
+                  Gtk.MenuButton view_menu_button {
+                    visible: false;
+                    icon-name: "view-more-symbolic";
+                    tooltip-text: _("View Menu");
+
+                    accessibility {
+                      label: _("View Menu");
+                    }
+                  }
+
+                  [end]
                   Gtk.MenuButton sync_button {
                     visible: false;
 
@@ -122,31 +150,48 @@ template $TickWindow: Adw.ApplicationWindow {
                   }
                 }
 
-                content: Gtk.ScrolledWindow list_scroller {
-                  hscrollbar-policy: never;
-                  focusable: false;
+                content: Gtk.Overlay list_overlay {
+                  child: Gtk.ScrolledWindow list_scroller {
+                    hscrollbar-policy: never;
+                    focusable: false;
 
-                  child: Adw.ClampScrollable {
-                    maximum-size: 720;
-                    tightening-threshold: 560;
+                    child: Adw.ClampScrollable {
+                      maximum-size: 720;
+                      tightening-threshold: 560;
 
-                    child: Gtk.ListView task_list {
-                      styles [
-                        "tick-task-list",
-                      ]
+                      child: Gtk.ListView task_list {
+                        styles [
+                          "tick-task-list",
+                        ]
 
-                      accessibility {
-                        label: _("Tasks");
-                      }
+                        accessibility {
+                          label: _("Tasks");
+                        }
+                      };
                     };
                   };
+
+                  [overlay]
+                  Gtk.Box drop_line {
+                    visible: false;
+                    can-target: false;
+                    halign: start;
+                    valign: start;
+                    accessible-role: presentation;
+
+                    styles [
+                      "tick-drop-indicator",
+                    ]
+                  }
                 };
               };
 
-              sidebar: Adw.ToolbarView {
+              sidebar: Adw.ToolbarView detail_view {
                 [top]
                 Adw.HeaderBar {
                   show-title: false;
+                  // The navigation back button belongs to the list's header bar (3.4).
+                  show-back-button: false;
 
                   [start]
                   Gtk.Button detail_back_button {
@@ -170,9 +215,20 @@ template $TickWindow: Adw.ApplicationWindow {
                       label: _("Close Task");
                     }
                   }
+
+                  [end]
+                  Gtk.MenuButton detail_menu_button {
+                    icon-name: "view-more-symbolic";
+                    menu-model: task_menu;
+                    tooltip-text: _("Task Menu");
+
+                    accessibility {
+                      label: _("Task Menu");
+                    }
+                  }
                 }
 
-                content: Adw.Bin {};
+                content: Adw.Bin detail_bin {};
               };
             };
           };
@@ -186,6 +242,17 @@ template $TickWindow: Adw.ApplicationWindow {
       }
     };
   };
+}
+
+menu task_menu {
+  section {
+    item (_("Complete"), "win.detail-complete")
+    item (_("Move to..."), "win.detail-move")
+  }
+
+  section {
+    item (_("Delete Task"), "win.detail-delete")
+  }
 }
 
 menu main_menu {

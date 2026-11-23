@@ -80,6 +80,10 @@ pub struct ViewHeader {
     /// Where server filter results come from, and whether they are loading (4.22). Shown
     /// under the subtitle, as part of the header.
     pub source: Option<(String, bool)>,
+    /// The project title is being renamed in place (4.2).
+    pub editing: bool,
+    /// The title can be renamed in place (project views).
+    pub renamable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -110,6 +114,8 @@ pub struct EmptyState {
     pub icon: &'static str,
     pub title: String,
     pub description: String,
+    /// A button under the text: label and the filter to edit ("Edit Filter", 4.22).
+    pub edit_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,6 +248,12 @@ pub enum Row {
         text: String,
         spinner: bool,
     },
+    /// The inline section name editor (4.24): a new section (`id` `None`) or a rename.
+    SectionEditor {
+        key: String,
+        id: Option<String>,
+        name: String,
+    },
 }
 
 impl Row {
@@ -254,7 +266,8 @@ impl Row {
             | Row::MonthHeader { key, .. }
             | Row::Ghost { key, .. }
             | Row::Loading { key, .. }
-            | Row::SourceLine { key, .. } => key.clone(),
+            | Row::SourceLine { key, .. }
+            | Row::SectionEditor { key, .. } => key.clone(),
             Row::DayHeader(d) => d.key.clone(),
             Row::Task(t) => t.key.clone(),
             Row::Empty(_) => "empty".into(),
@@ -283,6 +296,18 @@ pub struct UiState {
     pub filter_loading: HashSet<String>,
     /// Filter queries the server refused.
     pub filter_rejected: HashSet<String>,
+    /// The inline section editor (4.24), if open.
+    pub section_edit: Option<SectionEdit>,
+    /// The project title is being renamed in place (4.2).
+    pub renaming_title: bool,
+}
+
+/// An open inline section editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SectionEdit {
+    pub project_id: String,
+    /// The section being renamed; `None` for a new one.
+    pub id: Option<String>,
 }
 
 /// A view's rows plus what the window needs around them.
@@ -587,6 +612,7 @@ fn empty(icon: &'static str, title: String, description: String) -> Row {
         icon,
         title,
         description,
+        edit_filter: None,
     })
 }
 
@@ -600,11 +626,37 @@ fn header(title: &str, count: usize) -> ViewHeader {
         icon: None,
         avatars: Vec::new(),
         source: None,
+        editing: false,
+        renamable: false,
     }
 }
 
 fn iso(d: NaiveDate) -> String {
     d.format("%Y-%m-%d").to_string()
+}
+
+/// The detail pane's sub-tasks as compact task rows (4.8): the list row's meta line (due
+/// states, deadline, counts, labels) without the description line and the project item, which
+/// the parent's crumb already shows.
+pub fn subtask_rows(store: &Store, parent: &Task) -> Result<Vec<(Task, TaskRow)>> {
+    let lk = Lookup::new(store)?;
+    let mode = RowMode {
+        time_only: false,
+        own_project: Some(parent.project_id.as_str()),
+        group: None,
+    };
+    let ui = UiState::default();
+    Ok(store
+        .subtasks(&parent.id)?
+        .into_iter()
+        .map(|t| {
+            let has_children = lk.subtasks.contains_key(&t.id);
+            let mut row = lk.task_row(&t, 0, has_children, mode, &ui);
+            row.description = None;
+            row.project = None;
+            (t, row)
+        })
+        .collect())
 }
 
 /// Build the rows of `view`.
@@ -690,6 +742,8 @@ fn project(lk: &Lookup<'_>, id: &str, inbox: bool, ui: &UiState) -> Result<Conte
     let mut head = header(&title, total);
     if !inbox {
         head.color = Some(pv.project.color.clone());
+        head.renamable = true;
+        head.editing = ui.renaming_title;
     }
     if pv.project.shared {
         head.avatars = lk
@@ -732,12 +786,24 @@ fn project(lk: &Lookup<'_>, id: &str, inbox: bool, ui: &UiState) -> Result<Conte
         }
         for s in &pv.sections {
             let collapsed = ui.collapsed_sections.contains(&s.section.id);
-            rows.push(Row::SectionHeader(SectionHeader {
-                id: s.section.id.clone(),
-                name: s.section.name.clone(),
-                count: count_nodes(&s.tasks),
-                collapsed,
-            }));
+            let renaming = ui
+                .section_edit
+                .as_ref()
+                .is_some_and(|e| e.id.as_deref() == Some(s.section.id.as_str()));
+            if renaming {
+                rows.push(Row::SectionEditor {
+                    key: format!("section-editor:{}", s.section.id),
+                    id: Some(s.section.id.clone()),
+                    name: s.section.name.clone(),
+                });
+            } else {
+                rows.push(Row::SectionHeader(SectionHeader {
+                    id: s.section.id.clone(),
+                    name: s.section.name.clone(),
+                    count: count_nodes(&s.tasks),
+                    collapsed,
+                }));
+            }
             if !collapsed {
                 push_tree(&mut rows, &s.tasks, 0, lk, mode, ui);
                 let project = if inbox {
@@ -751,6 +817,18 @@ fn project(lk: &Lookup<'_>, id: &str, inbox: bool, ui: &UiState) -> Result<Conte
                 });
             }
         }
+    }
+    if ui
+        .section_edit
+        .as_ref()
+        .is_some_and(|e| e.id.is_none() && e.project_id == pv.project.id)
+    {
+        // A new section's editor goes at the end of the project (4.24), after the empty state.
+        rows.push(Row::SectionEditor {
+            key: "section-editor:new".into(),
+            id: None,
+            name: String::new(),
+        });
     }
     Ok(Content {
         title,
@@ -1057,11 +1135,12 @@ fn filter(lk: &Lookup<'_>, id: &str, ui: &UiState) -> Result<Content> {
                             body.push(Row::Task(Box::new(lk.task_row(t, 0, false, mode, ui))));
                         }
                     }
-                    None if rejected => body.push(empty(
-                        "dialog-warning-symbolic",
-                        gettext("Todoist couldn't read this filter"),
-                        gettext("Check the query and try again."),
-                    )),
+                    None if rejected => body.push(Row::Empty(EmptyState {
+                        icon: "dialog-warning-symbolic",
+                        title: gettext("Todoist couldn't read this filter"),
+                        description: gettext("Check the query and try again."),
+                        edit_filter: Some(f.id.clone()),
+                    })),
                     None if ui.offline => body.push(empty(
                         "network-offline-symbolic",
                         gettext("Can't show this filter offline"),

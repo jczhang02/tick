@@ -186,12 +186,12 @@ listview.tick-task-list > row.tick-drag-source { opacity: 0.4; }
 }
 .tick-drop-into { box-shadow: inset 0 0 0 2px var(--accent-color); }
 .tick-drag-icon {
+  padding: 0 12px 0 0;                      /* the row's end padding (4.4) */
   background-color: var(--popover-bg-color);
   color: var(--popover-fg-color);
   border: 1px solid var(--tick-float-border);
   box-shadow: var(--tick-float-shadow);
   border-radius: 15px;
-  opacity: 0.95;
 }
 
 /* ---------- priority ring (4.3) ---------- */
@@ -286,11 +286,17 @@ checkbutton.tick-ring > check:checked {
 
 /* ---------- date picker calendar (4.9) ---------- */
 popover calendar { border: none; background: none; }
+popover calendar > grid { padding: 0; }     /* libadwaita: 3 px left and bottom */
 popover calendar > grid > label {
   margin: 0;                                /* libadwaita: 3px top and right; 7 x 47 would not fit */
 }
+/* the weekday row is a quiet caption under Tick's own month heading */
+popover calendar > grid > label.day-name {
+  opacity: var(--dim-opacity);
+  font-size: 82%;
+}
 popover calendar > grid > label.day-number {
-  min-width: 44px;
+  min-width: 38px;                          /* allocated 44: see the calendar in pickers.rs */
   min-height: 44px;
   padding: 0;
   border-radius: 9999px;
@@ -499,3 +505,195 @@ dialog.tick-quick-add sheet {
 /* a tooltip surface is exactly its border box: the floating shadow would be cut off, leaving
    grey corners outside the 15 px radius (7.4 pitfall 7). Background, border and radius stay. */
 tooltip.background { box-shadow: none; }
+
+/* ---------- detail pane (4.8) ---------- */
+/* the detail pane uses the view background, like the list (2.4.1). That background covers
+   the split view's own 1 px separator (an inset box-shadow on the pane node), so the docked
+   pane draws the same line itself; the overlay (B1 to B3) has libadwaita's shadow. */
+.tick-detail-pane {
+  background-color: var(--view-bg-color);
+  color: var(--view-fg-color);
+}
+.tick-detail-pane.tick-docked:dir(ltr) { box-shadow: inset 1px 0 var(--secondary-sidebar-border-color); }
+.tick-detail-pane.tick-docked:dir(rtl) { box-shadow: inset -1px 0 var(--secondary-sidebar-border-color); }
+/* the overlay pane's shadow vanishes on the dimmed list in dark mode: the floating surface's
+   faint light ring marks its edge instead (P6) */
+@media (prefers-color-scheme: dark) {
+  .tick-detail-pane:not(.tick-docked):dir(ltr) { box-shadow: inset 1px 0 var(--tick-float-border); }
+  .tick-detail-pane:not(.tick-docked):dir(rtl) { box-shadow: inset -1px 0 var(--tick-float-border); }
+}
+/* the assignee's 20 px avatar centered on the 16 px icon column of the field rows (4.8) */
+.tick-field-avatar { margin: 0 -2px; }
+/* project crumb: a flat 44 px button */
+button.tick-crumb { min-height: 34px; }
+/* title and description editors: no frame, the pane background */
+textview.tick-title-edit,
+textview.tick-title-edit > text,
+textview.tick-description-edit,
+textview.tick-description-edit > text {
+  background: none;
+}
+/* the editors' text stays on the column of the text around it; the focus ring gets 9 px of
+   air on the sides (the text views have 9 px side margins) */
+textview.tick-title-edit,
+textview.tick-description-edit {
+  border-radius: 9px;
+  margin-left: -9px;
+  margin-right: -9px;
+}
+textview.tick-title-edit:focus-within,
+textview.tick-description-edit:focus-within {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+label.tick-description {
+  padding: 6px 0;
+  border-radius: 9px;
+  min-height: 32px;                         /* a click target: 32 + 2 x 6 = 44 (2.7) */
+}
+label.tick-description:focus:focus-visible { outline-offset: 2px; }
+/* field rows: hover 4 %, pressed 8 %, focus ring inside (4.8) */
+button.tick-field-row {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 9px;
+}
+button.tick-field-row:hover { background-color: color-mix(in srgb, currentColor 4%, transparent); }
+button.tick-field-row:active { background-color: color-mix(in srgb, currentColor 8%, transparent); }
+/* secondary row actions show on hover and keyboard focus; AT always sees them (P9) */
+.tick-field .tick-reveal,
+.tick-comment .tick-reveal { opacity: 0; }
+.tick-field:hover .tick-reveal,
+.tick-field:focus-within .tick-reveal,
+.tick-comment:hover .tick-reveal,
+.tick-comment:focus-within .tick-reveal,
+.tick-narrow .tick-comment .tick-reveal { opacity: 1; }
+button.tick-subtask-open,
+button.tick-ghost-button {
+  min-height: 34px;
+  padding-left: 0;
+  border-radius: 9px;
+}
+button.tick-ghost-button { padding: 0; }
+button.tick-subtask-open { padding-top: 7px; padding-bottom: 7px; }
+/* the composer bar: a multi-line text view drawn as an entry (44 px tall with one line) */
+.tick-composer-field {
+  min-height: 44px;
+  border-radius: 9px;
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+  outline: 0 solid transparent;
+  outline-offset: 4px;
+}
+.tick-composer-field:focus-within {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+.tick-composer-field textview,
+.tick-composer-field textview > text { background: none; }
+
+/* ---------- pickers (4.9, 4.10) ---------- */
+popover.tick-picker > contents { padding: 12px; }
+/* the search icon and text line up with the rows' icon and name columns below (4.10): a row
+   puts its 16 px icon at 42 (12 padding + 16 check + 12 + 2) and its name at 72. The icon is
+   decoration, not a target (the clear icon keeps 44). The offset is entry padding, not an icon
+   margin: GtkSearchEntry (GTK 4.22) sizes the icon's height from its width with margins, and
+   a 33 + 16 + 8 px icon made the entry 57 tall instead of 44 (2.7). */
+popover.tick-picker entry.tick-search { padding-left: 42px; }
+popover.tick-picker entry.tick-search > image:first-child {
+  min-width: 16px;                          /* 42 + 8 = 50, the row icon's center */
+  margin-right: 8px;                        /* + 6 px border-spacing: the text at 72 */
+}
+popover.tick-picker label { font-weight: normal; }
+list.tick-picker-list,
+list.tick-picker-list > row { background: none; }
+/* a picker list that scrolls fades out at the edge where more rows wait (4.10) */
+popover.tick-picker scrolledwindow > undershoot.bottom {
+  background: linear-gradient(to top, var(--popover-bg-color), transparent 32px);
+}
+popover.tick-picker scrolledwindow > undershoot.top {
+  background: linear-gradient(to bottom, var(--popover-bg-color), transparent 32px);
+}
+list.tick-picker-list > row {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 9px;
+}
+list.tick-picker-list > row:hover { background-color: color-mix(in srgb, currentColor 7%, transparent); }
+list.tick-picker-list > row:active { background-color: color-mix(in srgb, currentColor 16%, transparent); }
+/* a 16 px priority ring (priority picker, detail field row) */
+.tick-ring-16 {
+  min-width: 12px;
+  min-height: 12px;
+  border-radius: 9999px;
+  border: 2px solid var(--tick-p4);
+}
+image.tick-ring-16 { -gtk-icon-size: 0; }
+.tick-ring-16.p1 { border-color: var(--tick-red); }
+.tick-ring-16.p2 { border-color: var(--tick-orange); }
+.tick-ring-16.p3 { border-color: var(--tick-blue); }
+.tick-ring-16.current { background-color: var(--tick-p4); }
+.tick-ring-16.current.p1 { background-color: var(--tick-red); }
+.tick-ring-16.current.p2 { background-color: var(--tick-orange); }
+.tick-ring-16.current.p3 { background-color: var(--tick-blue); }
+
+/* ---------- management (4.1, 4.5, 4.23, 4.24) ---------- */
+/* row actions (sidebar "Add ...", section menus) show on hover and focus, always in AT */
+listview.tick-task-list > row .tick-reveal,
+.navigation-sidebar > row .tick-reveal { opacity: 0; }
+listview.tick-task-list > row:hover .tick-reveal,
+listview.tick-task-list > row:focus-within .tick-reveal,
+.navigation-sidebar > row:hover .tick-reveal,
+.navigation-sidebar > row:focus-within .tick-reveal,
+.tick-narrow .navigation-sidebar > row .tick-reveal { opacity: 1; }
+/* inline editors: the text keeps the heading's place and font */
+entry.tick-title-entry,
+entry.tick-section-entry {
+  background: none;
+  box-shadow: none;
+}
+/* the project title editor (4.2) takes the title's place: the ring hugs the .title-1 line
+   (taller than 44 px with the padding). It starts 6 px after the dot, not on it (the 9 px
+   gap minus 3), and the text moves 3 px to keep 4 px of air inside the ring. */
+entry.tick-title-entry {
+  min-height: 0;
+  border-radius: 12px;
+  padding: 3px 9px 3px 6px;
+  margin: -3px -9px -3px -3px;
+}
+/* the section editor (4.24) takes the header's name box: the entry's allocation is the text
+   line, so the name sits where a header's does. The visible box pads the text 6 px x 9 px with
+   the row radius (9); an 8 px transparent border brings the hit area to 46 px (2.7, technique 2;
+   radius 9 + 8). The ring hugs the visible box, ends at the hairline's end and leaves the
+   hairline visible 2 px under it (task_list.rs). */
+entry.tick-section-entry {
+  min-height: 0;
+  padding: 6px 9px;
+  border: 8px solid transparent;
+  margin: -14px -8px -14px -17px;
+  border-radius: 17px;
+}
+entry.tick-section-entry:focus-within { outline-offset: -10px; }
+/* the filter query (4.23): the typed text in monospace, the row title as the other rows' */
+row.tick-query text {
+  font-family: var(--monospace-font-family);
+  font-size: var(--monospace-font-size);
+}
+/* edit dialogs use the dialog background (2.4.1) */
+dialog.tick-entity-dialog sheet {
+  background-color: var(--dialog-bg-color);
+  color: var(--dialog-fg-color);
+}
+
+/* ---------- drag and drop (4.1, 4.4) ---------- */
+.tick-drop-indicator { min-height: 6px; }
+.tick-drop-dot {
+  min-width: 6px;
+  min-height: 6px;
+  border-radius: 9999px;
+  background-color: var(--accent-color);
+}
+.navigation-sidebar > row.tick-drag-source { opacity: 0.4; }
+.navigation-sidebar > row.tick-drop-into { box-shadow: inset 0 0 0 2px var(--accent-color); }
+listview.tick-task-list > row.tick-drop-into { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.tick-drag-icon { min-height: 44px; }
+.tick-project-drag { padding: 0 18px; }

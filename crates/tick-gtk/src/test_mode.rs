@@ -10,6 +10,34 @@ use gtk::{gio, glib, graphene};
 
 use crate::window::TickWindow;
 
+type DragState = Option<(glib::WeakRef<gtk::Widget>, (f64, f64), (f64, f64))>;
+
+thread_local! {
+    /// The drag icon in flight, its hotspot and the pointer in window coordinates.
+    static DRAG: std::cell::RefCell<DragState> = const { std::cell::RefCell::new(None) };
+}
+
+/// A drag began with `icon` (the `GtkDragIcon`) grabbed at (`hx`, `hy`) (screenshots of a drag in progress).
+pub fn set_drag_icon(icon: &gtk::Widget, hx: f64, hy: f64) {
+    if !enabled() {
+        return;
+    }
+    DRAG.with(|d| d.replace(Some((icon.downgrade(), (hx, hy), (-1000.0, -1000.0)))));
+}
+
+/// Where the pointer is during the drag, in window coordinates.
+pub fn set_drag_pointer(x: f64, y: f64) {
+    DRAG.with(|d| {
+        if let Some(s) = d.borrow_mut().as_mut() {
+            s.2 = (x, y);
+        }
+    });
+}
+
+pub fn clear_drag_icon() {
+    DRAG.with(|d| d.replace(None));
+}
+
 /// True when the app runs under the E2E harness.
 pub fn enabled() -> bool {
     std::env::var("TICK_TEST_MODE").is_ok_and(|v| v == "1")
@@ -66,6 +94,22 @@ fn save_screenshot(window: &gtk::Window, path: &Path) -> Result<(), String> {
     // origin is the window's surface transform (the CSD shadow) away from the window.
     let (wx, wy) = window.surface_transform();
     add_popups(window.upcast_ref(), &snapshot, (-wx, -wy));
+    // A drag icon is a surface of its own too: draw it where the pointer is.
+    DRAG.with(|d| {
+        let d = d.borrow();
+        if let Some((icon, (hx, hy), (px, py))) = d.as_ref()
+            && let Some(icon) = icon.upgrade()
+        {
+            // The drag icon's root: its surface, margins (and shadow) included.
+            let w = icon.width().max(1);
+            let h = icon.height().max(1);
+            let paintable = gtk::WidgetPaintable::new(Some(&icon));
+            snapshot.save();
+            snapshot.translate(&graphene::Point::new((px - hx) as f32, (py - hy) as f32));
+            paintable.snapshot(&snapshot, f64::from(w), f64::from(h));
+            snapshot.restore();
+        }
+    });
     let node = snapshot.to_node().ok_or("empty render node")?;
     let renderer = window.renderer().ok_or("window has no renderer")?;
     let viewport = graphene::Rect::new(0.0, 0.0, width as f32, height as f32);

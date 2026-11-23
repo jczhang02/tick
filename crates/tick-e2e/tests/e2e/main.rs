@@ -5,12 +5,16 @@
 
 mod a11y;
 mod app;
+mod detail;
+mod dnd;
 mod fixture;
 mod flows;
 mod harness;
 mod layout;
 mod login;
+mod manage;
 mod screenshots;
+mod shortcuts;
 mod startup;
 mod tasks;
 mod views;

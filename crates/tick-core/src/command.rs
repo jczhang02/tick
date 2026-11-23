@@ -140,6 +140,15 @@ impl Command {
     pub fn project_move(id: &str, parent_id: Option<&str>) -> Command {
         Command::with_id("project_move", id, json!({ "parent_id": parent_id }))
     }
+    /// Deprecated `project_reorder` with `child_order` values, for siblings without
+    /// `order_key`s.
+    pub fn project_reorder(orders: &[(String, i64)]) -> Command {
+        let projects: Vec<Value> = orders
+            .iter()
+            .map(|(id, o)| json!({"id": id, "child_order": o}))
+            .collect();
+        Command::new("project_reorder", json!({ "projects": projects }))
+    }
     pub fn project_archive(id: &str) -> Command {
         Command::with_id("project_archive", id, json!({}))
     }

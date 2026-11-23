@@ -56,7 +56,12 @@ impl Section {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemKind {
-    Header { section: Section, collapsed: bool },
+    /// `empty`: the section has no entries yet; its "Add ..." button stays visible (4.1).
+    Header {
+        section: Section,
+        collapsed: bool,
+        empty: bool,
+    },
     View(ViewId),
 }
 
@@ -130,12 +135,42 @@ impl SidebarItem {
     }
 }
 
+/// Keyboard moves of a project (4.1): the keyboard path of dragging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectMove {
+    Up,
+    Down,
+    /// Make it a sub-project of the sibling above.
+    In,
+    /// One level out.
+    Out,
+}
+
 /// What the sidebar asks the window to do.
 pub enum SidebarEvent {
     /// Open a view; `push` also shows the content page on narrow windows.
-    Open { view: ViewId, push: bool },
+    Open {
+        view: ViewId,
+        push: bool,
+    },
     /// A section header was collapsed or expanded (persist it).
     SectionToggled,
+    /// "Add Project", "Add Label", "Add Filter".
+    Add(Section),
+    /// The context menu of a row (a view) or a section header, at `rect` in the list's
+    /// coordinates.
+    Menu {
+        kind: ItemKind,
+        rect: gtk::gdk::Rectangle,
+    },
+    /// Alt+Shift+arrows on a project row.
+    MoveProject {
+        id: String,
+        how: ProjectMove,
+    },
+    /// A project drag started or ended.
+    DragBegin,
+    DragEnd,
 }
 
 pub struct Sidebar {
@@ -227,7 +262,118 @@ impl Sidebar {
             let Some(s) = weak.upgrade() else { return };
             s.activate(pos);
         });
+        // Menu key / Shift+F10: the focused row's context menu; Alt+Shift+arrows move the
+        // focused project (4.1).
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(&sidebar);
+        keys.connect_key_pressed(move |_, key, _, mods| {
+            use gtk::gdk::{Key, ModifierType};
+            let Some(s) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let Some((item, widget)) = s.focused_item() else {
+                return glib::Propagation::Proceed;
+            };
+            let shift = mods.contains(ModifierType::SHIFT_MASK);
+            let alt = mods.contains(ModifierType::ALT_MASK);
+            if key == Key::Menu || (key == Key::F10 && shift && !alt) {
+                let rect = widget
+                    .compute_bounds(&s.list)
+                    .map(|b| {
+                        gtk::gdk::Rectangle::new(
+                            b.x() as i32 + 12,
+                            b.y() as i32,
+                            (b.width() as i32 - 24).max(1),
+                            b.height() as i32,
+                        )
+                    })
+                    .unwrap_or_else(|| gtk::gdk::Rectangle::new(0, 0, 1, 1));
+                (s.events)(SidebarEvent::Menu {
+                    kind: item.data().kind,
+                    rect,
+                });
+                return glib::Propagation::Stop;
+            }
+            if shift
+                && alt
+                && let Some(ViewId::Project(id)) = item.view()
+            {
+                let how = match key {
+                    Key::Up | Key::KP_Up => ProjectMove::Up,
+                    Key::Down | Key::KP_Down => ProjectMove::Down,
+                    Key::Right | Key::KP_Right => ProjectMove::In,
+                    Key::Left | Key::KP_Left => ProjectMove::Out,
+                    _ => return glib::Propagation::Proceed,
+                };
+                (s.events)(SidebarEvent::MoveProject { id, how });
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        sidebar.list.add_controller(keys);
         sidebar
+    }
+
+    /// The item of the focused row and the row widget.
+    fn focused_item(&self) -> Option<(SidebarItem, gtk::Widget)> {
+        let root = self.list.root()?;
+        let mut w = gtk::prelude::RootExt::focus(&root)?;
+        let list: gtk::Widget = self.list.clone().upcast();
+        while w.parent().as_ref() != Some(&list) {
+            w = w.parent()?;
+        }
+        let item = w
+            .first_child()
+            .and_downcast::<gtk::TreeExpander>()?
+            .list_row()?
+            .item()
+            .and_downcast::<SidebarItem>()?;
+        Some((item, w))
+    }
+
+    /// Give keyboard focus to `view`'s row (after a keyboard move rebuilt the tree).
+    pub fn focus_view(&self, view: &ViewId) {
+        let pos = (0..self.tree.n_items())
+            .find(|i| self.item_at(*i).and_then(|it| it.view()).as_ref() == Some(view));
+        if let Some(p) = pos {
+            self.list.scroll_to(p, gtk::ListScrollFlags::FOCUS, None);
+            self.list.grab_focus();
+        }
+    }
+
+    /// The rectangle of `view`'s row in the list's coordinates (a picker points at it).
+    pub fn row_rect(&self, view: &ViewId) -> Option<gtk::gdk::Rectangle> {
+        let mut child = self.list.first_child();
+        while let Some(c) = child {
+            let item = c
+                .first_child()
+                .and_downcast::<gtk::TreeExpander>()
+                .and_then(|e| e.list_row())
+                .and_then(|r| r.item())
+                .and_downcast::<SidebarItem>();
+            if item.and_then(|i| i.view()).as_ref() == Some(view)
+                && let Some(b) = c.compute_bounds(&self.list)
+            {
+                return Some(gtk::gdk::Rectangle::new(
+                    b.x() as i32 + 12,
+                    b.y() as i32,
+                    (b.width() as i32 - 24).max(1),
+                    b.height() as i32,
+                ));
+            }
+            child = c.next_sibling();
+        }
+        None
+    }
+
+    /// Show `TickWindow:narrow` on rows: the "Add ..." buttons stay visible (4.1).
+    pub fn set_narrow(&self, narrow: bool) {
+        if narrow {
+            self.list.add_css_class("tick-narrow");
+        } else {
+            self.list.remove_css_class("tick-narrow");
+        }
     }
 
     fn item_at(&self, pos: u32) -> Option<SidebarItem> {
@@ -325,7 +471,11 @@ impl Sidebar {
             .css_classes(["tick-sidebar-row-content"])
             .build();
         match &d.kind {
-            ItemKind::Header { section, collapsed } => {
+            ItemKind::Header {
+                section,
+                collapsed,
+                empty,
+            } => {
                 li.set_selectable(false);
                 li.set_activatable(true);
                 li.set_focusable(true);
@@ -346,6 +496,34 @@ impl Sidebar {
                     .css_classes(["caption-heading", "dimmed"])
                     .build();
                 content.append(&title);
+                let add_name = match section {
+                    Section::Projects => Some(gettext("Add Project")),
+                    Section::Labels => Some(gettext("Add Label")),
+                    Section::Filters => Some(gettext("Add Filter")),
+                    Section::Favorites => None,
+                };
+                if let Some(name) = add_name {
+                    let add = gtk::Button::builder()
+                        .icon_name("list-add-symbolic")
+                        .valign(gtk::Align::Center)
+                        .css_classes(["flat", "tick-icon-44"])
+                        .tooltip_text(&name)
+                        .build();
+                    // An empty section shows its button at rest: it is the only visible way
+                    // to create the first project, label or filter (4.1).
+                    if !*empty {
+                        add.add_css_class("tick-reveal");
+                    }
+                    add.update_property(&[gtk::accessible::Property::Label(&name)]);
+                    let weak = Rc::downgrade(self);
+                    let section = *section;
+                    add.connect_clicked(move |_| {
+                        if let Some(s) = weak.upgrade() {
+                            (s.events)(SidebarEvent::Add(section));
+                        }
+                    });
+                    content.append(&add);
+                }
                 let chevron = gtk::Image::builder()
                     .icon_name("pan-down-symbolic")
                     .accessible_role(gtk::AccessibleRole::Presentation)
@@ -369,6 +547,9 @@ impl Sidebar {
                     }
                 });
                 content.add_controller(click);
+                if section != Section::Favorites {
+                    self.menu_gestures(&content, d.kind.clone());
+                }
             }
             ItemKind::View(view) => {
                 li.set_selectable(true);
@@ -459,9 +640,71 @@ impl Sidebar {
                     }
                 });
                 content.add_controller(click);
+                if let ItemKind::View(ViewId::Project(id)) = &d.kind {
+                    let (w1, w2) = (Rc::downgrade(self), Rc::downgrade(self));
+                    let name = d.name.clone();
+                    let color = d.color.clone().unwrap_or_default();
+                    crate::dnd::drag_source(
+                        content.upcast_ref(),
+                        format!("{}{}", crate::dnd::PROJECT, id),
+                        move || project_drag_icon(&name, &color),
+                        move || {
+                            if let Some(s) = w1.upgrade() {
+                                (s.events)(SidebarEvent::DragBegin);
+                            }
+                        },
+                        move || {
+                            if let Some(s) = w2.upgrade() {
+                                (s.events)(SidebarEvent::DragEnd);
+                            }
+                        },
+                    );
+                }
+                if !matches!(
+                    &d.kind,
+                    ItemKind::View(ViewId::Inbox | ViewId::Today | ViewId::Upcoming)
+                ) {
+                    self.menu_gestures(&content, d.kind.clone());
+                }
             }
         }
         expander.set_child(Some(&content));
+    }
+
+    /// Right-click and long-press open the row's context menu (4.1).
+    fn menu_gestures(self: &Rc<Self>, content: &gtk::Box, kind: ItemKind) {
+        let open = {
+            let weak = Rc::downgrade(self);
+            move |w: &gtk::Widget, x: f64, y: f64| {
+                let Some(s) = weak.upgrade() else { return };
+                if let Some(p) =
+                    w.compute_point(&s.list, &gtk::graphene::Point::new(x as f32, y as f32))
+                {
+                    (s.events)(SidebarEvent::Menu {
+                        kind: kind.clone(),
+                        rect: gtk::gdk::Rectangle::new(p.x() as i32, p.y() as i32, 1, 1),
+                    });
+                }
+            }
+        };
+        let right = gtk::GestureClick::new();
+        right.set_button(gtk::gdk::BUTTON_SECONDARY);
+        let o = open.clone();
+        right.connect_pressed(move |g, _, x, y| {
+            g.set_state(gtk::EventSequenceState::Claimed);
+            if let Some(w) = g.widget() {
+                o(&w, x, y);
+            }
+        });
+        content.add_controller(right);
+        let long = gtk::GestureLongPress::new();
+        long.set_touch_only(true);
+        long.connect_pressed(move |g, x, y| {
+            if let Some(w) = g.widget() {
+                open(&w, x, y);
+            }
+        });
+        content.add_controller(long);
     }
 
     /// Show new data: counts update in place; structural changes rebuild the model and
@@ -569,6 +812,7 @@ impl Sidebar {
                     kind: ItemKind::Header {
                         section,
                         collapsed: is_collapsed,
+                        empty: entries.is_empty(),
                     },
                     name: section.title(),
                     icon: None,
@@ -656,6 +900,23 @@ impl Sidebar {
     pub fn list(&self) -> &gtk::ListView {
         &self.list
     }
+}
+
+/// The drag icon of a project row: dot and name on the floating surface (4.1).
+fn project_drag_icon(name: &str, color: &str) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .css_classes(["tick-drag-icon", "tick-project-drag"])
+        .build();
+    root.append(
+        &gtk::Box::builder()
+            .valign(gtk::Align::Center)
+            .css_classes(["tick-dot".to_owned(), color_class(color)])
+            .build(),
+    );
+    root.append(&gtk::Label::new(Some(name)));
+    root.upcast()
 }
 
 fn view_item(view: ViewId, name: String, icon: &'static str, count: Option<usize>) -> SidebarItem {

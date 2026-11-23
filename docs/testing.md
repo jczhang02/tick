@@ -60,7 +60,15 @@ These were verified on the dev machine (mutter 50.5, GTK 4.22, libadwaita 1.9) a
      1 s after `Start` and send a warm-up motion and a warm-up key (Shift press + release)
      before real input. Without the warm-up key the first typed character is lost.
    - Add about 50 ms between key press and release, and between keys.
-   - Drag: press, several relative moves with short sleeps, release.
+   - Drag: press, several relative moves with short sleeps, release. Verified with real
+     `GtkDragSource`/`GtkDropTarget` (`fixture::drag_and_drop_between_widgets`) and in Tick's
+     list and sidebar. `Input::press_at`, `drag_by` and `release` hold a drag open (a
+     screenshot of a drag in progress). Observed, cause not settled: drops land a few pixels
+     (about 6) away from the AT-SPI extents of the target row, and a clamp-and-jump before
+     the release did not change where the drop landed. Aim well inside the target.
+   - Menus (`popover.menu`): GTK 4.22 reports their items with an empty name; Tick names them
+     from their text when the menu maps (`menus.rs`), so tests can find them by name. Tests
+     may also use the keyboard: the first item has focus when a menu opens.
    - Verified: typing into an entry, clicking a button and the header bar close button,
      `Ctrl+Q`, Tab + Space.
    - **Non-ASCII text.** Mutter drops keysyms that are not in its (US) keymap and logs
@@ -186,6 +194,32 @@ row), `quick-add`, `quick-add-offline` (with a kept draft), `offline` (one queue
 `sync-popover` (offline), `login`, `empty-today`, `empty-inbox`, and `sidebar` (narrow only).
 Without `TICK_SCREENSHOTS=1` (`just e2e`) only the Today view is captured.
 
+Editing (milestone 3), both schemes: `detail` (Markdown description, fields, sub-tasks),
+`detail-scrolled` (comments), `date-picker`, `label-picker`, `project-dialog`, `dragging` (a
+drag in progress: dimmed source row, drag icon, insertion line), `section-editor` and
+`delete-project`, wide and narrow; wide only: `deadline-picker`, `priority-picker`,
+`assignee-picker`, `move-picker`, `description-edit` (the raw-text editor, entered by a click
+at the end of the description's first line), `task-menu`, `view-menu`, `title-rename` (F2 on
+a scrolled list scrolls the title back into view), `label-dialog-duplicate`, `filter-dialog`,
+`sidebar-menu`; a 1024 x 600 window:
+`date-picker-short-<scheme>` (the calendar collapsed behind "Pick a Date") and
+`date-picker-short-open-<scheme>` (after "Pick a Date": the popover grows to the window and
+scrolls); in Chinese:
+`detail`, `date-picker`, `delete-project` and `project-dialog` (`<view>-zh-wide-<scheme>`).
+The drag icon is a surface of its own: in test mode the app remembers the `GtkDragIcon` and
+the pointer position, and `app.test-screenshot` draws the icon there, its 20 px margin (room
+for the floating shadow) included. Headless mutter shows no real drag surface, so the shot
+checks Tick's icon widget, not the compositor's rendering of it.
+
+Finding the pane's widgets: the list row previews a task's description (first line, Markdown
+stripped), so a label query by description text can match the list row first. Query text that
+only the pane shows (a later line), or pick the match furthest right.
+
+The accessibility audit (`a11y.rs`) skips only links inside a label (exemption 1 in DESIGN
+1.2.1) and only selectable labels for the 44 px rule (GTK 4.22 reports a selectable label with
+`has-popup`, its Copy menu, not with a selectable state). Every other link and focusable label
+is checked for a name and a 44 x 44 target.
+
 Wide only, both schemes: `p4-hover` and `p4-checked` (a recurring p4 task in its
 completed-pending state), `completing` (the 800 ms hold, kept with `TICK_TEST_HOLD=1`),
 `failed-change` (a change the server rejected) and `sync-popover-failed`, `tooltip`, and
@@ -202,5 +236,4 @@ completed-pending state), `completing` (the 800 ms hold, kept with `TICK_TEST_HO
 - The session's fontconfig maps `monospace` to Adwaita Mono, as on a GNOME desktop
   (the session has no GNOME settings, so libadwaita falls back to fontconfig's `monospace`).
 
-Not yet captured: the date picker and destructive buttons (their components come later) and a
-non-blue accent (the session's accent cannot be set yet).
+Not yet captured: a non-blue accent (the session's accent cannot be set yet).

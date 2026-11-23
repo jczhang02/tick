@@ -135,7 +135,45 @@ impl Input {
             self.motion(dx, dy).await?;
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        // Observed: drops land a few pixels away from the target's AT-SPI extents, and a
+        // clamp-and-jump before the release did not change that (cause not settled). Callers
+        // aim well inside the target.
         tokio::time::sleep(Duration::from_millis(100)).await;
+        self.button(BTN_LEFT, false).await?;
+        tokio::time::sleep(KEY_DELAY).await;
+        Ok(())
+    }
+
+    /// Presses the left button at (x, y) and keeps it down: the start of a drag that a test
+    /// wants to observe midway (see [`Input::drag_by`] and [`Input::release`]).
+    pub async fn press_at(&self, x: i32, y: i32) -> Result<()> {
+        let _guard = self.lock.lock().await;
+        self.move_to_locked(x, y).await?;
+        self.button(BTN_LEFT, true).await?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        Ok(())
+    }
+
+    /// Moves the pointer by (dx, dy) in `steps` relative moves with short pauses, so drag
+    /// thresholds and drop targets see the motion (the button state is left alone).
+    pub async fn drag_by(&self, dx: i32, dy: i32, steps: i32) -> Result<()> {
+        let _guard = self.lock.lock().await;
+        let steps = steps.max(1);
+        let (sx, sy) = (
+            f64::from(dx) / f64::from(steps),
+            f64::from(dy) / f64::from(steps),
+        );
+        for _ in 0..steps {
+            self.motion(sx, sy).await?;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        Ok(())
+    }
+
+    /// Releases the left button where the pointer is (the end of a drag).
+    pub async fn release(&self) -> Result<()> {
+        let _guard = self.lock.lock().await;
         self.button(BTN_LEFT, false).await?;
         tokio::time::sleep(KEY_DELAY).await;
         Ok(())

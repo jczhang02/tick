@@ -202,6 +202,11 @@ pub fn month_header(date: NaiveDate, today: NaiveDate) -> String {
     }
 }
 
+/// Month and year, as in the date picker's calendar heading: "November 2026", "2026 年 11 月".
+pub fn month_year(date: NaiveDate) -> String {
+    fill_date(&pgettext("date", "{month_name} {year}"), date)
+}
+
 /// `HH:MM` of a UTC timestamp in the clock's offset (filter source line).
 pub fn local_time_of(utc: &str, now: &tick_core::Now, s: DateSettings) -> Option<String> {
     let t = chrono::DateTime::parse_from_rfc3339(utc).ok()?;
