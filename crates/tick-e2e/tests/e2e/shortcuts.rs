@@ -198,3 +198,27 @@ async fn context_menu_by_keyboard_and_pointer() {
     // The right-clicked row is now the selected one: the pane did not change.
     field(&window, "Priority").await;
 }
+
+/// A second Undo toast lets the first change go: two deletes in a row both reach the server
+/// within the sync cadence, not after the 60 s Undo hold.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_deletes_in_a_row_both_leave() {
+    let (server, s, window) = start().await;
+    focus_first_row(&s, &window).await;
+    s.chord(&[keysym::SHIFT_L, keysym::DELETE]).await.unwrap();
+    app::wait_tasks(&window, &["Renew passport", "Read the article"]).await;
+    focus_first_row_named(&s, &window, "Renew passport").await;
+    s.chord(&[keysym::SHIFT_L, keysym::DELETE]).await.unwrap();
+    app::wait_tasks(&window, &["Read the article"]).await;
+    let sent = tick_e2e::poll(Duration::from_secs(20), "both item_delete", || async {
+        let c = app::commands_sent(&server, "item_delete");
+        (c.len() >= 2).then_some(c)
+    })
+    .await
+    .unwrap();
+    let ids: Vec<&str> = sent
+        .iter()
+        .filter_map(|c| c["args"]["id"].as_str())
+        .collect();
+    assert!(ids.contains(&"i1") && ids.contains(&"i2"), "{ids:?}");
+}

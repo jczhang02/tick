@@ -156,9 +156,6 @@ async fn title_and_description_edits() {
     })
     .await
     .unwrap();
-    if std::env::var_os("TICK_DEV_SHOTS").is_some() {
-        s.screenshot("/tmp/tick-shots/detail.png").await.unwrap();
-    }
 }
 
 /// A showing picker row (`ListItem` or `CheckBox`) named `name`.
@@ -322,9 +319,6 @@ async fn priority_and_labels() {
     })
     .await;
     s.type_text("urgent").await.unwrap();
-    if std::env::var_os("TICK_DEV_SHOTS").is_some() {
-        s.screenshot("/tmp/tick-shots/labels.png").await.unwrap();
-    }
     s.key(keysym::RETURN).await.unwrap();
     wait_item(&server, "i3", "label urgent", |v| {
         v["labels"] == serde_json::json!(["phone", "urgent"])
@@ -774,4 +768,37 @@ async fn rejected_edit_rolls_back() {
         server.state().get("items", "i3").unwrap()["content"],
         "Read the article"
     );
+}
+
+/// Narrow (B2): Escape in a picker closes only the picker, Escape in the composer closes the
+/// pane, and neither pops the list page.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn narrow_escape_closes_picker_then_pane() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server).narrow().start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Inbox").await;
+    open_task(&s, &window, "Read the article").await;
+    s.click(&field(&window, "Labels").await).await.unwrap();
+    picker_row(&window, "phone").await;
+    s.key(keysym::ESCAPE).await.unwrap();
+    // The pane stays.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    pane_title(&window, "Read the article").await;
+    let composer = window
+        .wait_for(
+            &Query::role(Role::Text).name("Write a comment").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&composer).await.unwrap();
+    s.key(keysym::ESCAPE).await.unwrap();
+    window
+        .wait_gone(&Query::role(Role::Text).name("Task title").showing(), WAIT)
+        .await
+        .unwrap();
+    // Still on the list page.
+    app::task_row(&window, "Read the article").await;
 }

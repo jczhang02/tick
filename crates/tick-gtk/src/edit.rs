@@ -32,6 +32,8 @@ pub enum Anchor {
 pub struct UndoAction {
     pub toast: adw::Toast,
     pub undo: Rc<dyn Fn(&TickWindow)>,
+    /// Runs when the toast goes away without Undo (a held delete is released).
+    pub gone: Rc<dyn Fn(&TickWindow)>,
 }
 
 /// Arguments of `due` for a picked date (4.9): a calendar day keeps an existing time as
@@ -688,13 +690,20 @@ impl TickWindow {
                     None
                 }
             };
-            if mine.is_some() {
-                gone(&w);
+            if let Some(a) = mine {
+                (a.gone)(&w);
             }
         });
+        // The previous toast's Undo ends here: let its change go (a second delete must not
+        // leave the first held for the whole Undo hold, with the queue waiting behind it).
+        let previous = self.imp().undo_action.take();
+        if let Some(p) = previous {
+            (p.gone)(self);
+        }
         self.imp().undo_action.replace(Some(UndoAction {
             toast: toast.clone(),
             undo: Rc::new(undo),
+            gone: Rc::new(gone),
         }));
         self.show_toast(&toast);
     }

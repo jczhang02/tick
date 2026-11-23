@@ -517,11 +517,17 @@ impl TickWindow {
                 return glib::Propagation::Proceed;
             }
             let focus = gtk::prelude::GtkWindowExt::focus(&w);
-            let editing = focus.as_ref().is_some_and(|f| {
-                f.is::<gtk::Text>()
-                    || f.is::<gtk::TextView>()
-                    || f.ancestor(gtk::Popover::static_type()).is_some()
-            });
+            // The comment composer has nothing to revert: Escape there closes the pane too
+            // (letting it through would pop the list page on narrow windows).
+            let in_composer = focus
+                .as_ref()
+                .is_some_and(|f| f.is_ancestor(&w.detail().composer));
+            let editing = !in_composer
+                && focus.as_ref().is_some_and(|f| {
+                    f.is::<gtk::Text>()
+                        || f.is::<gtk::TextView>()
+                        || f.ancestor(gtk::Popover::static_type()).is_some()
+                });
             if editing {
                 return glib::Propagation::Proceed;
             }
@@ -899,7 +905,8 @@ impl TickWindow {
             self.fetch_filter_if_needed();
         }
         if let Some(sb) = imp.sidebar.get() {
-            sb.select(&view);
+            // The refresh may have followed a replaced temp id.
+            sb.select(&self.current_view());
         }
         self.update_view_menu();
         if push && imp.split_view.is_collapsed() {

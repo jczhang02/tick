@@ -135,9 +135,9 @@ impl Input {
             self.motion(dx, dy).await?;
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        // The steps can end a few pixels off the target (pointer acceleration); a clamp to
-        // the corner and a jump back, as for clicks, does not work while a drag holds the
-        // pointer. Aim well inside the target.
+        // Observed: drops land a few pixels away from the target's AT-SPI extents, and a
+        // clamp-and-jump before the release did not change that (cause not settled). Callers
+        // aim well inside the target.
         tokio::time::sleep(Duration::from_millis(100)).await;
         self.button(BTN_LEFT, false).await?;
         tokio::time::sleep(KEY_DELAY).await;

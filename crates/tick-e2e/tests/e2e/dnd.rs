@@ -195,8 +195,8 @@ async fn reorder_and_nest_projects_by_drag() {
     drag(
         &s,
         (home.x + 80, home.y + home.height / 2),
-        // AT-SPI places sidebar rows a few pixels lower than GTK picks them: stay well
-        // inside the top third (14 px of 44).
+        // Drops land a few pixels off the AT-SPI extents (docs/testing.md): stay well inside
+        // the top third (14 px of 44).
         (work.x + 80, work.y + 10),
     )
     .await;

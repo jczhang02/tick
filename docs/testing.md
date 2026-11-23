@@ -62,10 +62,10 @@ These were verified on the dev machine (mutter 50.5, GTK 4.22, libadwaita 1.9) a
    - Add about 50 ms between key press and release, and between keys.
    - Drag: press, several relative moves with short sleeps, release. Verified with real
      `GtkDragSource`/`GtkDropTarget` (`fixture::drag_and_drop_between_widgets`) and in Tick's
-     list and sidebar. The steps are subject to pointer acceleration and can end a few
-     pixels off; during a drag the clamp-and-jump used for clicks does not move the
-     pointer, so aim well inside the target. `Input::press_at`, `drag_by` and `release`
-     hold a drag open (a screenshot of a drag in progress).
+     list and sidebar. `Input::press_at`, `drag_by` and `release` hold a drag open (a
+     screenshot of a drag in progress). Observed, cause not settled: drops land a few pixels
+     (about 6) away from the AT-SPI extents of the target row, and a clamp-and-jump before
+     the release did not change where the drop landed. Aim well inside the target.
    - Menus (`popover.menu`): GTK 4.22 reports their items with an empty name; Tick names them
      from their text when the menu maps (`menus.rs`), so tests can find them by name. Tests
      may also use the keyboard: the first item has focus when a menu opens.
