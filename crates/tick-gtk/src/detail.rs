@@ -325,7 +325,7 @@ impl TaskDetail {
         plus.set_size_request(44, 44);
         plus.add_css_class("dimmed");
         ghost_box.append(&plus);
-        ghost_box.append(&label(&gettext("Add sub-task"), &["dimmed"]));
+        ghost_box.append(&label(&gettext("Add sub-task"), &["body", "dimmed"]));
         sub_ghost.set_child(Some(&ghost_box));
         sub_ghost.update_property(&[gtk::accessible::Property::Label(&gettext("Add sub-task"))]);
         content.append(&sub_ghost);

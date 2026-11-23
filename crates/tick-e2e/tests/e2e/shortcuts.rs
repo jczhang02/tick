@@ -181,7 +181,7 @@ async fn context_menu_by_keyboard_and_pointer() {
     s.chord(&[keysym::SHIFT_L, keysym::F10]).await.unwrap();
     menu_choose(&s, &window, 0).await;
     pane_title(&window, "Call the dentist").await;
-    // Right-click "Read the article": Priority... (the fifth item) then Priority 3.
+    // Right-click "Read the article": Priority... (the fourth item) then Priority 3.
     let row = app::task_row(&window, "Read the article").await;
     let r = row.extents().await.unwrap();
     s.input()

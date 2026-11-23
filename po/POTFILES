@@ -1,10 +1,16 @@
 crates/tick-gtk/data/ui/login.blp
 crates/tick-gtk/data/ui/quick_add.blp
 crates/tick-gtk/data/ui/window.blp
+crates/tick-gtk/src/detail.rs
+crates/tick-gtk/src/dnd.rs
+crates/tick-gtk/src/edit.rs
 crates/tick-gtk/src/format.rs
 crates/tick-gtk/src/i18n.rs
 crates/tick-gtk/src/login.rs
 crates/tick-gtk/src/main.rs
+crates/tick-gtk/src/manage.rs
+crates/tick-gtk/src/markdown.rs
+crates/tick-gtk/src/pickers.rs
 crates/tick-gtk/src/quick_add.rs
 crates/tick-gtk/src/row_object.rs
 crates/tick-gtk/src/rows.rs

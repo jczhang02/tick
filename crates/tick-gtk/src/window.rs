@@ -290,6 +290,12 @@ impl TickWindow {
         b1.add_setter(&*imp.detail_split, "collapsed", Some(&t));
         let b2 = adw::Breakpoint::new(parse("max-width: 720sp"));
         let b3 = adw::Breakpoint::new(parse("max-width: 500sp"));
+        // B2: the detail overlays the right 340 px (3.3, "overlay as in B1 (340 px)").
+        b2.add_setter(
+            &*imp.detail_split,
+            "max-sidebar-width",
+            Some(&340.0f64.to_value()),
+        );
         for b in [&b2, &b3] {
             b.add_setter(&*imp.detail_split, "collapsed", Some(&t));
             b.add_setter(&*imp.split_view, "collapsed", Some(&t));
@@ -486,6 +492,37 @@ impl TickWindow {
             }
         });
         self.add_controller(keys);
+
+        // Escape closes the open task before anything below the window sees it: the
+        // navigation view would pop the list page on narrow windows (4.8: Escape closes the
+        // pane, when not editing, and returns focus to the task row).
+        let escape = gtk::EventControllerKey::new();
+        escape.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = self.downgrade();
+        escape.connect_key_pressed(move |_, key, _, mods| {
+            let Some(w) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            if key != gtk::gdk::Key::Escape
+                || !mods.is_empty()
+                || w.imp().open_task.borrow().is_none()
+                || w.visible_dialog().is_some()
+            {
+                return glib::Propagation::Proceed;
+            }
+            let focus = gtk::prelude::GtkWindowExt::focus(&w);
+            let editing = focus.as_ref().is_some_and(|f| {
+                f.is::<gtk::Text>()
+                    || f.is::<gtk::TextView>()
+                    || f.ancestor(gtk::Popover::static_type()).is_some()
+            });
+            if editing {
+                return glib::Propagation::Proceed;
+            }
+            w.close_task(true);
+            glib::Propagation::Stop
+        });
+        self.add_controller(escape);
     }
 
     /// When the focused widget goes away (a completed row leaves the list), GTK hands focus

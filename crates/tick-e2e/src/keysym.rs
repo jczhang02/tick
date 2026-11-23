@@ -14,6 +14,7 @@ pub const PAGE_UP: u32 = 0xff55;
 pub const PAGE_DOWN: u32 = 0xff56;
 pub const END: u32 = 0xff57;
 pub const F1: u32 = 0xffbe;
+pub const F2: u32 = 0xffbf;
 pub const F10: u32 = 0xffc7;
 pub const SHIFT_L: u32 = 0xffe1;
 pub const CONTROL_L: u32 = 0xffe3;

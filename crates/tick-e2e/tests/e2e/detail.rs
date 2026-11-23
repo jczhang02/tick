@@ -36,10 +36,19 @@ pub async fn open_task(s: &Session, window: &Node, title: &str) {
 
 /// The pane's title editor showing `title`.
 pub async fn pane_title(window: &Node, title: &str) -> Node {
-    let node = window
-        .wait_for(&Query::role(Role::Text).name("Task title").showing(), WAIT)
-        .await
-        .unwrap();
+    let node = tick_e2e::poll(WAIT, "the detail title", || async {
+        for name in ["Task title", "任务标题"] {
+            if let Some(n) = window
+                .find(&Query::role(Role::Text).name(name).showing())
+                .await
+            {
+                return Some(n);
+            }
+        }
+        None
+    })
+    .await
+    .unwrap();
     let got = tick_e2e::poll(WAIT, "detail title", || async {
         node.text().await.ok().filter(|t| t == title)
     })

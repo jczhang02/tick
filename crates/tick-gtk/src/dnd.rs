@@ -60,20 +60,16 @@ enum ProjectTarget {
     },
 }
 
-/// The list row widget (a direct child of `list`) under `y`, with its bounds.
-fn row_at(list: &gtk::Widget, y: f64) -> Option<(gtk::Widget, gtk::graphene::Rect)> {
-    let mut child = list.first_child();
-    while let Some(c) = child {
-        if let Some(b) = c.compute_bounds(list)
-            && c.is_visible()
-            && f64::from(b.y()) <= y
-            && y < f64::from(b.y() + b.height())
-        {
-            return Some((c, b));
-        }
-        child = c.next_sibling();
+/// The list row widget (a direct child of `list`) under (x, y), with its bounds. Picked like
+/// a click: a list view also keeps row widgets that are not on screen (recycled, or holding
+/// focus), whose bounds can overlap the pointer.
+fn row_at(list: &gtk::Widget, x: f64, y: f64) -> Option<(gtk::Widget, gtk::graphene::Rect)> {
+    let mut w = list.pick(x, y, gtk::PickFlags::DEFAULT)?;
+    while w.parent().as_ref() != Some(list) {
+        w = w.parent()?;
     }
-    None
+    let b = w.compute_bounds(list)?;
+    Some((w, b))
 }
 
 fn row_key(row: &gtk::Widget) -> Option<String> {
@@ -172,7 +168,7 @@ impl TickWindow {
                 w.note_drag_pointer(&sb.list().clone().upcast(), x, y);
             }
             let ok = if p.starts_with(TASK) {
-                match w.sidebar_project_at(y) {
+                match w.sidebar_project_at(x, y) {
                     Some((_, row)) => {
                         w.show_into(&row);
                         w.imp().sidebar_drop_line.set_visible(false);
@@ -212,7 +208,7 @@ impl TickWindow {
             w.hide_drop_feedback();
             let Some(p) = payload(v) else { return false };
             if let Some(id) = p.strip_prefix(TASK) {
-                let Some((project, _)) = w.sidebar_project_at(y) else {
+                let Some((project, _)) = w.sidebar_project_at(x, y) else {
                     return false;
                 };
                 let id = id.to_owned();
@@ -320,7 +316,7 @@ impl TickWindow {
     fn task_target(&self, id: &str, x: f64, y: f64) -> Option<TaskTarget> {
         let project = self.project_of_view()?;
         let list: gtk::Widget = self.imp().task_list.get().upcast();
-        let (row_w, b) = row_at(&list, y)?;
+        let (row_w, b) = row_at(&list, x, y)?;
         let key = row_key(&row_w)?;
         let row = self.row_for_key(&key)?;
         let (bx, by, bw, bh) = (
@@ -526,10 +522,10 @@ impl TickWindow {
     // ---- sidebar ----
 
     /// The project row (Inbox included) under `y` in the sidebar list.
-    fn sidebar_project_at(&self, y: f64) -> Option<(String, gtk::Widget)> {
+    fn sidebar_project_at(&self, x: f64, y: f64) -> Option<(String, gtk::Widget)> {
         let sb = self.imp().sidebar.get()?;
         let list: gtk::Widget = sb.list().clone().upcast();
-        let (row, _) = row_at(&list, y)?;
+        let (row, _) = row_at(&list, x, y)?;
         let item = sidebar_item(&row)?;
         match item.view()? {
             ViewId::Project(id) => Some((id, row)),
@@ -538,10 +534,10 @@ impl TickWindow {
         }
     }
 
-    fn project_target(&self, id: &str, _x: f64, y: f64) -> Option<ProjectTarget> {
+    fn project_target(&self, id: &str, x: f64, y: f64) -> Option<ProjectTarget> {
         let sb = self.imp().sidebar.get()?;
         let list: gtk::Widget = sb.list().clone().upcast();
-        let (row, b) = row_at(&list, y)?;
+        let (row, b) = row_at(&list, x, y)?;
         let item = sidebar_item(&row)?;
         let ViewId::Project(target) = item.view()? else {
             return None;
@@ -719,34 +715,46 @@ pub fn drag_source(
         h.set((x, y));
         Some(gtk::gdk::ContentProvider::for_value(&payload.to_value()))
     });
+    let on_end: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(on_end);
     let w = widget.downgrade();
     source.connect_drag_begin(move |_, drag| {
         let icon_widget = icon();
-        let (hx, hy) = hot.get();
+        let (hx, _) = hot.get();
         let di = gtk::DragIcon::for_drag(drag);
         di.set_child(Some(&icon_widget));
-        drag.set_hotspot(hx as i32, hy as i32);
-        crate::test_mode::set_drag_icon(&icon_widget, hx, hy);
+        // The icon hangs just below the pointer, so the insertion line at the pointer stays
+        // visible (a centered icon would cover it).
+        drag.set_hotspot(hx as i32, -6);
+        crate::test_mode::set_drag_icon(&icon_widget, hx, -6.0);
         // The source row (the list's row widget) stays in place at 40 % (4.4).
-        if let Some(row) = w
+        let row = w
             .upgrade()
             .and_then(|w| w.parent())
-            .and_then(|b| b.parent())
-        {
+            .and_then(|b| b.parent());
+        if let Some(row) = &row {
             row.add_css_class("tick-drag-source");
         }
         on_begin();
-    });
-    let w = widget.downgrade();
-    source.connect_drag_end(move |_, _, _| {
-        if let Some(row) = w
-            .upgrade()
-            .and_then(|w| w.parent())
-            .and_then(|b| b.parent())
-        {
-            row.remove_css_class("tick-drag-source");
-        }
-        on_end();
+        // The end is reported by the drag itself: the source widget may be gone by then.
+        let done = std::rc::Rc::new(std::cell::Cell::new(false));
+        let finish = {
+            let on_end = on_end.clone();
+            let row = row.map(|r| r.downgrade());
+            move || {
+                if done.replace(true) {
+                    return;
+                }
+                if let Some(r) = row.as_ref().and_then(|r| r.upgrade()) {
+                    r.remove_css_class("tick-drag-source");
+                }
+                on_end();
+            }
+        };
+        let f = finish.clone();
+        drag.connect_dnd_finished(move |_| f());
+        let f = finish.clone();
+        drag.connect_cancel(move |_, _| f());
+        drag.connect_drop_performed(move |_| finish());
     });
     widget.add_controller(source);
 }

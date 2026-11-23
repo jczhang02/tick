@@ -312,7 +312,7 @@ pub fn demo(st: &mut State) {
         // Wraps to three lines and ends in an ellipsis in a narrow window (4.4).
         ("6Xtask00000000008", T::new(INBOX_ID, "Compare the three quotes for replacing the kitchen windows, ask the landlord whether the building insurance covers any of it, and book whichever installer can come before the first frost, then tell the neighbours about the noise").p(3).labels(&["home"])),
         // Work
-        ("6Xtask00000000010", T::new(work, "Prepare the quarterly planning deck").sec(s1).p(1).due(at(t, 0, "14:00")).labels(&["deep-work"]).desc("Outline:\n1. Results\n2. Risks\n3. Asks").deadline(2).assign(USER_ID)),
+        ("6Xtask00000000010", T::new(work, "Prepare the quarterly planning deck").sec(s1).p(1).due(at(t, 0, "14:00")).labels(&["deep-work"]).desc("Outline for **Friday's** review:\n1. Results\n2. Risks and *open questions*\n3. Asks\n\nNumbers are in `metrics.xlsx`; the template is on [the wiki](https://example.com/wiki).").deadline(2).assign(USER_ID)),
         ("6Xtask00000000011", T::new(work, "Collect metrics from the dashboard").parent("6Xtask00000000010").sec(s1).due(on(t, 0)).assign(USER_ID)),
         ("6Xtask00000000012", T::new(work, "Draft the risks slide").parent("6Xtask00000000010").sec(s1).assign(maya)),
         ("6Xtask00000000013", T::new(work, "Review Maya's pull request").sec(s1).p(2).due(on(t, -1)).labels(&["waiting"]).assign(USER_ID)),

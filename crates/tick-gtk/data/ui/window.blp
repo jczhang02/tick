@@ -97,6 +97,8 @@ template $TickWindow: Adw.ApplicationWindow {
             child: Adw.OverlaySplitView detail_split {
               sidebar-position: end;
               show-sidebar: false;
+              // Escape closes a picker first, then the pane (TickWindow handles it), never both.
+              pin-sidebar: true;
               min-sidebar-width: 340;
               max-sidebar-width: 420;
               sidebar-width-fraction: 0.38;
@@ -188,6 +190,8 @@ template $TickWindow: Adw.ApplicationWindow {
                 [top]
                 Adw.HeaderBar {
                   show-title: false;
+                  // The navigation back button belongs to the list's header bar (3.4).
+                  show-back-button: false;
 
                   [start]
                   Gtk.Button detail_back_button {

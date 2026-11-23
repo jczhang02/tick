@@ -298,15 +298,49 @@ impl TickWindow {
     }
 
     fn present_popover(&self, pop: &gtk::Popover, anchor: Anchor) {
-        match anchor {
-            Anchor::Widget(w) => pickers::present(pop, &w, None),
+        let (parent, rect): (gtk::Widget, Option<gtk::gdk::Rectangle>) = match anchor {
+            Anchor::Widget(w) => (w, None),
             Anchor::Row(key) => {
                 let list = self.imp().task_list.get();
                 let rect = self.row_rect(&key);
-                pop.set_position(gtk::PositionType::Bottom);
-                pickers::present(pop, &list, rect);
+                (list.upcast(), rect)
             }
+        };
+        // Where the anchor is in the window.
+        let area = match rect {
+            Some(r) => parent.compute_bounds(self).map(|b| {
+                gtk::graphene::Rect::new(
+                    b.x() + r.x() as f32,
+                    b.y() + r.y() as f32,
+                    r.width() as f32,
+                    r.height() as f32,
+                )
+            }),
+            None => parent.compute_bounds(self),
+        };
+        let height = self.height() as f32;
+        match area {
+            // A detail field row with room on its left (the pane sits at the window's end
+            // edge): open towards the list, where the popover can slide to fit vertically.
+            Some(a) if rect.is_none() && a.x() >= 360.0 => {
+                pop.set_position(gtk::PositionType::Left);
+            }
+            // Otherwise below (or above) the anchor, scrolling inside when it is taller than
+            // the room there (a 630 px date picker under a row of a 800 px window).
+            Some(a) => {
+                let below = height - (a.y() + a.height()) - 12.0;
+                let above = a.y() - 12.0;
+                let (pos, room) = if below >= above {
+                    (gtk::PositionType::Bottom, below)
+                } else {
+                    (gtk::PositionType::Top, above)
+                };
+                pop.set_position(pos);
+                pickers::limit_height(pop, (room as i32 - 24).max(200));
+            }
+            None => pop.set_position(gtk::PositionType::Bottom),
         }
+        pickers::present(pop, &parent, rect);
     }
 
     fn date_info(&self, current: Option<chrono::NaiveDate>) -> DateInfo {
@@ -717,7 +751,6 @@ impl TickWindow {
         main.append(Some(&gettext("Open")), Some("win.task-open"));
         main.append(Some(&gettext("Complete")), Some("win.task-complete"));
         main.append(Some(&gettext("Date...")), Some("win.task-date"));
-        main.append(Some(&gettext("Deadline...")), Some("win.task-deadline"));
         main.append(Some(&gettext("Priority...")), Some("win.task-priority"));
         main.append(Some(&gettext("Labels...")), Some("win.task-labels"));
         main.append(Some(&gettext("Move to...")), Some("win.task-move"));

@@ -96,6 +96,37 @@ pub fn present(
     popover.popup();
 }
 
+/// Keep `popover` within `max` px of height: its scrolled content scrolls instead (4.9).
+pub fn limit_height(popover: &gtk::Popover, max: i32) {
+    fn find(w: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
+        if let Some(s) = w.downcast_ref::<gtk::ScrolledWindow>() {
+            return Some(s.clone());
+        }
+        let mut c = w.first_child();
+        while let Some(x) = c {
+            if let Some(s) = find(&x) {
+                return Some(s);
+            }
+            c = x.next_sibling();
+        }
+        None
+    }
+    let Some(child) = popover.child() else { return };
+    if let Some(s) = find(&child) {
+        // The rest of the picker (entry, quick options) sits outside a label list's scroller.
+        let outside = if s.upcast_ref::<gtk::Widget>() == &child {
+            0
+        } else {
+            60
+        };
+        let cap = (max - outside - 24).max(132);
+        if s.max_content_height() < 0 || s.max_content_height() > cap {
+            s.set_max_content_height(cap);
+        }
+        s.set_propagate_natural_height(true);
+    }
+}
+
 fn popover(width: i32, name: &str) -> gtk::Popover {
     let p = gtk::Popover::builder()
         .has_arrow(false)
@@ -103,6 +134,20 @@ fn popover(width: i32, name: &str) -> gtk::Popover {
         .width_request(width)
         .build();
     p.update_property(&[gtk::accessible::Property::Label(name)]);
+    // Escape closes the picker and goes no further: a search entry would only clear itself,
+    // and the event would reach the navigation view, which pops the page.
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    keys.connect_key_pressed(|c, key, _, _| {
+        if key == gtk::gdk::Key::Escape
+            && let Some(p) = c.widget().and_downcast::<gtk::Popover>()
+        {
+            p.popdown();
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    p.add_controller(keys);
     p
 }
 
@@ -374,9 +419,14 @@ pub fn date_picker(
         let revealer = revealer.downgrade();
         let pick_row_list = pick_row_list.downgrade();
         pop.connect_map(move |p| {
-            let short = p
-                .root()
-                .is_some_and(|r| r.upcast_ref::<gtk::Widget>().height() < SHORT_WINDOW);
+            // A short window, or little room at the anchor (see `limit_height`).
+            let limited = p
+                .child()
+                .and_downcast::<gtk::ScrolledWindow>()
+                .is_some_and(|s| (0..560).contains(&s.max_content_height()));
+            let short = limited
+                || p.root()
+                    .is_some_and(|r| r.upcast_ref::<gtk::Widget>().height() < SHORT_WINDOW);
             if let (Some(r), Some(l)) = (revealer.upgrade(), pick_row_list.upgrade()) {
                 r.set_reveal_child(!short);
                 l.set_visible(short);
@@ -654,6 +704,15 @@ pub fn label_picker(
         });
     }
     down_into(&search, &listbox);
+    // Escape in the search entry closes the picker (a search entry would only clear itself).
+    {
+        let pop = pop.downgrade();
+        search.connect_stop_search(move |_| {
+            if let Some(p) = pop.upgrade() {
+                p.popdown();
+            }
+        });
+    }
     // Typing anywhere in the picker filters (4.10), even after a click moved focus to a row.
     type_to_search(&listbox, &search);
     let scroller = gtk::ScrolledWindow::builder()
@@ -816,6 +875,15 @@ pub fn move_picker(
         });
     }
     down_into(&search, &listbox);
+    // Escape in the search entry closes the picker (a search entry would only clear itself).
+    {
+        let pop = pop.downgrade();
+        search.connect_stop_search(move |_| {
+            if let Some(p) = pop.upgrade() {
+                p.popdown();
+            }
+        });
+    }
     type_to_search(&listbox, &search);
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)

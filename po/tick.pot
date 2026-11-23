@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: tick\n"
 "Report-Msgid-Bugs-To: https://github.com/jczhang02/tick/issues\n"
-"POT-Creation-Date: 2026-11-22 15:00-0800\n"
+"POT-Creation-Date: 2026-11-22 16:39-0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -45,7 +45,7 @@ msgstr ""
 #: crates/tick-gtk/data/ui/quick_add.blp:9
 #: crates/tick-gtk/data/ui/quick_add.blp:12
 #: crates/tick-gtk/data/ui/quick_add.blp:76
-#: crates/tick-gtk/data/ui/window.blp:44 crates/tick-gtk/data/ui/window.blp:107
+#: crates/tick-gtk/data/ui/window.blp:44 crates/tick-gtk/data/ui/window.blp:122
 msgid "Add Task"
 msgstr ""
 
@@ -57,16 +57,17 @@ msgstr ""
 msgid "Task"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/quick_add.blp:66
+#: crates/tick-gtk/data/ui/quick_add.blp:66 crates/tick-gtk/src/edit.rs:702
+#: crates/tick-gtk/src/manage.rs:418 crates/tick-gtk/src/manage.rs:924
 msgid "Cancel"
 msgstr ""
 
 #: crates/tick-gtk/data/ui/window.blp:9 crates/tick-gtk/data/ui/window.blp:28
-#: crates/tick-gtk/src/main.rs:105
+#: crates/tick-gtk/src/main.rs:111
 msgid "Tick"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:40 crates/tick-gtk/data/ui/window.blp:103
+#: crates/tick-gtk/data/ui/window.blp:40 crates/tick-gtk/data/ui/window.blp:118
 msgid "Add Task (Q)"
 msgstr ""
 
@@ -74,40 +75,262 @@ msgstr ""
 msgid "Main Menu"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:71
+#: crates/tick-gtk/data/ui/window.blp:72
 msgid "Views"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:79 crates/tick-gtk/src/format.rs:129
-#: crates/tick-gtk/src/rows.rs:793 crates/tick-gtk/src/rows.rs:826
-#: crates/tick-gtk/src/sidebar.rs:549
+#: crates/tick-gtk/data/ui/window.blp:94 crates/tick-gtk/src/format.rs:129
+#: crates/tick-gtk/src/pickers.rs:264 crates/tick-gtk/src/rows.rs:847
+#: crates/tick-gtk/src/rows.rs:880 crates/tick-gtk/src/sidebar.rs:778
 msgid "Today"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:120
+#: crates/tick-gtk/data/ui/window.blp:130
+#: crates/tick-gtk/data/ui/window.blp:133
+msgid "View Menu"
+msgstr ""
+
+#: crates/tick-gtk/data/ui/window.blp:146
 msgid "Sync Status"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:139
+#: crates/tick-gtk/data/ui/window.blp:166
 msgid "Tasks"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:155
-#: crates/tick-gtk/data/ui/window.blp:166
+#: crates/tick-gtk/data/ui/window.blp:196
+#: crates/tick-gtk/data/ui/window.blp:207
 msgid "Close Task (Esc)"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:159
-#: crates/tick-gtk/data/ui/window.blp:170
+#: crates/tick-gtk/data/ui/window.blp:200
+#: crates/tick-gtk/data/ui/window.blp:211
 msgid "Close Task"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:193
+#: crates/tick-gtk/data/ui/window.blp:219
+#: crates/tick-gtk/data/ui/window.blp:222
+msgid "Task Menu"
+msgstr ""
+
+#: crates/tick-gtk/data/ui/window.blp:245 crates/tick-gtk/src/edit.rs:724
+msgid "Complete"
+msgstr ""
+
+#: crates/tick-gtk/data/ui/window.blp:246 crates/tick-gtk/src/edit.rs:728
+#: crates/tick-gtk/src/manage.rs:232
+msgid "Move to..."
+msgstr ""
+
+#: crates/tick-gtk/data/ui/window.blp:250 crates/tick-gtk/src/edit.rs:731
+msgid "Delete Task"
+msgstr ""
+
+#: crates/tick-gtk/data/ui/window.blp:256
 msgid "About Tick"
 msgstr ""
 
-#: crates/tick-gtk/data/ui/window.blp:197
+#: crates/tick-gtk/data/ui/window.blp:260
 msgid "Quit"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:162 crates/tick-gtk/src/pickers.rs:227
+msgid "Date"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:163 crates/tick-gtk/src/pickers.rs:225
+msgid "Deadline"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:164 crates/tick-gtk/src/pickers.rs:409
+msgid "Priority"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:165 crates/tick-gtk/src/pickers.rs:533
+#: crates/tick-gtk/src/sidebar.rs:32
+msgid "Labels"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:166 crates/tick-gtk/src/pickers.rs:698
+msgid "Assignee"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:167
+msgid "Project"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:243
+msgid "Task title"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:264
+msgid "Description"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:302 crates/tick-gtk/src/detail.rs:862
+msgid "Sub-tasks"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:313 crates/tick-gtk/src/detail.rs:318
+msgid "Sub-task name"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:328 crates/tick-gtk/src/detail.rs:330
+msgid "Add sub-task"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:340
+msgid "Comments"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:371 crates/tick-gtk/src/detail.rs:376
+msgid "Write a comment"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:383 crates/tick-gtk/src/detail.rs:385
+msgid "Send Comment"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:465 crates/tick-gtk/src/detail.rs:470
+msgid "Clear {field}"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:771
+msgid "Add a description"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:808
+msgid "Move to... (now {project})"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:821 crates/tick-gtk/src/detail.rs:966
+#: crates/tick-gtk/src/task_list.rs:718
+msgid "Mark as not done"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:823 crates/tick-gtk/src/detail.rs:968
+#: crates/tick-gtk/src/task_list.rs:720
+msgid "Complete task"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:898
+msgid "No date"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:911
+msgid "No deadline"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:917 crates/tick-gtk/src/pickers.rs:422
+#: crates/tick-gtk/src/quick_add.rs:315
+msgid "Priority {n}"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:924
+msgid "No labels"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:933 crates/tick-gtk/src/pickers.rs:703
+msgid "Unassigned"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:948
+msgid "{field}: {value}"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1000
+msgid "Open {title}"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1054 crates/tick-gtk/src/detail.rs:1057
+msgid "Comment Actions"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1111
+msgid "Open attachment {name}"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1143
+msgid "Edit comment"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1213 crates/tick-gtk/src/manage.rs:247
+#: crates/tick-gtk/src/manage.rs:257
+msgid "Edit"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1215
+msgid "Delete Comment..."
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1237 crates/tick-gtk/src/edit.rs:467
+#: crates/tick-gtk/src/edit.rs:545 crates/tick-gtk/src/rows.rs:482
+#: crates/tick-gtk/src/rows.rs:645 crates/tick-gtk/src/rows.rs:646
+#: crates/tick-gtk/src/rows.rs:709 crates/tick-gtk/src/sidebar.rs:772
+msgid "Inbox"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1262 crates/tick-gtk/src/pickers.rs:286
+msgid "{weekday} {date}"
+msgstr ""
+
+#. Translators: a due date with a time, for example "Tomorrow 14:00".
+#: crates/tick-gtk/src/detail.rs:1274 crates/tick-gtk/src/format.rs:176
+msgctxt "due"
+msgid "{date} {time}"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1331
+msgid "Someone"
+msgstr ""
+
+#: crates/tick-gtk/src/detail.rs:1350
+msgid "Attachment"
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:567
+msgid "Moved to {name}"
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:602
+msgid "Task deleted"
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:610
+msgid "The task was already deleted and could not be restored"
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:643 crates/tick-gtk/src/window.rs:1401
+msgid "Undo"
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:699
+msgid "Delete comment?"
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:700 crates/tick-gtk/src/manage.rs:967
+#: crates/tick-gtk/src/manage.rs:999
+msgid "This can't be undone."
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:703
+msgid "Delete Comment"
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:723 crates/tick-gtk/src/window.rs:1671
+msgid "Open"
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:725
+msgid "Date..."
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:726
+msgid "Priority..."
+msgstr ""
+
+#: crates/tick-gtk/src/edit.rs:727
+msgid "Labels..."
 msgstr ""
 
 #: crates/tick-gtk/src/format.rs:35
@@ -320,7 +543,8 @@ msgctxt "date"
 msgid "{mon} {day}, {year}"
 msgstr ""
 
-#: crates/tick-gtk/src/format.rs:130 crates/tick-gtk/src/rows.rs:795
+#: crates/tick-gtk/src/format.rs:130 crates/tick-gtk/src/pickers.rs:267
+#: crates/tick-gtk/src/rows.rs:849
 msgid "Tomorrow"
 msgstr ""
 
@@ -338,12 +562,6 @@ msgstr ""
 #: crates/tick-gtk/src/format.rs:150
 msgctxt "time"
 msgid "{hour}:{minute} PM"
-msgstr ""
-
-#. Translators: a due date with a time, for example "Tomorrow 14:00".
-#: crates/tick-gtk/src/format.rs:176
-msgctxt "due"
-msgid "{date} {time}"
 msgstr ""
 
 #. Translators: the Today view subtitle, month first. Chinese: "{month} 月 {day} 日 {wd}".
@@ -371,8 +589,9 @@ msgid "{month_name} {year}"
 msgstr ""
 
 #: crates/tick-gtk/src/i18n.rs:58 crates/tick-gtk/src/i18n.rs:59
-#: crates/tick-gtk/src/sidebar.rs:383 crates/tick-gtk/src/task_list.rs:142
-#: crates/tick-gtk/src/task_list.rs:225
+#: crates/tick-gtk/src/manage.rs:950 crates/tick-gtk/src/manage.rs:995
+#: crates/tick-gtk/src/manage.rs:1022 crates/tick-gtk/src/sidebar.rs:550
+#: crates/tick-gtk/src/task_list.rs:329 crates/tick-gtk/src/task_list.rs:438
 msgid "{n} task"
 msgid_plural "{n} tasks"
 msgstr[0] ""
@@ -386,12 +605,352 @@ msgstr ""
 msgid "Can't reach Todoist. Check your connection and try again."
 msgstr ""
 
-#: crates/tick-gtk/src/main.rs:107
+#: crates/tick-gtk/src/main.rs:113
 msgid "A Todoist client"
 msgstr ""
 
-#: crates/tick-gtk/src/quick_add.rs:315
-msgid "Priority {n}"
+#: crates/tick-gtk/src/manage.rs:47
+msgctxt "color"
+msgid "Berry Red"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:48
+msgctxt "color"
+msgid "Red"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:49
+msgctxt "color"
+msgid "Orange"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:50
+msgctxt "color"
+msgid "Yellow"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:51
+msgctxt "color"
+msgid "Olive Green"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:52
+msgctxt "color"
+msgid "Lime Green"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:53
+msgctxt "color"
+msgid "Green"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:54
+msgctxt "color"
+msgid "Mint Green"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:55
+msgctxt "color"
+msgid "Teal"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:56
+msgctxt "color"
+msgid "Sky Blue"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:57
+msgctxt "color"
+msgid "Light Blue"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:58
+msgctxt "color"
+msgid "Blue"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:59
+msgctxt "color"
+msgid "Grape"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:60
+msgctxt "color"
+msgid "Violet"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:61
+msgctxt "color"
+msgid "Lavender"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:62
+msgctxt "color"
+msgid "Magenta"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:63
+msgctxt "color"
+msgid "Salmon"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:64
+msgctxt "color"
+msgid "Grey"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:65
+msgctxt "color"
+msgid "Taupe"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:66
+msgctxt "color"
+msgid "Charcoal"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:88
+msgid "Examples: \"today | overdue\", \"#Work & p1\""
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:94
+msgid "Part of this query is checked by Todoist. Results need a connection."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:96
+msgid "Runs on this computer."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:210
+msgid "Unfavorite"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:212
+msgid "Favorite"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:222 crates/tick-gtk/src/manage.rs:224
+#: crates/tick-gtk/src/task_list.rs:548
+msgid "Rename"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:226 crates/tick-gtk/src/manage.rs:496
+#: crates/tick-gtk/src/manage.rs:508
+msgid "Color"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:228
+msgid "Add Section"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:234
+msgid "Archive"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:236
+msgid "Delete Project..."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:253
+msgid "Delete Label..."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:259
+msgid "Delete Filter..."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:274 crates/tick-gtk/src/sidebar.rs:491
+msgid "Add Project"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:275 crates/tick-gtk/src/sidebar.rs:492
+msgid "Add Label"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:276 crates/tick-gtk/src/sidebar.rs:493
+msgid "Add Filter"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:282
+msgid "Expand"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:284
+msgid "Collapse"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:364
+msgid "None"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:401
+msgid "New Project"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:402
+msgid "Edit Project"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:403
+msgid "New Label"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:404
+msgid "Edit Label"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:405
+msgid "New Filter"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:406 crates/tick-gtk/src/task_list.rs:974
+msgid "Edit Filter"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:423
+msgid "Save"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:425
+msgid "Add"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:444
+msgid "Name"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:450
+msgid "Query"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:463
+msgid "Parent Project"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:474
+msgid "Add to Favorites"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:487
+msgid "A label with this name already exists."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:905
+msgid "Archived \"{name}\""
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:951
+msgid "{n} sub-project"
+msgid_plural "{n} sub-projects"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/tick-gtk/src/manage.rs:955 crates/tick-gtk/src/manage.rs:994
+msgid "Its {tasks} will be deleted too."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:959
+msgid "Its {projects} will be deleted too."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:963
+msgid "Its {tasks} and {projects} will be deleted too."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:974
+msgid "Delete \"{name}\"?"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:976
+msgid "Delete Project"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1002
+msgid "Delete section \"{name}\"?"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1004
+msgid "Delete Section"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1021
+msgid "It will be removed from {tasks}. The tasks stay."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1025
+msgid "No tasks use it."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1030
+msgid "Delete label \"{name}\"?"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1034
+msgid "Delete Label"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1051
+msgid "Delete filter \"{name}\"?"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1052
+msgid "Only the filter is deleted. No tasks change."
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1053
+msgid "Delete Filter"
+msgstr ""
+
+#: crates/tick-gtk/src/manage.rs:1102
+msgid "Moved \"{name}\""
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:247
+msgid "Type a date, e.g. \"every Monday\""
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:251
+msgid "Date text"
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:274
+msgid "This Weekend"
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:278
+msgid "Next Week"
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:298
+msgid "No Deadline"
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:300
+msgid "No Date"
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:325
+msgid "Calendar"
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:352
+msgid "Pick a Date"
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:539 crates/tick-gtk/src/pickers.rs:543
+msgid "Search or create a label"
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:586
+msgid "Create label \"{name}\""
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:761
+msgid "Move to"
+msgstr ""
+
+#: crates/tick-gtk/src/pickers.rs:767 crates/tick-gtk/src/pickers.rs:771
+msgid "Search projects"
 msgstr ""
 
 #: crates/tick-gtk/src/quick_add.rs:325
@@ -406,145 +965,139 @@ msgstr ""
 msgid "Enter to add, Esc to close"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:177 crates/tick-gtk/src/task_list.rs:490
+#: crates/tick-gtk/src/rows.rs:183 crates/tick-gtk/src/task_list.rs:771
 msgid "Completing"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:180
+#: crates/tick-gtk/src/rows.rs:186
 msgid "Due {date}"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:183
+#: crates/tick-gtk/src/rows.rs:189
 msgid "deadline {date}"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:187
+#: crates/tick-gtk/src/rows.rs:193
 msgid "{done} of {n} sub-task"
 msgid_plural "{done} of {n} sub-tasks"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/tick-gtk/src/rows.rs:192
+#: crates/tick-gtk/src/rows.rs:198
 msgid "{n} comment"
 msgid_plural "{n} comments"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/tick-gtk/src/rows.rs:196
+#: crates/tick-gtk/src/rows.rs:202
 msgid "labels {names}"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:201
+#: crates/tick-gtk/src/rows.rs:207
 msgid "project {name}"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:204 crates/tick-gtk/src/task_list.rs:569
+#: crates/tick-gtk/src/rows.rs:210 crates/tick-gtk/src/task_list.rs:850
 msgid "Assigned to {name}"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:207
+#: crates/tick-gtk/src/rows.rs:213
 msgid "Not saved: {message}"
 msgstr ""
 
 #. Translators: separator between the parts of a task's meta line read aloud.
-#: crates/tick-gtk/src/rows.rs:210
+#: crates/tick-gtk/src/rows.rs:216
 msgctxt "list separator"
 msgid ", "
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:457 crates/tick-gtk/src/rows.rs:617
-#: crates/tick-gtk/src/rows.rs:618 crates/tick-gtk/src/rows.rs:681
-#: crates/tick-gtk/src/sidebar.rs:543
-msgid "Inbox"
-msgstr ""
-
-#: crates/tick-gtk/src/rows.rs:663
+#: crates/tick-gtk/src/rows.rs:691
 msgid "Inbox is empty"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:664
+#: crates/tick-gtk/src/rows.rs:692
 msgid "New tasks land here. Press Q to add one."
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:716
+#: crates/tick-gtk/src/rows.rs:746
 msgid "No tasks yet"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:717
+#: crates/tick-gtk/src/rows.rs:747
 msgid "Press Q to add the first one."
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:814
+#: crates/tick-gtk/src/rows.rs:868
 msgid "Overdue"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:838
+#: crates/tick-gtk/src/rows.rs:892
 msgid "All done for today"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:839
+#: crates/tick-gtk/src/rows.rs:893
 msgid "Enjoy the rest of your day."
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:870 crates/tick-gtk/src/sidebar.rs:555
+#: crates/tick-gtk/src/rows.rs:924 crates/tick-gtk/src/sidebar.rs:784
 msgid "Upcoming"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:880
+#: crates/tick-gtk/src/rows.rs:934
 msgid "Nothing scheduled"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:881
+#: crates/tick-gtk/src/rows.rs:935
 msgid "Tasks with a date show up here, day by day."
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:953
+#: crates/tick-gtk/src/rows.rs:1007
 msgid "No tasks with @{name}"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:955
+#: crates/tick-gtk/src/rows.rs:1009
 msgid "Add @{name} to a task to see it here."
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1034
+#: crates/tick-gtk/src/rows.rs:1088
 msgid "Offline. Showing results from {time}."
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1040
+#: crates/tick-gtk/src/rows.rs:1094
 msgid "Updating"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1044
+#: crates/tick-gtk/src/rows.rs:1098
 msgid "Results from Todoist, updated {time}"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1062
+#: crates/tick-gtk/src/rows.rs:1116
 msgid "Todoist couldn't read this filter"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1063
+#: crates/tick-gtk/src/rows.rs:1117
 msgid "Check the query and try again."
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1067
+#: crates/tick-gtk/src/rows.rs:1122
 msgid "Can't show this filter offline"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1068
+#: crates/tick-gtk/src/rows.rs:1123
 msgid ""
 "Tick can't evaluate part of this query on this computer. Connect to see "
 "results."
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1072
+#: crates/tick-gtk/src/rows.rs:1127
 msgid "Loading results"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1084
+#: crates/tick-gtk/src/rows.rs:1139
 msgid "No matching tasks"
 msgstr ""
 
-#: crates/tick-gtk/src/rows.rs:1085
+#: crates/tick-gtk/src/rows.rs:1140
 msgid "Nothing matches this filter right now."
 msgstr ""
 
@@ -556,35 +1109,31 @@ msgstr ""
 msgid "Projects"
 msgstr ""
 
-#: crates/tick-gtk/src/sidebar.rs:32
-msgid "Labels"
-msgstr ""
-
 #: crates/tick-gtk/src/sidebar.rs:33
 msgid "Filters"
 msgstr ""
 
-#: crates/tick-gtk/src/sidebar.rs:333 crates/tick-gtk/src/task_list.rs:133
+#: crates/tick-gtk/src/sidebar.rs:474 crates/tick-gtk/src/task_list.rs:320
 msgid "collapsed"
 msgstr ""
 
-#: crates/tick-gtk/src/sidebar.rs:335 crates/tick-gtk/src/task_list.rs:135
+#: crates/tick-gtk/src/sidebar.rs:476 crates/tick-gtk/src/task_list.rs:322
 msgid "expanded"
 msgstr ""
 
-#: crates/tick-gtk/src/sidebar.rs:338
+#: crates/tick-gtk/src/sidebar.rs:479
 msgid "{name}, {state}"
 msgstr ""
 
-#: crates/tick-gtk/src/sidebar.rs:380
+#: crates/tick-gtk/src/sidebar.rs:547
 msgid "{name}, {count}"
 msgstr ""
 
-#: crates/tick-gtk/src/sidebar.rs:441 crates/tick-gtk/src/task_list.rs:299
+#: crates/tick-gtk/src/sidebar.rs:608 crates/tick-gtk/src/task_list.rs:512
 msgid "Collapse {name}"
 msgstr ""
 
-#: crates/tick-gtk/src/sidebar.rs:443 crates/tick-gtk/src/task_list.rs:297
+#: crates/tick-gtk/src/sidebar.rs:610 crates/tick-gtk/src/task_list.rs:510
 msgid "Expand {name}"
 msgstr ""
 
@@ -614,118 +1163,126 @@ msgstr ""
 msgid "Todoist rejected the change. Your task shows the version on the server."
 msgstr ""
 
-#: crates/tick-gtk/src/sync_status.rs:99
+#: crates/tick-gtk/src/sync_status.rs:101
 msgid "Sync Now"
 msgstr ""
 
-#: crates/tick-gtk/src/sync_status.rs:103
+#: crates/tick-gtk/src/sync_status.rs:105
 msgid "Dismiss Errors"
 msgstr ""
 
-#: crates/tick-gtk/src/task_list.rs:139
+#: crates/tick-gtk/src/task_list.rs:326
 msgid "{name}, {count}, {state}"
 msgstr ""
 
-#: crates/tick-gtk/src/task_list.rs:149 crates/tick-gtk/src/task_list.rs:632
+#: crates/tick-gtk/src/task_list.rs:336 crates/tick-gtk/src/task_list.rs:934
 msgid "Add task"
 msgstr ""
 
-#: crates/tick-gtk/src/task_list.rs:437
-msgid "Mark as not done"
+#: crates/tick-gtk/src/task_list.rs:344 crates/tick-gtk/src/task_list.rs:592
+msgid "Section name"
 msgstr ""
 
-#: crates/tick-gtk/src/task_list.rs:439
-msgid "Complete task"
+#: crates/tick-gtk/src/task_list.rs:395
+msgid "Project name"
 msgstr ""
 
-#: crates/tick-gtk/src/task_list.rs:581
+#: crates/tick-gtk/src/task_list.rs:549
+msgid "Add Task Here"
+msgstr ""
+
+#: crates/tick-gtk/src/task_list.rs:551
+msgid "Delete Section..."
+msgstr ""
+
+#: crates/tick-gtk/src/task_list.rs:558
+msgid "Section Menu"
+msgstr ""
+
+#: crates/tick-gtk/src/task_list.rs:561
+msgid "{name} section menu"
+msgstr ""
+
+#: crates/tick-gtk/src/task_list.rs:862
 msgid "Expand sub-tasks"
 msgstr ""
 
-#: crates/tick-gtk/src/task_list.rs:583
+#: crates/tick-gtk/src/task_list.rs:864
 msgid "Collapse sub-tasks"
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:627
+#: crates/tick-gtk/src/window.rs:697
 msgid "Couldn't update this filter"
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:628
+#: crates/tick-gtk/src/window.rs:698
 msgid "Retry"
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:744
+#: crates/tick-gtk/src/window.rs:814
 msgid "Couldn't save \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:747
+#: crates/tick-gtk/src/window.rs:817
 msgid "Details"
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:943
+#: crates/tick-gtk/src/window.rs:1035
 msgid "Complete \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:944
+#: crates/tick-gtk/src/window.rs:1036
 msgid "Reopen \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:945
+#: crates/tick-gtk/src/window.rs:1037
 msgid "Add \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:946
+#: crates/tick-gtk/src/window.rs:1038
 msgid "Delete \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:947
+#: crates/tick-gtk/src/window.rs:1039
 msgid "Move \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:948
+#: crates/tick-gtk/src/window.rs:1040
 msgid "Change project \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:949
+#: crates/tick-gtk/src/window.rs:1041
 msgid "Change section \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:950
+#: crates/tick-gtk/src/window.rs:1042
 msgid "Change label \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:951
+#: crates/tick-gtk/src/window.rs:1043
 msgid "Change filter \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:952
+#: crates/tick-gtk/src/window.rs:1044
 msgid "Change \"{title}\""
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:1278
+#: crates/tick-gtk/src/window.rs:1393
 msgid "Task completed"
 msgstr ""
 
-#: crates/tick-gtk/src/window.rs:1280
+#: crates/tick-gtk/src/window.rs:1395
 msgid "{n} task completed"
 msgid_plural "{n} tasks completed"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/tick-gtk/src/window.rs:1286
-msgid "Undo"
-msgstr ""
-
-#: crates/tick-gtk/src/window.rs:1368
+#: crates/tick-gtk/src/window.rs:1484
 msgid "{n} task was already saved and could not be restored"
 msgid_plural "{n} tasks were already saved and could not be restored"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/tick-gtk/src/window.rs:1554
+#: crates/tick-gtk/src/window.rs:1670
 msgid "Task added"
-msgstr ""
-
-#: crates/tick-gtk/src/window.rs:1555
-msgid "Open"
 msgstr ""

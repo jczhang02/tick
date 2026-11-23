@@ -544,7 +544,7 @@ button.tick-field-row:active { background-color: color-mix(in srgb, currentColor
 .tick-field:focus-within .tick-reveal,
 .tick-comment:hover .tick-reveal,
 .tick-comment:focus-within .tick-reveal,
-.tick-narrow .tick-reveal { opacity: 1; }
+.tick-narrow .tick-comment .tick-reveal { opacity: 1; }
 button.tick-subtask-open,
 button.tick-ghost-button {
   min-height: 34px;

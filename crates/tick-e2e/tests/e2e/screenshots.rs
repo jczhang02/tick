@@ -497,3 +497,315 @@ async fn chinese(scheme: ColorScheme) {
     wait_row(&window, "今天的任务都完成了").await;
     shoot(&s, &name("empty-today")).await;
 }
+
+/// The detail pane, every picker, menus, dialogs, the inline editors and a drag in
+/// progress (`DESIGN.md` 4.8 to 4.10, 4.19, 4.23 to 4.25, 4.4).
+async fn editing(scheme: ColorScheme, narrow: bool) {
+    let server = app::server("demo").await;
+    let s = session(&server, scheme, narrow).await;
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    let size = if narrow { "narrow" } else { "wide" };
+    let sc = scheme_name(scheme);
+    let name = |view: &str| format!("{view}-{size}-{sc}");
+    let esc = || async {
+        s.key(keysym::ESCAPE).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    };
+
+    app::open_view(&s, &window, "Work").await;
+    wait_row(&window, "This week, 7 tasks, expanded").await;
+    crate::detail::open_task(&s, &window, "Prepare the quarterly planning deck").await;
+    shoot(&s, &name("detail")).await;
+    // The rest of the pane: sub-tasks and comments.
+    let pane = window
+        .wait_for(
+            &Query::role(Role::Button).name("Add sub-task").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let r = pane.extents().await.unwrap();
+    let input = s.input().await.unwrap();
+    input.move_to(r.x + 60, r.y).await.unwrap();
+    input.scroll(10).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    shoot(&s, &name("detail-scrolled")).await;
+    input.move_to(r.x + 60, r.y).await.unwrap();
+    input.scroll(-10).await.unwrap();
+
+    for (field, file) in [
+        ("Date", "date-picker"),
+        ("Deadline", "deadline-picker"),
+        ("Priority", "priority-picker"),
+        ("Labels", "label-picker"),
+        ("Assignee", "assignee-picker"),
+    ] {
+        if narrow && !matches!(field, "Date" | "Labels") {
+            continue;
+        }
+        s.click(&crate::detail::field(&window, field).await)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        shoot(&s, &name(file)).await;
+        esc().await;
+    }
+    if !narrow {
+        let crumb = window
+            .wait_for(
+                &Query::role(Role::Button).name_contains("Move to").showing(),
+                WAIT,
+            )
+            .await
+            .unwrap();
+        s.click(&crumb).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        shoot(&s, &name("move-picker")).await;
+        esc().await;
+        // Editing the description: the raw text in place.
+        let desc = window
+            .wait_for(
+                &Query::role(Role::Label)
+                    .name_contains("Outline for")
+                    .showing(),
+                WAIT,
+            )
+            .await
+            .unwrap();
+        let d = desc.extents().await.unwrap();
+        input.click(d.x + d.width - 20, d.y + 10).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        shoot(&s, &name("description-edit")).await;
+        esc().await;
+    }
+    esc().await;
+
+    // Menus: the task row context menu, the view menu.
+    let row = app::task_row(&window, "Review Maya's pull request").await;
+    let rr = row.extents().await.unwrap();
+    input.right_click(rr.x + 160, rr.y + 20).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    shoot_here(&s, &name("task-menu")).await;
+    esc().await;
+    let view_menu = window
+        .wait_for(&Query::role(Role::Button).name("View Menu").showing(), WAIT)
+        .await
+        .unwrap();
+    s.click(&view_menu).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    shoot(&s, &name("view-menu")).await;
+    esc().await;
+
+    // The section editor (Add Section) and the in-place project title.
+    s.click(&view_menu).await.unwrap();
+    crate::detail::menu_choose(&s, &window, 2).await;
+    s.type_text("Next quarter").await.unwrap();
+    shoot(&s, &name("section-editor")).await;
+    esc().await;
+    if !narrow {
+        s.key(keysym::F2).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        shoot(&s, &name("title-rename")).await;
+        esc().await;
+    }
+
+    // A drag in progress: the row stays dimmed, the icon follows, the line marks the spot.
+    let from = app::task_row(&window, "Weekly sync with the team").await;
+    let f = from.extents().await.unwrap();
+    let to = app::task_row(&window, "Review Maya's pull request").await;
+    let t = to.extents().await.unwrap();
+    input.press_at(f.x + 90, f.y + f.height / 2).await.unwrap();
+    input
+        .drag_by(0, t.y + 4 - (f.y + f.height / 2), 15)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    shoot_here(&s, &name("dragging")).await;
+    // Back onto the row itself, where nothing can be dropped: the drag ends without a change.
+    input
+        .drag_by(0, (f.y + f.height / 2) - (t.y + 4), 15)
+        .await
+        .unwrap();
+    input.release().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Dialogs (4.23) and a confirmation (4.25).
+    if narrow {
+        back_to_sidebar(&s, &window).await;
+    }
+    let add = window
+        .wait_for(
+            &Query::role(Role::Button).name("Add Project").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&add).await.unwrap();
+    window
+        .parent()
+        .await
+        .unwrap()
+        .unwrap()
+        .wait_for(&Query::role(Role::Dialog).name("New Project"), WAIT)
+        .await
+        .unwrap();
+    s.type_text("Garden").await.unwrap();
+    shoot(&s, &name("project-dialog")).await;
+    esc().await;
+    if !narrow {
+        let add = window
+            .wait_for(&Query::role(Role::Button).name("Add Label").showing(), WAIT)
+            .await
+            .unwrap();
+        s.click(&add).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        s.type_text("Waiting").await.unwrap();
+        shoot(&s, &name("label-dialog-duplicate")).await;
+        esc().await;
+        // The Filters header is below the fold of the demo sidebar.
+        let sb = app::sidebar(&window).await.extents().await.unwrap();
+        input.move_to(sb.x + 100, sb.y + 300).await.unwrap();
+        input.scroll(20).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let add = window
+            .wait_for(
+                &Query::role(Role::Button).name("Add Filter").showing(),
+                WAIT,
+            )
+            .await
+            .unwrap();
+        s.click(&add).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        s.type_text("Due soon").await.unwrap();
+        s.key(keysym::TAB).await.unwrap();
+        s.type_text("due before: next week & p1").await.unwrap();
+        shoot(&s, &name("filter-dialog")).await;
+        esc().await;
+        // The sidebar context menu of a project.
+        input.move_to(sb.x + 100, sb.y + 300).await.unwrap();
+        input.scroll(-20).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let list = app::sidebar(&window).await;
+        let work = list
+            .wait_for(
+                &Query::role(Role::ListItem).name_contains("Work").showing(),
+                WAIT,
+            )
+            .await
+            .unwrap();
+        let w = work.extents().await.unwrap();
+        input.right_click(w.x + 80, w.y + 22).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        shoot_here(&s, &name("sidebar-menu")).await;
+        esc().await;
+    }
+    app::open_view(&s, &window, "Work").await;
+    wait_row(&window, "Review Maya's pull request").await;
+    let view_menu = window
+        .wait_for(&Query::role(Role::Button).name("View Menu").showing(), WAIT)
+        .await
+        .unwrap();
+    s.click(&view_menu).await.unwrap();
+    crate::detail::menu_choose(&s, &window, 5).await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    shoot(&s, &name("delete-project")).await;
+    esc().await;
+}
+
+/// The date picker on a short window (4.9): the calendar starts collapsed.
+async fn short_window(scheme: ColorScheme) {
+    let server = app::server("demo").await;
+    let s = app::session(&server)
+        .color_scheme(scheme)
+        .monitor(1024, 600)
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Work").await;
+    wait_row(&window, "This week, 7 tasks, expanded").await;
+    crate::detail::open_task(&s, &window, "Prepare the quarterly planning deck").await;
+    s.click(&crate::detail::field(&window, "Date").await)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    shoot(&s, &format!("date-picker-short-{}", scheme_name(scheme))).await;
+}
+
+/// A few editing surfaces in Chinese.
+async fn editing_chinese(scheme: ColorScheme) {
+    let sc = scheme_name(scheme);
+    let name = |view: &str| format!("{view}-zh-wide-{sc}");
+    let server = app::server("demo").await;
+    let s = app::session(&server)
+        .color_scheme(scheme)
+        .locale("zh_CN.UTF-8")
+        .env("LANGUAGE", "zh_CN")
+        .env("TICK_LOCALEDIR", zh_catalog().display().to_string())
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Work").await;
+    wait_row(&window, "Book the offsite venue").await;
+    crate::detail::open_task(&s, &window, "Prepare the quarterly planning deck").await;
+    shoot(&s, &name("detail")).await;
+    s.click(&crate::detail::field(&window, "日期").await)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    shoot(&s, &name("date-picker")).await;
+    s.key(keysym::ESCAPE).await.unwrap();
+    s.key(keysym::ESCAPE).await.unwrap();
+    let view_menu = window
+        .wait_for(&Query::role(Role::Button).name("视图菜单").showing(), WAIT)
+        .await
+        .unwrap();
+    s.click(&view_menu).await.unwrap();
+    crate::detail::menu_choose(&s, &window, 5).await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    shoot(&s, &name("delete-project")).await;
+    s.key(keysym::ESCAPE).await.unwrap();
+    let add = window
+        .wait_for(&Query::role(Role::Button).name("添加项目").showing(), WAIT)
+        .await
+        .unwrap();
+    s.click(&add).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    shoot(&s, &name("project-dialog")).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn editing_wide_light() {
+    if full() {
+        editing(ColorScheme::Light, false).await;
+        short_window(ColorScheme::Light).await;
+        editing_chinese(ColorScheme::Light).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn editing_wide_dark() {
+    if full() {
+        editing(ColorScheme::Dark, false).await;
+        short_window(ColorScheme::Dark).await;
+        editing_chinese(ColorScheme::Dark).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn editing_narrow_light() {
+    if full() {
+        editing(ColorScheme::Light, true).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn editing_narrow_dark() {
+    if full() {
+        editing(ColorScheme::Dark, true).await;
+    }
+}
