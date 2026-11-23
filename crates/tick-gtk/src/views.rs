@@ -216,6 +216,11 @@ impl TickWindow {
             }
         };
         if completed {
+            // The history row goes away with the reopen: a pane showing it would go on
+            // showing an active task as completed and read-only.
+            if self.open_task_id().as_deref() == Some(id) {
+                self.close_task(false);
+            }
             self.enqueue(vec![Command::item_uncomplete(id)]);
             let toast = adw::Toast::builder()
                 .title(gettext("Task reopened"))
