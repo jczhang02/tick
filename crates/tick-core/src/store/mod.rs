@@ -27,6 +27,7 @@ use serde_json::Value;
 
 use crate::clock::{self, Now};
 
+pub use apply::{CompletedRange, completed_stamp};
 pub use place::{DeleteCounts, TaskPlace};
 pub use query::*;
 pub use queue::{FailedCommand, MAX_ATTEMPTS, QueuedCommand, UNDO_DELAY, wall_ms};
@@ -293,29 +294,38 @@ impl Store {
     /// Delete all cached data (logout). Settings are kept.
     pub fn clear_all(&mut self) -> Result<()> {
         let tx = self.write_tx()?;
-        for kind in Kind::OBJECT_KINDS {
-            tx.execute(&format!("DELETE FROM {}", kind.table()), [])?;
-        }
-        tx.execute_batch(
-            "DELETE FROM item_labels; DELETE FROM collaborator_states; DELETE FROM completed_info;
-             DELETE FROM completed_items; DELETE FROM filter_cache; DELETE FROM queue;
-             DELETE FROM failed_commands; DELETE FROM meta; DELETE FROM temp_ids;
-             DELETE FROM fired_reminders;",
-        )?;
+        clear_cached(&tx)?;
         tx.commit()?;
         Ok(())
     }
 }
 
+/// Every cached object and the sync state (queue, history, filter caches, reminder state).
+fn clear_cached(tx: &Transaction<'_>) -> Result<()> {
+    for kind in Kind::OBJECT_KINDS {
+        tx.execute(&format!("DELETE FROM {}", kind.table()), [])?;
+    }
+    tx.execute_batch(
+        "DELETE FROM item_labels; DELETE FROM collaborator_states; DELETE FROM completed_info;
+         DELETE FROM completed_items; DELETE FROM filter_cache; DELETE FROM queue;
+         DELETE FROM failed_commands; DELETE FROM meta; DELETE FROM temp_ids;
+         DELETE FROM fired_reminders;",
+    )?;
+    Ok(())
+}
+
 impl Store {
     /// Log out: delete every cached object, the queue, reminder state and the settings
-    /// except the device preferences (`color-scheme`, `run-at-login`).
+    /// except the device preferences (`color-scheme`, `run-at-login`), in one transaction
+    /// (a failure leaves the cache as it was, not half logged out).
     pub fn clear_account(&mut self) -> Result<()> {
-        self.clear_all()?;
-        self.conn.execute(
+        let tx = self.write_tx()?;
+        clear_cached(&tx)?;
+        tx.execute(
             "DELETE FROM settings WHERE key NOT IN ('color-scheme', 'run-at-login')",
             [],
         )?;
+        tx.commit()?;
         Ok(())
     }
 }
