@@ -48,7 +48,7 @@ jobs:
           if-no-files-found: ignore
       - name: Screenshots
         if: always()
-        run: just screenshots || true
+        run: just screenshots
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v7

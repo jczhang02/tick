@@ -129,7 +129,16 @@ async fn quits_on_ctrl_q() {
   and prints the paths and log tails (`app.log`, `mutter.log`, `dbus.log`). `TICK_E2E_KEEP=1`
   always keeps it. CI uploads the logs of failed sessions as the `e2e-logs` artifact.
 - Builder options: `.narrow()` (600x800), `.monitor(w, h)`, `.color_scheme(..)`, `.now(..)`,
-  `.locale(..)`, `.env(k, v)`, `.api(base_url, token)`, `.no_launch()`.
+  `.locale(..)`, `.env(k, v)`, `.api(base_url, token)`, `.no_launch()`,
+  `.fake_portal(PortalMode::Grant | Deny | NoBackground)`.
+- Fake Background portal (opt-in): the harness owns `org.freedesktop.portal.Desktop` on the
+  private bus and records `RequestBackground` calls (`Session::portal().calls()`); `Grant`
+  answers `Response` 0 with what was asked, `Deny` answers 1, `NoBackground` owns the name
+  without the interface (every call fails, like a portal without a Background backend). Opt-in,
+  because owning the name also turns away the Settings portal calls GTK and libadwaita make.
+- AT-SPI: libadwaita's switch rows report the "switch" role, which the `atspi` crate does not
+  know (`Role` shows it as unknown): find them by name and the `checkable` state.
+- Theme checks sample screenshot pixels (`png` dev-dependency) rather than a test hook.
 - Harness self-tests that Tick cannot exercise yet (typing into an entry, notifications) run
   against `crates/tick-gtk/examples/e2e_fixture.rs`, a minimal GTK app that is not part of Tick.
 
@@ -235,5 +244,11 @@ completed-pending state), `completing` (the 800 ms hold, kept with `TICK_TEST_HO
   (no hover tint) and from the scrolled window's edge (where GTK shows the scrollbar).
 - The session's fontconfig maps `monospace` to Adwaita Mono, as on a GNOME desktop
   (the session has no GNOME settings, so libadwaita falls back to fontconfig's `monospace`).
+
+Milestone 4 (both schemes, wide and narrow): `search-empty`, `search` (results), `search-none`,
+`completed` (the demo history: day groups and "Load More"), `preferences`, `shortcuts`; wide
+only: `completed-detail` (read-only pane) and `log-out` (the confirmation over preferences); in
+Chinese (`<view>-zh-wide-<scheme>`): `search-empty`, `search`, `completed`, `preferences`,
+`shortcuts`.
 
 Not yet captured: a non-blue accent (the session's accent cannot be set yet).

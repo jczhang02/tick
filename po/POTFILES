@@ -10,12 +10,17 @@ crates/tick-gtk/src/login.rs
 crates/tick-gtk/src/main.rs
 crates/tick-gtk/src/manage.rs
 crates/tick-gtk/src/markdown.rs
+crates/tick-gtk/src/notify.rs
 crates/tick-gtk/src/pickers.rs
+crates/tick-gtk/src/portal.rs
+crates/tick-gtk/src/prefs.rs
 crates/tick-gtk/src/quick_add.rs
 crates/tick-gtk/src/row_object.rs
 crates/tick-gtk/src/rows.rs
+crates/tick-gtk/src/shortcuts.rs
 crates/tick-gtk/src/sidebar.rs
 crates/tick-gtk/src/style.rs
 crates/tick-gtk/src/sync_status.rs
 crates/tick-gtk/src/task_list.rs
+crates/tick-gtk/src/views.rs
 crates/tick-gtk/src/window.rs
