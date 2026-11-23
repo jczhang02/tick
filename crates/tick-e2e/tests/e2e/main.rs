@@ -11,6 +11,7 @@ mod flows;
 mod harness;
 mod layout;
 mod login;
+mod manage;
 mod screenshots;
 mod shortcuts;
 mod startup;

@@ -3,6 +3,7 @@ mod edit;
 mod format;
 mod i18n;
 mod login;
+mod manage;
 mod markdown;
 mod pickers;
 mod quick_add;

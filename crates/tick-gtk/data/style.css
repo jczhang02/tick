@@ -583,3 +583,31 @@ image.tick-ring-16 { -gtk-icon-size: 0; }
 .tick-ring-16.current.p1 { background-color: var(--tick-red); }
 .tick-ring-16.current.p2 { background-color: var(--tick-orange); }
 .tick-ring-16.current.p3 { background-color: var(--tick-blue); }
+
+/* ---------- management (4.1, 4.5, 4.23, 4.24) ---------- */
+/* row actions (sidebar "Add ...", section menus) show on hover and focus, always in AT */
+listview.tick-task-list > row .tick-reveal,
+.navigation-sidebar > row .tick-reveal { opacity: 0; }
+listview.tick-task-list > row:hover .tick-reveal,
+listview.tick-task-list > row:focus-within .tick-reveal,
+.navigation-sidebar > row:hover .tick-reveal,
+.navigation-sidebar > row:focus-within .tick-reveal,
+.tick-narrow listview.tick-task-list > row .tick-reveal,
+.tick-narrow .navigation-sidebar > row .tick-reveal { opacity: 1; }
+/* inline editors: the text keeps the heading's place and font */
+entry.tick-title-entry,
+entry.tick-section-entry {
+  background: none;
+  box-shadow: none;
+  border-radius: 9px;
+  padding-left: 6px;
+  padding-right: 6px;
+  margin-left: -6px;
+  margin-right: -6px;
+}
+entry.tick-title-entry { min-height: 44px; }
+/* edit dialogs use the dialog background (2.4.1) */
+dialog.tick-entity-dialog sheet {
+  background-color: var(--dialog-bg-color);
+  color: var(--dialog-fg-color);
+}

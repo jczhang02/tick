@@ -144,6 +144,12 @@ mod imp {
                 return;
             }
             self.narrow_cell.set(narrow);
+            // Hover-only row actions are always visible on touch-sized layouts (4.1, P9).
+            if narrow {
+                self.obj().add_css_class("tick-narrow");
+            } else {
+                self.obj().remove_css_class("tick-narrow");
+            }
             // The view header's top margin depends on it.
             if let Some(header) = self
                 .rows
@@ -204,6 +210,7 @@ impl TickWindow {
         win.setup_breakpoints();
         win.setup_lists();
         win.setup_detail();
+        win.setup_manage();
         win.setup_actions();
         win.setup_keys();
         win.setup_focus_guard();
@@ -333,6 +340,10 @@ impl TickWindow {
             let Some(w) = weak.upgrade() else {
                 return glib::Propagation::Proceed;
             };
+            // Typing in an inline editor (section name, project title) is not navigation.
+            if gtk::prelude::GtkWindowExt::focus(&w).is_some_and(|f| f.is::<gtk::Text>()) {
+                return glib::Propagation::Proceed;
+            }
             if mods.intersects(
                 ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SHIFT_MASK,
             ) {
@@ -371,6 +382,9 @@ impl TickWindow {
                 match event {
                     SidebarEvent::Open { view, push } => w.open_view(view, push),
                     SidebarEvent::SectionToggled => w.save_sidebar_collapsed(),
+                    SidebarEvent::Add(section) => w.add_from_sidebar(section),
+                    SidebarEvent::Menu { kind, rect } => w.sidebar_menu(&kind, rect),
+                    SidebarEvent::MoveProject { id, how } => w.move_project_key(&id, how),
                 }
             }),
         );
@@ -788,6 +802,11 @@ impl TickWindow {
         let imp = self.imp();
         let same = imp.view.borrow().as_ref() == Some(&view);
         if !same {
+            {
+                let mut ui = imp.ui.borrow_mut();
+                ui.section_edit = None;
+                ui.renaming_title = false;
+            }
             imp.view.replace(Some(view.clone()));
             self.save_setting("last-view", &view.to_setting());
             imp.ui.borrow_mut().filter_rejected.clear();
@@ -807,6 +826,7 @@ impl TickWindow {
         if let Some(sb) = imp.sidebar.get() {
             sb.select(&view);
         }
+        self.update_view_menu();
         if push && imp.split_view.is_collapsed() {
             imp.split_view.set_show_content(true);
         }
@@ -962,6 +982,7 @@ impl TickWindow {
                 if let Some(sb) = imp.sidebar.get() {
                     sb.update(d);
                 }
+                self.update_view_menu();
             }
             Err(e) => eprintln!("tick: reading the sidebar: {e}"),
         }
@@ -1113,6 +1134,11 @@ impl TickWindow {
             RowAction::ToggleSection(id) => self.toggle_section(&id),
             RowAction::Ghost(prefill) => self.open_quick_add(Some(prefill)),
             RowAction::Open(id) => self.open_task(&id, false),
+            RowAction::SectionCommit { id, name } => self.commit_section(id, Some(name)),
+            RowAction::SectionCancel => self.commit_section(None, None),
+            RowAction::RenameTitle => self.rename_title(),
+            RowAction::TitleCommit(name) => self.commit_title(Some(name)),
+            RowAction::TitleCancel => self.commit_title(None),
             RowAction::Menu { key, x, y } => {
                 if let Some(store) = self.imp().rows.get()
                     && let Some(pos) = (0..store.n_items()).find(|i| {
@@ -1190,6 +1216,7 @@ impl TickWindow {
         if id_map.is_empty() {
             return;
         }
+        self.remap_view(id_map);
         let imp = self.imp();
         {
             let mut ui = imp.ui.borrow_mut();
@@ -1671,6 +1698,24 @@ impl TickWindow {
             Key::i if pending_g => goto(ViewId::Inbox),
             Key::t if pending_g => goto(ViewId::Today),
             Key::u if pending_g => goto(ViewId::Upcoming),
+            Key::F2 if in_list => {
+                // Rename the focused section header, else the open project (4.2, 4.24).
+                let section = self.focused_row().and_then(|r| match &*r.row() {
+                    Row::SectionHeader(s) => Some(s.id.clone()),
+                    _ => None,
+                });
+                match section {
+                    Some(id) => {
+                        let _ = WidgetExt::activate_action(
+                            self,
+                            "win.section-rename",
+                            Some(&id.to_variant()),
+                        );
+                    }
+                    None => self.rename_title(),
+                }
+                true
+            }
             Key::e if in_list => {
                 self.complete_selected();
                 true
@@ -1804,7 +1849,7 @@ impl TickWindow {
         });
     }
 
-    fn focus_first_task_now(&self) {
+    pub(crate) fn focus_first_task_now(&self) {
         let _ = self.focus_task_near(0, true);
     }
 

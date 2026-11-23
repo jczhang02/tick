@@ -34,6 +34,95 @@ pub enum RowAction {
         x: f64,
         y: f64,
     },
+    /// The inline section editor: save (`id` `None`: a new section) or cancel (4.24).
+    SectionCommit {
+        id: Option<String>,
+        name: String,
+    },
+    SectionCancel,
+    /// The in-place project title editor (4.2): start, save, cancel.
+    RenameTitle,
+    TitleCommit(String),
+    TitleCancel,
+}
+
+/// A frameless inline editor: Enter or focus-out commits, Escape cancels. `select` selects
+/// the text on focus (a rename).
+fn inline_entry(
+    text: &str,
+    placeholder: &str,
+    classes: &[&str],
+    select: bool,
+    commit: impl Fn(String) + 'static,
+    cancel: impl Fn() + 'static,
+) -> gtk::Entry {
+    let entry = gtk::Entry::builder()
+        .text(text)
+        .placeholder_text(placeholder)
+        .hexpand(true)
+        .css_classes(classes.iter().map(|c| c.to_string()).collect::<Vec<_>>())
+        .build();
+    entry.update_property(&[gtk::accessible::Property::Label(placeholder)]);
+    let done = Rc::new(Cell::new(false));
+    let commit = Rc::new(commit);
+    let cancel = Rc::new(cancel);
+    {
+        let done = done.clone();
+        let commit = commit.clone();
+        entry.connect_activate(move |e| {
+            if !done.replace(true) {
+                commit(e.text().trim().to_owned());
+            }
+        });
+    }
+    let keys = gtk::EventControllerKey::new();
+    {
+        let done = done.clone();
+        let cancel = cancel.clone();
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                if !done.replace(true) {
+                    cancel();
+                }
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+    }
+    entry.add_controller(keys);
+    let focus = gtk::EventControllerFocus::new();
+    {
+        let done = done.clone();
+        focus.connect_leave(move |c| {
+            // Focus-out after the row was already finished (or while it is rebuilt) is not a
+            // user decision.
+            let Some(e) = c.widget().and_downcast::<gtk::Entry>() else {
+                return;
+            };
+            if !e.is_mapped() || done.replace(true) {
+                return;
+            }
+            let text = e.text().trim().to_owned();
+            if text.is_empty() {
+                cancel();
+            } else {
+                commit(text);
+            }
+        });
+    }
+    entry.add_controller(focus);
+    entry.connect_map(move |e| {
+        let e = e.clone();
+        glib::idle_add_local_once(move || {
+            e.grab_focus();
+            if select {
+                e.select_region(0, -1);
+            } else {
+                e.set_position(-1);
+            }
+        });
+    });
+    entry
 }
 
 /// Whether `w` (picked under the pointer) is inside a button of the row (ring, chevron).
@@ -171,6 +260,7 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
     let (selectable, interactive) = match &row {
         Row::Task(_) => (true, true),
         Row::SectionHeader(_) | Row::Ghost { .. } => (false, true),
+        Row::SectionEditor { .. } => (false, false),
         _ => (false, false),
     };
     li.set_selectable(selectable);
@@ -197,6 +287,7 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
         Row::Empty(e) => empty_row(e),
         Row::Loading { text, .. } => loading_row(text),
         Row::SourceLine { text, spinner, .. } => source_line(text, *spinner),
+        Row::SectionEditor { id, name, .. } => section_editor(id.clone(), name, ctx),
     };
     // The key lets keyboard navigation map the focused row back to its model position.
     widget.set_widget_name(&obj.key());
@@ -232,6 +323,7 @@ fn accessible_text(row: &Row) -> (String, String) {
         Row::DayHeader(d) => (d.label.clone(), d.dim.clone().unwrap_or_default()),
         Row::Empty(e) => (e.title.clone(), e.description.clone()),
         Row::Loading { text, .. } | Row::SourceLine { text, .. } => (text.clone(), String::new()),
+        Row::SectionEditor { .. } => (gettext("Section name"), String::new()),
     }
 }
 
@@ -277,10 +369,35 @@ fn view_header(h: &ViewHeader, ctx: &RenderCtx) -> gtk::Widget {
         img.set_pixel_size(20);
         title_box.append(&img);
     }
-    let title = label(&h.title, &["title-1"]);
-    title.set_wrap(true);
-    title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    title_box.append(&title);
+    if h.editing {
+        let d1 = ctx.dispatch.clone();
+        let d2 = ctx.dispatch.clone();
+        let entry = inline_entry(
+            &h.title,
+            &gettext("Project name"),
+            &["title-1", "tick-title-entry"],
+            true,
+            move |name| d1(RowAction::TitleCommit(name)),
+            move || d2(RowAction::TitleCancel),
+        );
+        title_box.append(&entry);
+    } else {
+        let title = label(&h.title, &["title-1"]);
+        title.set_wrap(true);
+        title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        if h.renamable {
+            // Double-click renames the project in place (4.2).
+            let click = gtk::GestureClick::new();
+            let dispatch = ctx.dispatch.clone();
+            click.connect_pressed(move |_, n, _, _| {
+                if n == 2 {
+                    dispatch(RowAction::RenameTitle);
+                }
+            });
+            title.add_controller(click);
+        }
+        title_box.append(&title);
+    }
     root.append(&title_box);
 
     let sub = gtk::Box::builder()
@@ -398,6 +515,74 @@ fn section_header(s: &SectionHeader, ctx: &RenderCtx) -> gtk::Widget {
     count.set_margin_start(9);
     name_row.append(&count);
     column.append(&name_row);
+    let rule = hairline(0);
+    rule.set_margin_top(2);
+    column.append(&rule);
+    line.append(&column);
+    // Rename, Add Task Here, Delete Section (4.5): shown on hover and focus, always in AT.
+    let menu = gio::Menu::new();
+    let target = Some(s.id.to_variant());
+    let item = |label: &str, action: &str| {
+        let i = gio::MenuItem::new(Some(label), None);
+        i.set_action_and_target_value(Some(action), target.as_ref());
+        i
+    };
+    menu.append_item(&item(&gettext("Rename"), "win.section-rename"));
+    menu.append_item(&item(&gettext("Add Task Here"), "win.section-add-task"));
+    let danger = gio::Menu::new();
+    danger.append_item(&item(&gettext("Delete Section..."), "win.section-delete"));
+    menu.append_section(None, &danger);
+    let button = gtk::MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .menu_model(&menu)
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "tick-icon-44", "tick-reveal"])
+        .tooltip_text(gettext("Section Menu"))
+        .build();
+    button.update_property(&[gtk::accessible::Property::Label(&fill(
+        &gettext("{name} section menu"),
+        &[("name", &s.name)],
+    ))]);
+    line.append(&button);
+    root.append(&line);
+    root.upcast()
+}
+
+/// The inline section editor (4.24): the section header layout with an entry for the name.
+fn section_editor(id: Option<String>, name: &str, ctx: &RenderCtx) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["tick-section-header"])
+        .build();
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let slot = gtk::Box::builder()
+        .width_request(44)
+        .accessible_role(gtk::AccessibleRole::Presentation)
+        .build();
+    line.append(&slot);
+    let column = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .valign(gtk::Align::Center)
+        .margin_top(3)
+        .hexpand(true)
+        .build();
+    let d1 = ctx.dispatch.clone();
+    let d2 = ctx.dispatch.clone();
+    let rename = id.is_some();
+    let entry = inline_entry(
+        name,
+        &gettext("Section name"),
+        &["heading", "tick-entry", "tick-section-entry"],
+        rename,
+        move |name| {
+            d1(RowAction::SectionCommit {
+                id: id.clone(),
+                name,
+            })
+        },
+        move || d2(RowAction::SectionCancel),
+    );
+    column.append(&entry);
     let rule = hairline(0);
     rule.set_margin_top(2);
     column.append(&rule);
@@ -744,6 +929,18 @@ fn empty_row(e: &EmptyState) -> gtk::Widget {
     description.set_justify(gtk::Justification::Center);
     description.set_xalign(0.5);
     root.append(&description);
+    if let Some(id) = &e.edit_filter {
+        // The rejected server filter (4.22): fix the query in the Edit Filter dialog.
+        let button = gtk::Button::builder()
+            .label(gettext("Edit Filter"))
+            .halign(gtk::Align::Center)
+            .margin_top(12)
+            .css_classes(["pill"])
+            .action_name("win.filter-edit")
+            .action_target(&id.to_variant())
+            .build();
+        root.append(&button);
+    }
     root.upcast()
 }
 
