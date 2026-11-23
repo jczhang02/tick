@@ -268,7 +268,9 @@ impl TickWindow {
     /// The sidebar context menu (4.1) at `rect` in the sidebar list's coordinates.
     pub(crate) fn sidebar_menu(&self, kind: &ItemKind, rect: gtk::gdk::Rectangle) {
         let menu = match kind {
-            ItemKind::Header { section, collapsed } => {
+            ItemKind::Header {
+                section, collapsed, ..
+            } => {
                 let menu = gio::Menu::new();
                 let (label, action) = match section {
                     Section::Projects => (gettext("Add Project"), "win.add-project"),

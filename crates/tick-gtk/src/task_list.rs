@@ -572,6 +572,11 @@ fn section_editor(id: Option<String>, name: &str, ctx: &RenderCtx) -> gtk::Widge
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["tick-section-header"])
         .build();
+    if id.is_none() {
+        // A new section is the project's last row: room under it, so scrolling it into view
+        // does not leave it on the window's bottom edge (4.24).
+        root.set_margin_bottom(48);
+    }
     let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     // The chevron column, as in a header (a new section has nothing to collapse yet).
     let chevron = gtk::Image::builder()
@@ -583,12 +588,13 @@ fn section_editor(id: Option<String>, name: &str, ctx: &RenderCtx) -> gtk::Widge
         .build();
     line.append(&chevron);
     // The name column ends where a header's menu button starts, so the hairline does too.
-    // The hairline hangs 2 px lower than a header's, under the focus ring; 2 px more top
-    // margin keeps the name on the header's line.
+    // The hairline hangs 2 px lower than a header's, 2 px under the focus ring (which pads
+    // the text by 6 px, style.css); the top margin balances the box so the name stays on the
+    // header's line.
     let column = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .valign(gtk::Align::Center)
-        .margin_top(5)
+        .margin_top(9)
         .margin_end(44)
         .hexpand(true)
         .build();
@@ -610,7 +616,7 @@ fn section_editor(id: Option<String>, name: &str, ctx: &RenderCtx) -> gtk::Widge
     );
     column.append(&entry);
     let rule = hairline(0);
-    rule.set_margin_top(4);
+    rule.set_margin_top(8);
     column.append(&rule);
     line.append(&column);
     root.append(&line);
@@ -764,6 +770,84 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
         desc.set_margin_top(2);
         content.append(&desc);
     }
+    if let Some(meta) = meta_line(t) {
+        content.append(&meta);
+    }
+    root.append(&content);
+    let trailing = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .valign(gtk::Align::Center)
+        .margin_start(12)
+        .build();
+    if let Some(msg) = &t.failed {
+        let warn = icon("dialog-warning-symbolic", &["tick-failed"]);
+        warn.set_tooltip_text(Some(msg));
+        trailing.append(&warn);
+    }
+    if let Some(name) = &t.assignee {
+        let a = adw::Avatar::new(20, Some(name), true);
+        a.upcast_ref::<gtk::Widget>()
+            .update_property(&[gtk::accessible::Property::Label(&fill(
+                &gettext("Assigned to {name}"),
+                &[("name", name)],
+            ))]);
+        trailing.append(&a);
+    }
+    if t.has_children {
+        let chevron = gtk::Button::builder()
+            .icon_name("pan-down-symbolic")
+            .css_classes(["flat", "tick-icon-44", "tick-chevron", "dimmed"])
+            .build();
+        let name = if t.collapsed {
+            chevron.add_css_class("collapsed");
+            gettext("Expand sub-tasks")
+        } else {
+            gettext("Collapse sub-tasks")
+        };
+        chevron.update_property(&[gtk::accessible::Property::Label(&name)]);
+        let dispatch = ctx.dispatch.clone();
+        let id = t.id.clone();
+        chevron.connect_clicked(move |_| dispatch(RowAction::ToggleSubtasks(id.clone())));
+        trailing.append(&chevron);
+    } else if t.chevron_slot {
+        // Keep the chevron column so avatars line up with the parents' (4.4).
+        let slot = gtk::Box::builder()
+            .width_request(44)
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .build();
+        trailing.append(&slot);
+    }
+    if trailing.first_child().is_some() {
+        root.append(&trailing);
+    }
+
+    if t.fading {
+        // libadwaita skips an animation whose widget is not mapped (it jumps to the end):
+        // start the fade once the row is on screen. Test mode uses no duration (5.3).
+        let duration = if crate::test_mode::enabled() { 0 } else { 250 };
+        let target = adw::PropertyAnimationTarget::new(&root, "opacity");
+        let anim = adw::TimedAnimation::new(&root, 1.0, 0.0, duration, target);
+        anim.set_easing(adw::Easing::EaseOutCubic);
+        anim.set_follow_enable_animations_setting(false);
+        if root.is_mapped() {
+            anim.play();
+        } else {
+            let pending = std::cell::RefCell::new(Some(anim));
+            root.connect_map(move |_| {
+                if let Some(a) = pending.borrow_mut().take() {
+                    a.play();
+                }
+            });
+        }
+    }
+    root.upcast()
+}
+
+/// A task's meta line (4.4): due, deadline, sub-tasks, comments, labels, project, each with
+/// its 12 px icon; `.dimmed` on individual items only (7.4 pitfall 1). `None` when empty.
+/// Shared by the task list and the detail pane's sub-task rows (4.8).
+pub fn meta_line(t: &TaskRow) -> Option<adw::WrapBox> {
     let meta = adw::WrapBox::builder()
         .child_spacing(12)
         .line_spacing(2)
@@ -835,79 +919,7 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
         meta.append(&b);
         has_meta = true;
     }
-    if has_meta {
-        content.append(&meta);
-    }
-    root.append(&content);
-
-    let trailing = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(6)
-        .valign(gtk::Align::Center)
-        .margin_start(12)
-        .build();
-    if let Some(msg) = &t.failed {
-        let warn = icon("dialog-warning-symbolic", &["tick-failed"]);
-        warn.set_tooltip_text(Some(msg));
-        trailing.append(&warn);
-    }
-    if let Some(name) = &t.assignee {
-        let a = adw::Avatar::new(20, Some(name), true);
-        a.upcast_ref::<gtk::Widget>()
-            .update_property(&[gtk::accessible::Property::Label(&fill(
-                &gettext("Assigned to {name}"),
-                &[("name", name)],
-            ))]);
-        trailing.append(&a);
-    }
-    if t.has_children {
-        let chevron = gtk::Button::builder()
-            .icon_name("pan-down-symbolic")
-            .css_classes(["flat", "tick-icon-44", "tick-chevron", "dimmed"])
-            .build();
-        let name = if t.collapsed {
-            chevron.add_css_class("collapsed");
-            gettext("Expand sub-tasks")
-        } else {
-            gettext("Collapse sub-tasks")
-        };
-        chevron.update_property(&[gtk::accessible::Property::Label(&name)]);
-        let dispatch = ctx.dispatch.clone();
-        let id = t.id.clone();
-        chevron.connect_clicked(move |_| dispatch(RowAction::ToggleSubtasks(id.clone())));
-        trailing.append(&chevron);
-    } else if t.chevron_slot {
-        // Keep the chevron column so avatars line up with the parents' (4.4).
-        let slot = gtk::Box::builder()
-            .width_request(44)
-            .accessible_role(gtk::AccessibleRole::Presentation)
-            .build();
-        trailing.append(&slot);
-    }
-    if trailing.first_child().is_some() {
-        root.append(&trailing);
-    }
-
-    if t.fading {
-        // libadwaita skips an animation whose widget is not mapped (it jumps to the end):
-        // start the fade once the row is on screen. Test mode uses no duration (5.3).
-        let duration = if crate::test_mode::enabled() { 0 } else { 250 };
-        let target = adw::PropertyAnimationTarget::new(&root, "opacity");
-        let anim = adw::TimedAnimation::new(&root, 1.0, 0.0, duration, target);
-        anim.set_easing(adw::Easing::EaseOutCubic);
-        anim.set_follow_enable_animations_setting(false);
-        if root.is_mapped() {
-            anim.play();
-        } else {
-            let pending = std::cell::RefCell::new(Some(anim));
-            root.connect_map(move |_| {
-                if let Some(a) = pending.borrow_mut().take() {
-                    a.play();
-                }
-            });
-        }
-    }
-    root.upcast()
+    has_meta.then_some(meta)
 }
 
 /// The drag icon (4.4): the row as it is drawn in the list (ring, title, meta line and

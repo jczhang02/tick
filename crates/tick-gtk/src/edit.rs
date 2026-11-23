@@ -182,6 +182,11 @@ impl TickWindow {
         let id = imp.open_task.take();
         self.detail().set_data(None);
         imp.detail_split.set_show_sidebar(false);
+        if !refocus {
+            // Closed by pointer (or the task is gone): no row is open, none stays tinted
+            // (2.4.6). Escape keeps the row selected as the keyboard cursor below.
+            self.select_open_task();
+        }
         if refocus && let Some(id) = id {
             let pos = self.row_position(&id).or(self.selected_position());
             self.keep_focus_in_list(pos.unwrap_or(0), true);
@@ -787,7 +792,7 @@ impl TickWindow {
     }
 
     /// The task row context menu (4.4) at `rect` in the list's coordinates.
-    pub(crate) fn task_menu(&self, rect: gtk::gdk::Rectangle) {
+    pub(crate) fn task_menu(&self, rect: gtk::gdk::Rectangle) -> gtk::PopoverMenu {
         let menu = gio::Menu::new();
         let main = gio::Menu::new();
         main.append(Some(&gettext("Open")), Some("win.task-open"));
@@ -806,6 +811,7 @@ impl TickWindow {
         pop.set_position(gtk::PositionType::Bottom);
         let list = self.imp().task_list.get();
         pickers::present(pop.upcast_ref(), &list, Some(rect));
+        pop
     }
 
     /// The context menu of the selected row, under it (Menu key, Shift+F10).
@@ -823,7 +829,7 @@ impl TickWindow {
             return;
         }
         if let Some(rect) = self.row_rect(&row.key()) {
-            self.task_menu(rect);
+            let _ = self.task_menu(rect);
         }
     }
 }

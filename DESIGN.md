@@ -484,8 +484,15 @@ pixels; they must equal the tabled `--accent-color`, not a 50 % mix.
 |---|---|---|
 | hover | `color-mix(in srgb, currentColor 4%, transparent)` (task list); 7 % (sidebar) | libadwaita values |
 | pressed | 8 % (task list); 16 % (sidebar) | libadwaita values |
-| selected (the task shown in the detail pane; the current view in the sidebar) | 10 % | replaces libadwaita's `listview > row:selected` accent at 25 %, which would vary with nine accents and compete with priority rings |
+| selected (the task shown in the detail pane, or the task list's keyboard cursor; the current view in the sidebar) | 10 % | replaces libadwaita's `listview > row:selected` accent at 25 %, which would vary with nine accents and compete with priority rings |
 | selected + hover | 13 % | |
+
+In the task list, `GtkListView` selects the row keyboard focus moves to, and row shortcuts (1 to 4,
+T, L, V, Space) act on that row, so the tint also marks the keyboard cursor. A pointer never
+leaves it behind: a context menu opened by right-click or long-press selects its row while it is
+open, then the selection returns to the task in the detail pane (none when the pane is closed);
+closing the pane by pointer clears it too. Escape returns focus to the row, which stays selected
+as the cursor.
 
 #### 2.4.7 Project, label and filter colors
 
@@ -842,6 +849,8 @@ in `.caption-heading .dimmed`, left-aligned with row icons; trailing: optional "
 the settings table.
 
 The "Add ..." button is shown on hover and on focus within the header, and always exposed to AT.
+A section with no entries yet (a new account: no projects, labels or filters) shows its button
+at rest: it is the only visible way to create the first one.
 Touch has two paths of its own: in B2 and B3 (`TickWindow:narrow`, 3.3) the button is always
 visible, and on every width a long-press, right-click or Menu key on the header opens its context
 menu ("Add Project" / "Add Label" / "Add Filter", then "Collapse" or "Expand"). Favorites has no
@@ -900,7 +909,9 @@ title's bottom edge, the large title stays where it is (it scrolls away) and the
 title fades to 1 over 150 ms; scrolling back fades it out. In B2/B3 the same applies.
 
 **Project title editing.** Double-click or F2 on a project title makes it an inline entry
-(same font); Enter saves, Escape cancels. Rename is also in the view menu.
+(same font); Enter saves, Escape cancels. The focus ring hugs the title line and starts 6 px
+after the dot (the 9 px gap minus 3); the text moves 3 px right to keep 4 px of air inside the
+ring. Rename is also in the view menu.
 
 ### 4.3 Priority ring (checkbox)
 
@@ -977,12 +988,12 @@ avatar column lines up.
 | hover | 4 % tint; ring shows the faint check |
 | focus-visible | 2 px focus ring inside the row (offset -2), radius 9 |
 | pressed | 8 % tint |
-| selected (open in the detail pane) | 10 % tint; selected + hover 13 % |
+| selected (open in the detail pane, or the keyboard cursor: 2.4.6) | 10 % tint; selected + hover 13 % |
 | completing | ring fills and the check appears (150 ms), title gets `text-decoration: line-through` and `.dimmed`; after 800 ms the row fades to 0 (250 ms) and is removed; the toast appears (4.12) |
 | completed-pending (recurring) | ring filled, title not struck, meta line shows the spinner and "Completing" until the sync returns with the next date; then the ring empties and the due date updates |
 | failed change | trailing `dialog-warning-symbolic` 16 px in `--tick-red` with the server message as tooltip; the row shows the server state (the change was rolled back). The tooltip is redundant (2.6): the same message is appended to the row's accessible description ("Not saved: <server message>") and listed in the sync popover (4.14), which the warning in the header bar opens |
 | dragging (source) | the row stays in place at 40 % opacity |
-| drag icon | the row rendered on the floating surface (2.6) at its own width, radius 15, 95 % opacity |
+| drag icon | the row rendered on the floating surface (2.6) at its own width, radius 15, opaque (a translucent icon lets the row text under it show through and overlap its own) |
 | drop position | 2 px `--accent-color` line with a 6 px dot at its start, inset by the target depth's indent, between rows; dropping on the right half of a row's content nests it as a sub-task (row gets the inset accent outline instead) |
 | disabled | not used (read-only Completed rows use the ring's disabled state and full-contrast titles) |
 
@@ -1089,7 +1100,8 @@ with an `AdwClamp` (max 420), padding 18 px sides, 6 px top.
   Assignee    [avatar 20]               Ana                (shared projects only; "Unassigned")
 [space 24]
 [Sub-tasks .heading + "1/3" .caption .dimmed]
-  task rows (4.4, compact: no description line), "Add sub-task" ghost row
+  task rows (4.4, compact: no description line and no project item; the same meta line, so due
+  states keep their colors), "Add sub-task" ghost row
 [space 24]
 [Comments .heading + count]
   comment: [avatar 24][name .heading][gap 9][time .caption .dimmed]
@@ -1101,8 +1113,10 @@ with an `AdwClamp` (max 420), padding 18 px sides, 6 px top.
 - **Field row:** 44 px, radius 9, `[icon 16][gap 12][label .dimmed, fixed 96 px column][value .body]`.
   The whole row is a button: hover 4 %, pressed 8 %, focus ring inside. Activating opens the
   matching popover anchored to the value (date picker 4.9, label picker 4.10, priority picker
-  4.10, assignee picker = label picker layout with avatars). A clear button (`edit-clear-symbolic`,
-  44 x 44) appears at the row end on hover and focus when the field has a value. Touch does not
+  4.10, assignee picker = label picker layout with avatars). A clear button (`tick-clear-symbolic`,
+  an outline cross in a circle, 44 x 44) appears at the row end on hover and focus when the
+  field has a value: Date, Deadline, Labels and Assignee. Priority has none: it always has a
+  value, and "clear" (back to priority 4) would be unclear; its picker sets priority 4. Touch does not
   need it: every popover the row opens has its own clear path ("No Date", "No Deadline",
   unchecking labels, "Unassigned"), so the clear button is a shortcut, not the only way.
 - **Title:** always editable (Things-style). Enter commits (no newlines), Escape reverts, focus-out
@@ -1118,6 +1132,10 @@ with an `AdwClamp` (max 420), padding 18 px sides, 6 px top.
   Activating opens the file URL with `GtkUriLauncher`. Accessible name "Open attachment
   report.pdf".
 - **Completed history tasks** open read-only: fields have no hover, the title is not editable.
+- **Overlay edge in dark mode.** As an overlay (B1 to B3) the pane's shadow all but vanishes on
+  the dimmed list in dark mode, so the pane draws the floating surface's faint ring
+  (`--tick-float-border`, 1 px) along its leading edge there (P6). Docked, it draws the split
+  view's separator instead.
 
 Keyboard: Tab cycles title, description, field rows, sub-task rows, comments, composer. Escape
 closes the pane (when not editing) and returns focus to the task row. Ctrl+Enter in the composer
@@ -1134,8 +1152,8 @@ padding 12 (content 316 wide, which fits the 7 x 44 = 308 px calendar).
    [weather-clear-symbolic]     Today         Sun       (dim, right)
    [daytime-sunrise-symbolic]   Tomorrow      Mon
    [tick-weekend-symbolic]      This Weekend  Sat
-   [go-next-symbolic]           Next Week     Mon 30 Nov
-   [edit-clear-symbolic]        No Date                  (only when a date is set)
+   [tick-next-week-symbolic]    Next Week     Mon 30 Nov
+   [tick-clear-symbolic]        No Date                  (only when a date is set)
 [separator 6]
 [GtkCalendar, 7 x 44 day cells]                    (or, on short windows, a 44 px "Pick a Date" row)
 ```
@@ -1158,12 +1176,17 @@ padding 12 (content 316 wide, which fits the 7 x 44 = 308 px calendar).
   buttons (44 x 44). The first day of the week follows the locale: `GtkCalendar` has no
   first-weekday property, so Todoist's `start_day` setting is not applied (a custom grid would
   be needed; not in v1).
-- **Height.** With the entry, five quick options and the full calendar the popover is about
-  630 px tall (12 + 44 + 5 x 44 + 13 + 44 header + 20 weekday row + 6 x 44 + 12), more than a
-  1024 x 600 window can show. When the popover opens and the window is shorter than 700 px,
-  the calendar starts collapsed behind a "Pick a Date" row (44 px, `x-office-calendar-symbolic`,
-  chevron at the end); activating it reveals the calendar in place (`GtkRevealer`, crossfade)
-  and moves focus into it. Collapsed height: about 345 px. The content also sits in a
+- **Height.** With the entry, five quick options and the full calendar the popover is about 630
+  px tall (12 + 44 + 5 x 44 + 13 + 44 header + 20 weekday row + 6 x 44 + 12), more than a 1024 x
+  600 window can show. When the popover opens and the window is shorter than 700 px, the calendar
+  starts collapsed behind a "Pick a Date" row (44 px, `x-office-calendar-symbolic`, chevron at
+  the end). Activating it changes the popover's form, not its size (P10): the quick options and
+  the separator make way, and the calendar appears in their place (`GtkRevealer`, crossfade) with
+  focus on the selected day. Entry, month header, weekday row and grid measure about 426 px on a
+  1024 x 600 window (12 + 44 + 6 + 44 + weekday row + 6 x 44 + 12), so the whole calendar, the
+  focused day included, fits. If little room at the anchor still caps the popover, its content
+  scrolls the grid into view once revealed. Collapsed height: about 345 px. Escape closes the
+  popover; reopening it shows the quick options again. The content also sits in a
   `GtkScrolledWindow` with `propagate-natural-height`, so if the compositor still has to shrink
   the popover, it scrolls instead of clipping.
 - **Deadline** uses the same popover without the entry. Deadlines are a plain
@@ -1187,6 +1210,11 @@ state shown with `object-select-symbolic` at the start. Typing filters; when no 
 exactly, the first row is "Create label "name"" (`list-add-symbolic`). Space or click toggles,
 Enter toggles and keeps the popover open, Escape closes and applies (changes apply live; Undo is
 not needed).
+
+**Move to... picker** (4.4, 4.8; width 300): the label picker layout with a "Search projects"
+entry. Projects show their color dot (the Inbox its icon) and indent 18 px per level; each
+project's sections follow it one level further in, with `tick-section-symbolic` in `.dimmed` in
+the icon column, so they do not read as sub-projects.
 
 **Priority picker** (floating surface, a `popover.menu`-style list, width 220): four 44 px rows
 `[ring 16 in the priority color, filled for the current one][gap 12]["Priority 1"]...["Priority
@@ -1566,7 +1594,12 @@ Inline, no dialog (Todoist web and Things both edit section names in place).
   the project: the section header layout (4.5) with the name replaced by a frameless entry
   (`.tick-entry`, `.heading` font, placeholder "Section name", hairline below), focused. Enter
   or focus-out with text creates the section (`section_add`, optimistic) and the row becomes a
-  normal header. Escape, or focus-out while empty, removes the row without a change.
+  normal header. Escape, or focus-out while empty, removes the row without a change. The new
+  row keeps 48 px of room below it and is scrolled into view, so it never sits on the window's
+  bottom edge.
+- **Editor box.** The name keeps the header's place and font. The focus ring draws a box around
+  it with 6 px x 9 px padding and the row radius (9 px); an 8 px transparent border makes the
+  hit area 46 px tall (2.7, technique 2). The hairline stays visible 2 px under the ring.
 - **Rename** (section menu, or F2 on a focused header) swaps the header's name for the same
   entry with the current name selected. Enter or focus-out saves (`section_update`); Escape
   reverts.
@@ -2008,7 +2041,6 @@ listview.tick-task-list > row.tick-drag-source { opacity: 0.4; }
   border: 1px solid var(--tick-float-border);
   box-shadow: var(--tick-float-shadow);
   border-radius: 15px;
-  opacity: 0.95;
 }
 
 /* ---------- priority ring (4.3) ---------- */
@@ -2229,6 +2261,9 @@ plain date, so the due and overdue icons are Tick's own.
 | Attachment | `tick-attachment-symbolic` (paperclip) | Icon Library |
 | Send | `tick-send-symbolic` (paper plane) | Icon Library |
 | Weekend | `tick-weekend-symbolic` (sofa or sun-and-moon) | Icon Library |
+| Next Week (date picker) | `tick-next-week-symbolic` (calendar page with the week row filled) | Tick (the `tick-due-symbolic` page) |
+| Clear (No Date, No Deadline, field clear buttons) | `tick-clear-symbolic` (outline cross in a circle, as light as the outline icons around it) | Tick |
+| Section (Move to... picker) | `tick-section-symbolic` (a heading over a rule and two indented lines) | Tick |
 | Overdue group | `tick-overdue-symbolic` (calendar page with a cross) | Tick |
 | Offline / pending / error | `network-offline-symbolic`, `network-transmit-symbolic`, `dialog-warning-symbolic` | Adwaita |
 | Detail close | `sidebar-show-right-symbolic` | Adwaita |

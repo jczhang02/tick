@@ -327,6 +327,15 @@ async fn priority_and_labels() {
         .unwrap();
     // API priority 4 is p1 (7.4 pitfall 10).
     wait_item(&server, "i3", "p1", |v| v["priority"] == 4).await;
+    // Priority always has a value: no clear button (4.8), unlike Date or Labels.
+    field(&window, "Priority").await;
+    assert!(
+        window
+            .find(&Query::role(Role::Button).name("Clear Priority").showing())
+            .await
+            .is_none(),
+        "a clear button on the Priority row"
+    );
     let row = app::task_row(&window, "Read the article").await;
     row.wait_for(&Query::role(Role::CheckBox).name("Complete task"), WAIT)
         .await
@@ -339,7 +348,27 @@ async fn priority_and_labels() {
         v["labels"] == serde_json::json!(["phone"])
     })
     .await;
+    // The search entry is 44 px like the date entry (2.7), empty and with text (clear icon).
+    let app_node = window.parent().await.unwrap().unwrap();
+    let search = tick_e2e::poll(WAIT, "label search entry", || async {
+        for role in [Role::Entry, Role::Text] {
+            let q = Query::role(role).name("Search or create a label").showing();
+            if let Some(n) = app_node.find(&q).await {
+                return Some(n);
+            }
+        }
+        None
+    })
+    .await
+    .unwrap();
+    assert_eq!(search.extents().await.unwrap().height, 44, "empty search");
     s.type_text("urgent").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        search.extents().await.unwrap().height,
+        44,
+        "search with text"
+    );
     s.key(keysym::RETURN).await.unwrap();
     wait_item(&server, "i3", "label urgent", |v| {
         v["labels"] == serde_json::json!(["phone", "urgent"])
@@ -540,6 +569,44 @@ async fn subtasks_add_complete_and_open() {
         .unwrap();
     s.click(&open).await.unwrap();
     pane_title(&window, "Book a room").await;
+}
+
+/// The pane's sub-task rows carry the list rows' meta line (4.8): due state, deadline and
+/// labels, but no project item (the crumb says it).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subtask_rows_show_the_meta_line() {
+    let mut fx = app::fixture();
+    for item in fx["items"].as_array_mut().unwrap() {
+        if item["id"] == "w2" {
+            item["due"] = serde_json::json!({
+                "date": "2026-11-21", "string": "21 Nov", "is_recurring": false
+            });
+            item["labels"] = serde_json::json!(["phone"]);
+        }
+    }
+    let server = app::server_with(fx).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Work").await;
+    open_task(&s, &window, "Plan the deck").await;
+    let open = window
+        .wait_for(
+            &Query::role(Role::Button)
+                .name("Open Collect metrics")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let meta = open.description().await.unwrap();
+    assert!(meta.contains("Due Yesterday"), "{meta:?}");
+    assert!(meta.contains("labels phone"), "{meta:?}");
+    assert!(!meta.contains("project"), "{meta:?}");
+    // The overdue date is in the pane, as in the list (not a plain caption).
+    open.wait_for(&Query::role(Role::Label).name("Yesterday").showing(), WAIT)
+        .await
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1373,6 +1440,20 @@ async fn short_window_pick_a_date_reveals_the_calendar() {
         )
         .await
         .unwrap();
+    // The calendar takes the quick options' place (P10), so the whole grid fits the 600 px
+    // window, down to its last row (29 November to 5 December).
+    app_node
+        .wait_gone(
+            &Query::role(Role::ListItem).name("Tomorrow").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let day = november_day(&app_node, "30").await.extents().await.unwrap();
+    assert!(
+        day.y >= 0 && day.y + day.height <= 600,
+        "the last calendar row is off screen: {day:?}"
+    );
     s.click(&november_day(&app_node, "27").await).await.unwrap();
     wait_item(&server, "i3", "due 27 Nov", |v| {
         v["due"]["date"] == "2026-11-27"

@@ -334,7 +334,11 @@ pub fn date_picker(
             info.this_weekend(),
         ));
     }
-    quick.push(("go-next-symbolic", gettext("Next Week"), info.next_week()));
+    quick.push((
+        "tick-next-week-symbolic",
+        gettext("Next Week"),
+        info.next_week(),
+    ));
     let mut actions: Vec<DateChoice> = Vec::new();
     let next_week = gettext("Next Week");
     for (icon_name, label, date) in quick {
@@ -361,7 +365,7 @@ pub fn date_picker(
         } else {
             gettext("No Date")
         };
-        options.append(&row(Some(icon("edit-clear-symbolic")), &label, None));
+        options.append(&row(Some(icon("tick-clear-symbolic")), &label, None));
         actions.push(DateChoice::Clear);
     }
     {
@@ -376,12 +380,11 @@ pub fn date_picker(
     if let Some(e) = &entry {
         down_into(e, &options);
     }
-    content.append(
-        &gtk::Separator::builder()
-            .margin_top(6)
-            .margin_bottom(6)
-            .build(),
-    );
+    let separator = gtk::Separator::builder()
+        .margin_top(6)
+        .margin_bottom(6)
+        .build();
+    content.append(&separator);
 
     // GtkCalendar's own heading has month and year steppers; Tick shows one "November 2026"
     // heading with previous and next month buttons (4.9).
@@ -505,10 +508,20 @@ pub fn date_picker(
     pick_row_list.append(&pick_row);
     pick_row_list.set_visible(false);
     {
+        // The calendar takes the quick options' place (change form, not size: P10): entry,
+        // month header and grid fit a 600 px window; options and calendar together do not.
         let revealer = revealer.downgrade();
         let calendar = calendar.downgrade();
+        let options = options.downgrade();
+        let separator = separator.downgrade();
         pick_row_list.connect_row_activated(move |l, _| {
             l.set_visible(false);
+            if let Some(o) = options.upgrade() {
+                o.set_visible(false);
+            }
+            if let Some(s) = separator.upgrade() {
+                s.set_visible(false);
+            }
             if let (Some(r), Some(c)) = (revealer.upgrade(), calendar.upgrade()) {
                 r.set_visible(true);
                 r.set_reveal_child(true);
@@ -546,6 +559,19 @@ pub fn date_picker(
         .child(&content)
         .build();
     pop.set_child(Some(&scroller));
+    {
+        // Little room at the anchor can cap the popover below even the calendar-only form:
+        // once revealed, scroll the grid (and the focused day) into view, not the top.
+        let scroller = scroller.downgrade();
+        revealer.connect_child_revealed_notify(move |r| {
+            if r.is_child_revealed()
+                && let Some(s) = scroller.upgrade()
+            {
+                let adj = s.vadjustment();
+                adj.set_value(adj.upper() - adj.page_size());
+            }
+        });
+    }
     // Focus starts in the entry; in the deadline picker on the first quick option (4.9).
     {
         let entry = entry.clone();
@@ -694,7 +720,7 @@ pub fn label_picker(
         .build();
     let search = gtk::SearchEntry::builder()
         .placeholder_text(gettext("Search or create a label"))
-        .css_classes(["tick-entry"])
+        .css_classes(["tick-entry", "tick-search"])
         .build();
     search.update_property(&[gtk::accessible::Property::Label(&gettext(
         "Search or create a label",
@@ -926,7 +952,7 @@ pub fn move_picker(
         .build();
     let search = gtk::SearchEntry::builder()
         .placeholder_text(gettext("Search projects"))
-        .css_classes(["tick-entry"])
+        .css_classes(["tick-entry", "tick-search"])
         .build();
     search.update_property(&[gtk::accessible::Property::Label(&gettext(
         "Search projects",
@@ -935,15 +961,12 @@ pub fn move_picker(
     let listbox = list(&gettext("Projects"));
     let mut rows = Vec::new();
     for o in &options {
-        // Sections sit under their project with a dimmed "/" (as in "Work / Backlog"), so
-        // they do not read as sub-projects; the Inbox has its own icon (4.1).
+        // Sections sit one step in under their project with a dimmed section icon, so they
+        // do not read as sub-projects; the Inbox has its own icon (4.1).
         let lead = if o.section_id.is_some() {
-            gtk::Label::builder()
-                .label("/")
-                .css_classes(["dimmed"])
-                .accessible_role(gtk::AccessibleRole::Presentation)
-                .build()
-                .upcast()
+            let i = icon("tick-section-symbolic");
+            i.add_css_class("dimmed");
+            i
         } else if o.inbox {
             icon("tick-inbox-symbolic")
         } else {

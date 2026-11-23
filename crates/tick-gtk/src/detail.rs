@@ -62,7 +62,8 @@ pub struct SubtaskRow {
     pub title: String,
     pub p: u8,
     pub checked: bool,
-    pub due: Option<String>,
+    /// The sub-task as a list row, for the meta line (4.4, 4.8).
+    pub meta: Box<crate::rows::TaskRow>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -510,7 +511,7 @@ impl TaskDetail {
             .build();
         root.append(&button);
         let clear = gtk::Button::builder()
-            .icon_name("edit-clear-symbolic")
+            .icon_name("tick-clear-symbolic")
             .valign(gtk::Align::Center)
             .css_classes(["flat", "tick-icon-44", "tick-reveal"])
             .tooltip_text(fill(
@@ -1033,7 +1034,8 @@ impl TaskDetail {
         for c in classes {
             row.value.add_css_class(c);
         }
-        row.clear.set_visible(has);
+        // Priority always has a value: "clear" (back to p4) would be unclear there (4.8).
+        row.clear.set_visible(has && f != Field::Priority);
         row.button
             .update_property(&[gtk::accessible::Property::Label(&fill(
                 &gettext("{field}: {value}"),
@@ -1079,18 +1081,22 @@ impl TaskDetail {
             t.set_wrap(true);
             t.set_wrap_mode(gtk::pango::WrapMode::WordChar);
             text.append(&t);
-            if let Some(due) = &s.due {
-                text.append(&label(due, &["caption", "dimmed"]));
+            // The list rows' meta line: due states keep their colors (2.4.3).
+            if let Some(meta) = crate::task_list::meta_line(&s.meta) {
+                text.append(&meta);
             }
             let open = gtk::Button::builder()
                 .child(&text)
                 .hexpand(true)
                 .css_classes(["flat", "tick-subtask-open"])
                 .build();
-            open.update_property(&[gtk::accessible::Property::Label(&fill(
-                &gettext("Open {title}"),
-                &[("title", &s.title)],
-            ))]);
+            open.update_property(&[
+                gtk::accessible::Property::Label(&fill(
+                    &gettext("Open {title}"),
+                    &[("title", &s.title)],
+                )),
+                gtk::accessible::Property::Description(&s.meta.meta_description()),
+            ]);
             let weak = Rc::downgrade(self);
             let id = s.id.clone();
             open.connect_clicked(move |_| {
@@ -1405,17 +1411,14 @@ pub fn load(store: &tick_core::Store, id: &str) -> tick_core::store::Result<Opti
         let date = chrono::NaiveDate::parse_from_str(dl.date.get(..10)?, "%Y-%m-%d").ok()?;
         Some((field_date(date, today, settings), date < today))
     });
-    let subtasks = store
-        .subtasks(id)?
+    let subtasks = crate::rows::subtask_rows(store, &t)?
         .into_iter()
-        .map(|s| SubtaskRow {
+        .map(|(s, meta)| SubtaskRow {
             id: s.id.clone(),
             title: s.content.clone(),
             p: s.item.p(),
             checked: s.checked,
-            due: s
-                .due
-                .and_then(|d| format::due(d.date, d.time, today, settings, false)),
+            meta: Box::new(meta),
         })
         .collect();
     let subtask_counts = store

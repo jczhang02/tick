@@ -192,7 +192,6 @@ listview.tick-task-list > row.tick-drag-source { opacity: 0.4; }
   border: 1px solid var(--tick-float-border);
   box-shadow: var(--tick-float-shadow);
   border-radius: 15px;
-  opacity: 0.95;
 }
 
 /* ---------- priority ring (4.3) ---------- */
@@ -517,6 +516,12 @@ tooltip.background { box-shadow: none; }
 }
 .tick-detail-pane.tick-docked:dir(ltr) { box-shadow: inset 1px 0 var(--secondary-sidebar-border-color); }
 .tick-detail-pane.tick-docked:dir(rtl) { box-shadow: inset -1px 0 var(--secondary-sidebar-border-color); }
+/* the overlay pane's shadow vanishes on the dimmed list in dark mode: the floating surface's
+   faint light ring marks its edge instead (P6) */
+@media (prefers-color-scheme: dark) {
+  .tick-detail-pane:not(.tick-docked):dir(ltr) { box-shadow: inset 1px 0 var(--tick-float-border); }
+  .tick-detail-pane:not(.tick-docked):dir(rtl) { box-shadow: inset -1px 0 var(--tick-float-border); }
+}
 /* the assignee's 20 px avatar centered on the 16 px icon column of the field rows (4.8) */
 .tick-field-avatar { margin: 0 -2px; }
 /* project crumb: a flat 44 px button */
@@ -589,11 +594,13 @@ button.tick-subtask-open { padding-top: 7px; padding-bottom: 7px; }
 /* ---------- pickers (4.9, 4.10) ---------- */
 popover.tick-picker > contents { padding: 12px; }
 /* the search icon and text line up with the rows' icon and name columns below (4.10): a row
-   puts its 16 px icon at 42 (12 padding + 16 check + 12 + 2) and its name at 72; the entry
-   starts with 9 px padding. The icon is decoration, not a target (the clear icon keeps 44). */
-popover.tick-picker entry.tick-entry > image:first-child {
-  min-width: 16px;
-  margin-left: 33px;                        /* 9 + 33 + 8 = 50, the row icon's center */
+   puts its 16 px icon at 42 (12 padding + 16 check + 12 + 2) and its name at 72. The icon is
+   decoration, not a target (the clear icon keeps 44). The offset is entry padding, not an icon
+   margin: GtkSearchEntry (GTK 4.22) sizes the icon's height from its width with margins, and
+   a 33 + 16 + 8 px icon made the entry 57 tall instead of 44 (2.7). */
+popover.tick-picker entry.tick-search { padding-left: 42px; }
+popover.tick-picker entry.tick-search > image:first-child {
+  min-width: 16px;                          /* 42 + 8 = 50, the row icon's center */
   margin-right: 8px;                        /* + 6 px border-spacing: the text at 72 */
 }
 popover.tick-picker label { font-weight: normal; }
@@ -644,26 +651,28 @@ entry.tick-section-entry {
   background: none;
   box-shadow: none;
 }
-/* the project title editor (4.2) takes the title's place without moving the header: the
-   ring hugs the .title-1 line (taller than 44 px with the padding) */
+/* the project title editor (4.2) takes the title's place: the ring hugs the .title-1 line
+   (taller than 44 px with the padding). It starts 6 px after the dot, not on it (the 9 px
+   gap minus 3), and the text moves 3 px to keep 4 px of air inside the ring. */
 entry.tick-title-entry {
   min-height: 0;
   border-radius: 12px;
-  padding: 3px 9px;
-  margin: -3px -9px;
+  padding: 3px 9px 3px 6px;
+  margin: -3px -9px -3px -3px;
 }
 /* the section editor (4.24) takes the header's name box: the entry's allocation is the text
-   line, so the name sits where a header's does. An 11 px transparent border keeps the 44 px
-   hit area (2.7, technique 2); the focus ring hugs the 3 px x 9 px padding around the text,
-   ends at the hairline's end and leaves the hairline visible 1 px under it (task_list.rs). */
+   line, so the name sits where a header's does. The visible box pads the text 6 px x 9 px with
+   the row radius (9); an 8 px transparent border brings the hit area to 46 px (2.7, technique 2;
+   radius 9 + 8). The ring hugs the visible box, ends at the hairline's end and leaves the
+   hairline visible 2 px under it (task_list.rs). */
 entry.tick-section-entry {
   min-height: 0;
-  padding: 3px 9px;
-  border: 11px solid transparent;
-  margin: -14px -11px -14px -20px;
-  border-radius: 20px;
+  padding: 6px 9px;
+  border: 8px solid transparent;
+  margin: -14px -8px -14px -17px;
+  border-radius: 17px;
 }
-entry.tick-section-entry:focus-within { outline-offset: -13px; }
+entry.tick-section-entry:focus-within { outline-offset: -10px; }
 /* the filter query (4.23): the typed text in monospace, the row title as the other rows' */
 row.tick-query text {
   font-family: var(--monospace-font-family);

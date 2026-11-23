@@ -56,7 +56,12 @@ impl Section {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemKind {
-    Header { section: Section, collapsed: bool },
+    /// `empty`: the section has no entries yet; its "Add ..." button stays visible (4.1).
+    Header {
+        section: Section,
+        collapsed: bool,
+        empty: bool,
+    },
     View(ViewId),
 }
 
@@ -466,7 +471,11 @@ impl Sidebar {
             .css_classes(["tick-sidebar-row-content"])
             .build();
         match &d.kind {
-            ItemKind::Header { section, collapsed } => {
+            ItemKind::Header {
+                section,
+                collapsed,
+                empty,
+            } => {
                 li.set_selectable(false);
                 li.set_activatable(true);
                 li.set_focusable(true);
@@ -497,9 +506,14 @@ impl Sidebar {
                     let add = gtk::Button::builder()
                         .icon_name("list-add-symbolic")
                         .valign(gtk::Align::Center)
-                        .css_classes(["flat", "tick-icon-44", "tick-reveal"])
+                        .css_classes(["flat", "tick-icon-44"])
                         .tooltip_text(&name)
                         .build();
+                    // An empty section shows its button at rest: it is the only visible way
+                    // to create the first project, label or filter (4.1).
+                    if !*empty {
+                        add.add_css_class("tick-reveal");
+                    }
                     add.update_property(&[gtk::accessible::Property::Label(&name)]);
                     let weak = Rc::downgrade(self);
                     let section = *section;
@@ -798,6 +812,7 @@ impl Sidebar {
                     kind: ItemKind::Header {
                         section,
                         collapsed: is_collapsed,
+                        empty: entries.is_empty(),
                     },
                     name: section.title(),
                     icon: None,

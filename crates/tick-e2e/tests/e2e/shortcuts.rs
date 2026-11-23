@@ -195,8 +195,52 @@ async fn context_menu_by_keyboard_and_pointer() {
         .await
         .unwrap();
     wait_item(&server, "i3", "p3", |v| v["priority"] == 2).await;
-    // The right-clicked row is now the selected one: the pane did not change.
+    // The pane did not change, and the tint went back to its task: selected means "open in
+    // the pane" (2.4.6), the right-clicked row does not keep it.
     field(&window, "Priority").await;
+    wait_selected(&window, "Call the dentist", true).await;
+    wait_selected(&window, "Read the article", false).await;
+    // With the pane closed, a right-click menu leaves no row selected.
+    let close = window
+        .wait_for(
+            &Query::role(Role::Button).name("Close Task").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&close).await.unwrap();
+    wait_selected(&window, "Call the dentist", false).await;
+    let row = app::task_row(&window, "Renew passport").await;
+    let r = row.extents().await.unwrap();
+    s.input()
+        .await
+        .unwrap()
+        .right_click(r.x + 150, r.y + 20)
+        .await
+        .unwrap();
+    window
+        .parent()
+        .await
+        .unwrap()
+        .unwrap()
+        .wait_for(&Query::role(Role::MenuItem).name("Open").showing(), WAIT)
+        .await
+        .unwrap();
+    wait_selected(&window, "Renew passport", true).await;
+    s.key(keysym::ESCAPE).await.unwrap();
+    wait_selected(&window, "Renew passport", false).await;
+}
+
+async fn wait_selected(window: &Node, title: &str, selected: bool) {
+    let row = app::task_row(window, title).await;
+    tick_e2e::poll(WAIT, &format!("{title:?} selected: {selected}"), || async {
+        row.has_state(tick_e2e::State::Selected)
+            .await
+            .ok()
+            .filter(|f| *f == selected)
+    })
+    .await
+    .unwrap();
 }
 
 /// A second Undo toast lets the first change go: two deletes in a row both reach the server

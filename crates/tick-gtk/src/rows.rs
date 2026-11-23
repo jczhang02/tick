@@ -635,6 +635,30 @@ fn iso(d: NaiveDate) -> String {
     d.format("%Y-%m-%d").to_string()
 }
 
+/// The detail pane's sub-tasks as compact task rows (4.8): the list row's meta line (due
+/// states, deadline, counts, labels) without the description line and the project item, which
+/// the parent's crumb already shows.
+pub fn subtask_rows(store: &Store, parent: &Task) -> Result<Vec<(Task, TaskRow)>> {
+    let lk = Lookup::new(store)?;
+    let mode = RowMode {
+        time_only: false,
+        own_project: Some(parent.project_id.as_str()),
+        group: None,
+    };
+    let ui = UiState::default();
+    Ok(store
+        .subtasks(&parent.id)?
+        .into_iter()
+        .map(|t| {
+            let has_children = lk.subtasks.contains_key(&t.id);
+            let mut row = lk.task_row(&t, 0, has_children, mode, &ui);
+            row.description = None;
+            row.project = None;
+            (t, row)
+        })
+        .collect())
+}
+
 /// Build the rows of `view`.
 pub fn build(store: &Store, view: &ViewId, ui: &UiState) -> Result<Content> {
     let lk = Lookup::new(store)?;

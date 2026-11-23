@@ -461,8 +461,13 @@ impl TickWindow {
         let undo = gio::ActionEntry::builder("undo")
             .activate(|w: &TickWindow, _, _| w.undo())
             .build();
+        // The header bar's close button. Focus goes back to the row, but no row stays tinted:
+        // selected means "open in the pane" (2.4.6); Escape keeps the row as the cursor.
         let close_task = gio::ActionEntry::builder("close-task")
-            .activate(|w: &TickWindow, _, _| w.close_task(true))
+            .activate(|w: &TickWindow, _, _| {
+                w.close_task(true);
+                w.select_open_task();
+            })
             .build();
         self.add_action_entries([quick_add, undo, close_task]);
 
@@ -1272,8 +1277,20 @@ impl TickWindow {
                     })
                     && let Some(sel) = self.imp().selection.get()
                 {
+                    // The menu acts on the selected row. Selected means "open in the detail
+                    // pane" (2.4.6): once the menu is done (its action ran), the tint goes back
+                    // to the pane's task, or away.
                     sel.set_selected(pos);
-                    self.task_menu(gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1));
+                    let pop = self.task_menu(gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1));
+                    let weak = self.downgrade();
+                    pop.connect_closed(move |_| {
+                        let weak = weak.clone();
+                        glib::idle_add_local_once(move || {
+                            if let Some(w) = weak.upgrade() {
+                                w.select_open_task();
+                            }
+                        });
+                    });
                 }
             }
         }
@@ -1603,6 +1620,20 @@ impl TickWindow {
                 }
             }
             None => self.touch_task_row(&id),
+        }
+    }
+
+    /// Select the row of the task open in the detail pane, or none when the pane is closed.
+    pub(crate) fn select_open_task(&self) {
+        let Some(sel) = self.imp().selection.get() else {
+            return;
+        };
+        let pos = self
+            .open_task_id()
+            .and_then(|id| self.row_position(&id))
+            .unwrap_or(gtk::INVALID_LIST_POSITION);
+        if sel.selected() != pos {
+            sel.set_selected(pos);
         }
     }
 
