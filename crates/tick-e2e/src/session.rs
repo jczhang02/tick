@@ -16,6 +16,7 @@ use tokio::sync::{OnceCell, OwnedSemaphorePermit};
 use crate::a11y::{A11y, Node, Query};
 use crate::input::Input;
 use crate::notify::Notifications;
+use crate::portal::{Portal, PortalMode};
 use crate::{Result, Role, poll};
 
 /// App ID (and D-Bus name) of Tick.
@@ -61,6 +62,7 @@ pub struct SessionBuilder {
     app_id: String,
     launch: bool,
     gtk_notifications: bool,
+    portal: Option<PortalMode>,
 }
 
 impl Default for SessionBuilder {
@@ -78,6 +80,7 @@ impl Default for SessionBuilder {
             app_id: TICK_APP_ID.into(),
             launch: true,
             gtk_notifications: true,
+            portal: None,
         }
     }
 }
@@ -147,6 +150,13 @@ impl SessionBuilder {
     /// falls back to its freedesktop backend.
     pub fn freedesktop_notifications_only(mut self) -> Self {
         self.gtk_notifications = false;
+        self
+    }
+
+    /// Owns `org.freedesktop.portal.Desktop` with a fake Background portal (see
+    /// [`crate::Portal`]).
+    pub fn fake_portal(mut self, mode: PortalMode) -> Self {
+        self.portal = Some(mode);
         self
     }
 
@@ -274,6 +284,7 @@ pub struct Session {
     a11y: OnceCell<A11y>,
     input: OnceCell<Input>,
     notifications: Notifications,
+    portal: Option<Portal>,
     bus: zbus::Connection,
     procs: Procs,
     _slot: OwnedSemaphorePermit,
@@ -377,6 +388,10 @@ impl Session {
                 .context("connecting to the private session bus")?;
             // Own the notification names before anything can activate a real server.
             let notifications = Notifications::install(&bus, opts.gtk_notifications).await?;
+            let portal = match opts.portal {
+                Some(mode) => Some(Portal::install(&bus, mode).await?),
+                None => None,
+            };
 
             let mut mutter = Command::new("mutter");
             mutter
@@ -396,10 +411,10 @@ impl Session {
                 }
             })
             .await?;
-            anyhow::Ok((bus, notifications))
+            anyhow::Ok((bus, notifications, portal))
         }
         .await;
-        let (bus, notifications) = match started {
+        let (bus, notifications, portal) = match started {
             Ok(v) => v,
             Err(err) => {
                 let mutter = procs.log_tail("mutter.log", 30);
@@ -414,6 +429,7 @@ impl Session {
             a11y: OnceCell::new(),
             input: OnceCell::new(),
             notifications,
+            portal,
             bus,
             procs,
             _slot: slot,
@@ -570,6 +586,11 @@ impl Session {
     /// The fake notification servers.
     pub fn notifications(&self) -> &Notifications {
         &self.notifications
+    }
+
+    /// The fake Background portal, if the session has one ([`SessionBuilder::fake_portal`]).
+    pub fn portal(&self) -> Option<&Portal> {
+        self.portal.as_ref()
     }
 
     /// AT-SPI access (connects to the accessibility bus on first use).

@@ -158,6 +158,12 @@ mod imp {
         pub focus_search: Rc<Cell<bool>>,
         /// The view before Search (Escape in the empty search entry goes back to it).
         pub previous_view: RefCell<Option<ViewId>>,
+        /// Log out in progress: waiting for the engine to stop (`prefs.rs`).
+        pub logging_out: Cell<bool>,
+        /// The next reminder check (`notify.rs`).
+        pub reminder_timer: RefCell<Option<glib::SourceId>>,
+        /// Reminder notifications on screen: (notification id, task id).
+        pub sent_reminders: RefCell<Vec<(String, String)>>,
     }
 
     impl TickWindow {
@@ -242,7 +248,7 @@ impl TickWindow {
         win.setup_login();
         win.setup_title_handoff();
         win.load_settings();
-        match start {
+        match &start {
             Start::Main => win.show_main(),
             Start::Login => win.show_login(),
         }
@@ -253,6 +259,15 @@ impl TickWindow {
         win.open_view(initial, false);
         win.refresh_sidebar();
         win.refresh_sync();
+        // Reminders from the cache, before any sync (a missed one shows at start, 1 h grace).
+        if matches!(start, Start::Main) {
+            let weak = win.downgrade();
+            glib::idle_add_local_once(move || {
+                if let Some(w) = weak.upgrade() {
+                    w.check_reminders();
+                }
+            });
+        }
         win
     }
 
@@ -407,6 +422,15 @@ impl TickWindow {
                     return glib::Propagation::Stop;
                 }
                 return glib::Propagation::Proceed;
+            }
+            // Left collapses a parent or moves to it, Right expands (4.4).
+            if matches!(key, Key::Left | Key::KP_Left | Key::Right | Key::KP_Right) {
+                let right = matches!(key, Key::Right | Key::KP_Right);
+                return if w.collapse_key(right) {
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                };
             }
             let down = match key {
                 Key::Down | Key::KP_Down | Key::j => true,
@@ -657,6 +681,10 @@ impl TickWindow {
         self.imp().stack.set_visible_child_name("main");
     }
 
+    pub(crate) fn show_login_page(&self) {
+        self.show_login();
+    }
+
     fn show_login(&self) {
         let imp = self.imp();
         imp.stack.set_visible_child_name("login");
@@ -705,6 +733,10 @@ impl TickWindow {
             while let Ok(ev) = events.recv().await {
                 let Some(w) = weak.upgrade() else { break };
                 w.on_engine_event(ev);
+            }
+            // The engine stopped (log out).
+            if let Some(w) = weak.upgrade() {
+                w.engine_stopped();
             }
         });
         // A filter view opened from the cache may need its server part now.
@@ -779,6 +811,9 @@ impl TickWindow {
 
     fn on_changes(&self, c: &Changes) {
         self.remap_ids(&c.id_map);
+        if c.full || Self::reminders_affected(&c.kinds.iter().copied().collect::<Vec<_>>()) {
+            self.check_reminders();
+        }
         let only_queue = !c.full && c.kinds.iter().all(|k| *k == Kind::Queue);
         if !only_queue {
             self.refresh_rows_with(&c.id_map);
@@ -1969,6 +2004,41 @@ impl TickWindow {
         (0..store.n_items())
             .filter_map(|i| store.item(i).and_downcast::<TickRow>())
             .find(|r| r.key() == key)
+    }
+
+    /// Left on a focused task: collapse its sub-tasks, else focus its parent. Right:
+    /// expand them. Returns whether the key did something.
+    fn collapse_key(&self, right: bool) -> bool {
+        let Some(t) = self.focused_row().and_then(|r| r.row().task().cloned()) else {
+            return false;
+        };
+        if t.read_only {
+            return false;
+        }
+        if t.has_children && t.collapsed == right {
+            self.toggle_subtasks(&t.id);
+            return true;
+        }
+        if right {
+            return false;
+        }
+        let parent = self
+            .store()
+            .task(&t.id)
+            .ok()
+            .flatten()
+            .and_then(|x| x.parent_id.clone());
+        match parent.and_then(|p| self.row_position(&p)) {
+            Some(pos) => {
+                self.imp().task_list.scroll_to(
+                    pos,
+                    gtk::ListScrollFlags::FOCUS | gtk::ListScrollFlags::SELECT,
+                    None,
+                );
+                true
+            }
+            None => false,
+        }
     }
 
     fn focused_row_is_task(&self) -> bool {

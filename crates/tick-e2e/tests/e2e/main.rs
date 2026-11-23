@@ -14,6 +14,7 @@ mod harness;
 mod layout;
 mod login;
 mod manage;
+mod prefs;
 mod screenshots;
 mod search;
 mod shortcuts;
