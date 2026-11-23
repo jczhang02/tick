@@ -289,34 +289,36 @@ async fn a_reminder_fires_on_time_while_running() {
         ],
         "reminders": [
             {"id": "n1", "item_id": "t1", "type": "absolute",
-             "due": {"date": "2026-11-22T09:00:10", "string": "9:00:10", "is_recurring": false}}
+             "due": {"date": "2026-11-22T09:00:15", "string": "9:00:15", "is_recurring": false}}
         ]
     });
     let server = app::server_with(f).await;
-    let launched = std::time::Instant::now();
     let s = app::session(&server)
         .env("TICK_NOW_ADVANCE", "1")
         .env("TICK_SYNC_INTERVAL_MS", "600000")
         .start()
         .await
         .unwrap();
+    // The app is launched by now (`start` may first wait for a free slot); its clock starts
+    // later, at its first reading.
+    let launched = std::time::Instant::now();
     let window = s.window().await.unwrap();
     app::wait_first_sync(&server).await;
     app::wait_tasks(&window, &["Take the cake out"]).await;
     let synced = launched.elapsed();
     assert!(
-        synced < Duration::from_secs(9),
+        synced < Duration::from_secs(13),
         "the first sync took {synced:?}: too late to tell the timer from the start check"
     );
     assert!(s.notifications().sent().is_empty(), "{:?}", titles(&s));
     let n = s
         .notifications()
-        .wait_for(Duration::from_secs(20), |n| n.title == "Take the cake out")
+        .wait_for(Duration::from_secs(25), |n| n.title == "Take the cake out")
         .await
         .unwrap();
     let at = launched.elapsed();
-    assert!(at >= Duration::from_secs(9), "fired early, after {at:?}");
-    assert!(at < Duration::from_secs(16), "fired late, after {at:?}");
+    assert!(at >= Duration::from_secs(14), "fired early, after {at:?}");
+    assert!(at < Duration::from_secs(22), "fired late, after {at:?}");
     assert_eq!(n.buttons.len(), 2);
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(titles(&s), ["Take the cake out"]);
