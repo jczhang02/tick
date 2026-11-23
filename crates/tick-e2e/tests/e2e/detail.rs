@@ -271,6 +271,23 @@ async fn due_by_picker_text_and_clear() {
         .await
         .unwrap();
 
+    // A calendar day for the recurring task moves this occurrence; it stays recurring.
+    s.click(&field(&window, "Date").await).await.unwrap();
+    let app_node = window.parent().await.unwrap().unwrap();
+    s.click(&november_day(&app_node, "25").await).await.unwrap();
+    wait_item(&server, "i3", "occurrence on the 25th", |v| {
+        v["due"]["date"] == "2026-11-25"
+    })
+    .await;
+    let item = server.state().get("items", "i3").cloned().unwrap();
+    assert_eq!(item["due"]["is_recurring"], true, "{item}");
+    assert_eq!(item["due"]["string"], "every monday", "{item}");
+    assert_eq!(
+        update_sent(&server, "i3", "due").last().unwrap(),
+        &serde_json::json!({"date": "2026-11-25", "string": "every monday",
+                            "lang": "en", "is_recurring": true})
+    );
+
     // "No Date" clears.
     s.click(&field(&window, "Date").await).await.unwrap();
     s.click(&picker_row(&window, "No Date").await)

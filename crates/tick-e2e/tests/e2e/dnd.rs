@@ -317,6 +317,69 @@ async fn drop_on_another_upcoming_day_reschedules() {
         v["due"]["date"] == "2026-11-23"
     })
     .await;
+    // A recurring task ("every monday") onto Wednesday's group: this occurrence moves, the
+    // recurrence stays.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (fx, fy, _) = title_point(&window, "Water the plants").await;
+    let (tx, ty, _) = title_point(&window, "Book the venue").await;
+    drag(&s, (fx, fy), (tx, ty)).await;
+    wait_item(&server, "h1", "occurrence moved to the 25th", |v| {
+        v["due"]["date"] == "2026-11-25"
+    })
+    .await;
+    let h1 = server.state().get("items", "h1").cloned().unwrap();
+    assert_eq!(h1["due"]["is_recurring"], true, "{h1}");
+    assert_eq!(h1["due"]["string"], "every monday", "{h1}");
+    let updates = app::commands_sent(&server, "item_update");
+    assert_eq!(
+        updates.last().unwrap()["args"]["due"],
+        serde_json::json!({"date": "2026-11-25", "string": "every monday", "is_recurring": true}),
+        "{updates:?}"
+    );
+}
+
+/// 4.20: in Today an overdue task dropped on the Today group is due today (same time);
+/// the Overdue group takes no drops.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn drop_on_today_in_the_today_view() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Today").await;
+    app::wait_tasks(
+        &window,
+        &["Renew passport", "Plan the deck", "Call the dentist"],
+    )
+    .await;
+    // Onto Overdue: nothing happens.
+    let (fx, fy, _) = title_point(&window, "Call the dentist").await;
+    let (tx, ty, _) = title_point(&window, "Renew passport").await;
+    drag(&s, (fx, fy), (tx, ty)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(
+        app::commands_sent(&server, "item_update").is_empty(),
+        "{:?}",
+        app::commands_sent(&server, "item_update")
+    );
+    assert_eq!(
+        server.state().get("items", "i1").unwrap()["due"]["date"],
+        "2026-11-22"
+    );
+    // The overdue task onto the Today group: due today.
+    let (fx, fy, _) = title_point(&window, "Renew passport").await;
+    let (tx, ty, _) = title_point(&window, "Plan the deck").await;
+    drag(&s, (fx, fy), (tx, ty)).await;
+    wait_item(&server, "i2", "due today", |v| {
+        v["due"]["date"] == "2026-11-22"
+    })
+    .await;
+    let updates = app::commands_sent(&server, "item_update");
+    assert_eq!(
+        updates.last().unwrap()["args"]["due"],
+        serde_json::json!({"date": "2026-11-22"}),
+        "{updates:?}"
+    );
 }
 
 /// 4.1: hovering a collapsed sidebar project for 600 ms while dragging expands it, so a

@@ -672,14 +672,12 @@ impl TickWindow {
     fn drop_task(&self, id: &str, target: TaskTarget) {
         let cmds = match target {
             TaskTarget::Day { date, .. } => {
-                // A new day, the same time (4.7).
-                let time = self
-                    .store()
-                    .task(id)
-                    .ok()
-                    .flatten()
-                    .and_then(|t| t.due.and_then(|d| d.time));
-                let due = crate::edit::due_args(time, &crate::pickers::DateChoice::Date(date));
+                // A new day, the same time (4.7); a recurring task stays recurring.
+                let Some(task) = self.store().task(id).ok().flatten() else {
+                    return;
+                };
+                let due =
+                    crate::edit::task_due_args(&task, &crate::pickers::DateChoice::Date(date));
                 vec![tick_core::Command::item_update(
                     id,
                     serde_json::json!({ "due": due }),

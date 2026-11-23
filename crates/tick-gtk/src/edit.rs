@@ -38,17 +38,49 @@ pub struct UndoAction {
 
 /// Arguments of `due` for a picked date (4.9): a calendar day keeps the task's existing
 /// `time` as the floating `YYYY-MM-DDTHH:MM:SS`; typed text goes to the server as `string`.
-pub fn due_args(time: Option<chrono::NaiveTime>, choice: &DateChoice) -> Value {
+///
+/// A recurring task (`current`) moved to a day keeps its recurrence: a `date` alone would
+/// make the due a one-off (`docs/api/openapi.json`, `Due.is_recurring`: "Recurring dues
+/// require string"), so its `string` and `lang` go along, and the server moves only this
+/// occurrence (`docs/api/pages/sync_tasks.md`: `{"date": ..., "string": "every day"}`).
+pub fn due_args(
+    time: Option<chrono::NaiveTime>,
+    current: Option<&tick_core::model::Due>,
+    choice: &DateChoice,
+) -> Value {
     match choice {
-        DateChoice::Date(d) => match time {
-            Some(t) => {
-                json!({ "date": format!("{}T{}", d.format("%Y-%m-%d"), t.format("%H:%M:%S")) })
+        DateChoice::Date(d) => {
+            let date = match time {
+                Some(t) => format!("{}T{}", d.format("%Y-%m-%d"), t.format("%H:%M:%S")),
+                None => d.format("%Y-%m-%d").to_string(),
+            };
+            match current {
+                Some(due) if due.is_recurring && !due.string.is_empty() => {
+                    let mut v = json!({
+                        "date": date,
+                        "string": due.string,
+                        "is_recurring": true,
+                    });
+                    if let Some(lang) = &due.lang {
+                        v["lang"] = json!(lang);
+                    }
+                    v
+                }
+                _ => json!({ "date": date }),
             }
-            None => json!({ "date": d.format("%Y-%m-%d").to_string() }),
-        },
+        }
         DateChoice::Text(s) => json!({ "string": s }),
         DateChoice::Clear => Value::Null,
     }
+}
+
+/// [`due_args`] for `task` as it is now.
+pub fn task_due_args(task: &Task, choice: &DateChoice) -> Value {
+    due_args(
+        task.due.and_then(|d| d.time),
+        task.item.due.as_ref(),
+        choice,
+    )
 }
 
 /// Arguments of `deadline` (`docs/api/pages/deadlines.md`: a plain date, no time).
@@ -465,7 +497,7 @@ impl TickWindow {
                     };
                     w.enqueue(vec![Command::item_update(
                         &id,
-                        json!({ "due": due_args(t.due.and_then(|d| d.time), &c) }),
+                        json!({ "due": task_due_args(&t, &c) }),
                     )]);
                 })
             }
@@ -920,16 +952,16 @@ mod tests {
     fn a_picked_day_keeps_the_time_as_a_floating_date() {
         let t = NaiveTime::from_hms_opt(14, 0, 0);
         assert_eq!(
-            due_args(t, &DateChoice::Date(day())),
+            due_args(t, None, &DateChoice::Date(day())),
             json!({ "date": "2026-11-25T14:00:00" })
         );
         let t = NaiveTime::from_hms_opt(9, 5, 30);
         assert_eq!(
-            due_args(t, &DateChoice::Date(day())),
+            due_args(t, None, &DateChoice::Date(day())),
             json!({ "date": "2026-11-25T09:05:30" })
         );
         assert_eq!(
-            due_args(None, &DateChoice::Date(day())),
+            due_args(None, None, &DateChoice::Date(day())),
             json!({ "date": "2026-11-25" })
         );
     }
@@ -937,18 +969,52 @@ mod tests {
     #[test]
     fn typed_text_and_clearing() {
         assert_eq!(
-            due_args(None, &DateChoice::Text("every monday".into())),
+            due_args(None, None, &DateChoice::Text("every monday".into())),
             json!({ "string": "every monday" })
         );
         // Text keeps no time of its own: the server parses it.
         assert_eq!(
             due_args(
                 NaiveTime::from_hms_opt(14, 0, 0),
+                None,
                 &DateChoice::Text("fri".into())
             ),
             json!({ "string": "fri" })
         );
-        assert_eq!(due_args(None, &DateChoice::Clear), Value::Null);
+        assert_eq!(due_args(None, None, &DateChoice::Clear), Value::Null);
+    }
+
+    #[test]
+    fn a_recurring_task_moved_to_a_day_stays_recurring() {
+        let due: tick_core::model::Due = serde_json::from_value(json!({
+            "date": "2026-11-23T08:00:00", "string": "every monday at 8", "lang": "en",
+            "is_recurring": true, "timezone": null
+        }))
+        .unwrap();
+        assert_eq!(
+            due_args(
+                NaiveTime::from_hms_opt(8, 0, 0),
+                Some(&due),
+                &DateChoice::Date(day())
+            ),
+            json!({ "date": "2026-11-25T08:00:00", "string": "every monday at 8",
+                    "lang": "en", "is_recurring": true })
+        );
+        // Typed text replaces the recurrence on purpose; clearing clears it.
+        assert_eq!(
+            due_args(None, Some(&due), &DateChoice::Text("fri".into())),
+            json!({ "string": "fri" })
+        );
+        assert_eq!(due_args(None, Some(&due), &DateChoice::Clear), Value::Null);
+        // A one-off due sends the date alone.
+        let once: tick_core::model::Due = serde_json::from_value(json!({
+            "date": "2026-11-23", "string": "23 Nov", "is_recurring": false
+        }))
+        .unwrap();
+        assert_eq!(
+            due_args(None, Some(&once), &DateChoice::Date(day())),
+            json!({ "date": "2026-11-25" })
+        );
     }
 
     #[test]
