@@ -242,23 +242,24 @@ async fn sideways_drag_changes_depth() {
         &["Call the dentist", "Renew passport", "Read the article"],
     )
     .await;
-    // On its own row, 40 px right: one level in, under the task above.
+    // On its own row, a step and a half right (drops land a few pixels off, docs/testing.md):
+    // one level in, under the task above.
     let (fx, fy, _) = title_point(&window, "Read the article").await;
     let input = s.input().await.unwrap();
     input.press_at(fx, fy).await.unwrap();
     input.drag_by(0, 8, 4).await.unwrap();
-    input.drag_by(40, 0, 8).await.unwrap();
+    input.drag_by(48, 0, 8).await.unwrap();
     input.release().await.unwrap();
     wait_item(&server, "i3", "one level in", |v| v["parent_id"] == "i2").await;
     let moves = app::commands_sent(&server, "item_move");
     assert_eq!(moves[0]["args"]["parent_id"], "i2", "{moves:?}");
 
-    // 40 px left: back out to the top level, after "Renew passport".
+    // A step and a half left: back out to the top level, after "Renew passport".
     tokio::time::sleep(Duration::from_millis(500)).await;
     let (fx, fy, _) = title_point(&window, "Read the article").await;
     input.press_at(fx, fy).await.unwrap();
     input.drag_by(0, 8, 4).await.unwrap();
-    input.drag_by(-40, 0, 8).await.unwrap();
+    input.drag_by(-48, 0, 8).await.unwrap();
     input.release().await.unwrap();
     wait_item(&server, "i3", "back out", |v| v["parent_id"].is_null()).await;
     tick_e2e::poll(Duration::from_secs(15), "after Renew passport", || async {
