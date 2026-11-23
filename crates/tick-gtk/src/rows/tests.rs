@@ -379,3 +379,106 @@ fn day_after_month(c: &Content, key: &str) -> bool {
         })
         .unwrap()
 }
+
+#[test]
+fn search_rows_follow_the_query() {
+    let s = store();
+    let mut ui = UiState::default();
+    let c = build(&s, &ViewId::Search, &ui).unwrap();
+    assert_eq!(keys(&c), ["search-header", "empty"]);
+    ui.search_query = "the".into();
+    let c = build(&s, &ViewId::Search, &ui).unwrap();
+    assert_eq!(
+        keys(&c),
+        [
+            "search-header",
+            "task:in1",
+            "task:w1",
+            "task:h1",
+            "task:in3"
+        ]
+    );
+    assert_eq!(
+        c.rows[0],
+        Row::SearchHeader {
+            query: "the".into(),
+            count: 4
+        }
+    );
+    // The project item shows in every result (4.15).
+    assert_eq!(
+        task(&c, "w1").project.as_ref().unwrap().name,
+        "Work Stuff / This week"
+    );
+    ui.search_query = "zebra".into();
+    let c = build(&s, &ViewId::Search, &ui).unwrap();
+    match &c.rows[1] {
+        Row::Empty(e) => assert_eq!(e.title, "No results for \"zebra\""),
+        r => panic!("{r:?}"),
+    }
+}
+
+#[test]
+fn completed_rows_group_by_completion_day() {
+    let mut s = store();
+    s.cache_completed(&[
+        json!({"id": "d1", "content": "Today one", "project_id": "work",
+               "completed_at": "2026-11-22T08:05:00.000000Z", "priority": 4}),
+        json!({"id": "d2", "content": "Yesterday one", "project_id": "inbox",
+               "completed_at": "2026-11-21T10:00:00.000000Z"}),
+        json!({"id": "d3", "content": "Last month", "project_id": "inbox",
+               "completed_at": "2026-10-30T10:00:00.000000Z"}),
+        json!({"id": "d4", "content": "Too old", "project_id": "inbox",
+               "completed_at": "2026-10-01T10:00:00.000000Z"}),
+    ])
+    .unwrap();
+    let mut ui = UiState::default();
+    ui.completed.has_more = Some(true);
+    let c = build(&s, &ViewId::Completed, &ui).unwrap();
+    assert_eq!(
+        keys(&c),
+        [
+            "header",
+            "day:2026-11-22",
+            "done:d1",
+            "day:2026-11-21",
+            "done:d2",
+            "month:2026-10",
+            "day:2026-10-30",
+            "done:d3",
+            "load-more"
+        ]
+    );
+    match &c.rows[0] {
+        Row::ViewHeader(h) => assert_eq!(h.subtitle.as_deref(), Some("Last 30 days")),
+        r => panic!("{r:?}"),
+    }
+    let d1 = task(&c, "d1");
+    assert!(d1.read_only && d1.checked);
+    assert_eq!(d1.done_at.as_deref(), Some("08:05"));
+    assert!(d1.due.is_none() && d1.labels.is_empty());
+    // An older window loaded: its start names the subtitle and older rows show.
+    ui.completed.since = Some("2026-09-23T09:00:00.000000Z".into());
+    let c = build(&s, &ViewId::Completed, &ui).unwrap();
+    assert!(keys(&c).contains(&"done:d4".to_owned()));
+    match &c.rows[0] {
+        Row::ViewHeader(h) => assert_eq!(h.subtitle.as_deref(), Some("Since 23 September")),
+        r => panic!("{r:?}"),
+    }
+    // Refreshing a shown cache: "Updating" in the header; offline: the saved-results line.
+    ui.completed.refreshing = true;
+    let c = build(&s, &ViewId::Completed, &ui).unwrap();
+    match &c.rows[0] {
+        Row::ViewHeader(h) => assert_eq!(h.source, Some(("Updating".into(), true))),
+        r => panic!("{r:?}"),
+    }
+    ui.offline = true;
+    let c = build(&s, &ViewId::Completed, &ui).unwrap();
+    match &c.rows[0] {
+        Row::ViewHeader(h) => assert_eq!(
+            h.source,
+            Some(("Offline. Showing saved results.".into(), false))
+        ),
+        r => panic!("{r:?}"),
+    }
+}
