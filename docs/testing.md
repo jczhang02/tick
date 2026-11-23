@@ -60,7 +60,15 @@ These were verified on the dev machine (mutter 50.5, GTK 4.22, libadwaita 1.9) a
      1 s after `Start` and send a warm-up motion and a warm-up key (Shift press + release)
      before real input. Without the warm-up key the first typed character is lost.
    - Add about 50 ms between key press and release, and between keys.
-   - Drag: press, several relative moves with short sleeps, release.
+   - Drag: press, several relative moves with short sleeps, release. Verified with real
+     `GtkDragSource`/`GtkDropTarget` (`fixture::drag_and_drop_between_widgets`) and in Tick's
+     list and sidebar. The steps are subject to pointer acceleration and can end a few
+     pixels off; during a drag the clamp-and-jump used for clicks does not move the
+     pointer, so aim well inside the target. `Input::press_at`, `drag_by` and `release`
+     hold a drag open (a screenshot of a drag in progress).
+   - Menus (`popover.menu`): GTK 4.22 reports their items with an empty name; Tick names them
+     from their text when the menu maps (`menus.rs`), so tests can find them by name. Tests
+     may also use the keyboard: the first item has focus when a menu opens.
    - Verified: typing into an entry, clicking a button and the header bar close button,
      `Ctrl+Q`, Tab + Space.
    - **Non-ASCII text.** Mutter drops keysyms that are not in its (US) keymap and logs
@@ -186,6 +194,17 @@ row), `quick-add`, `quick-add-offline` (with a kept draft), `offline` (one queue
 `sync-popover` (offline), `login`, `empty-today`, `empty-inbox`, and `sidebar` (narrow only).
 Without `TICK_SCREENSHOTS=1` (`just e2e`) only the Today view is captured.
 
+Editing (milestone 3), both schemes: `detail` (Markdown description, fields, sub-tasks),
+`detail-scrolled` (comments), `date-picker`, `label-picker`, `project-dialog`, `dragging` (a
+drag in progress: dimmed source row, drag icon, insertion line), `section-editor` and
+`delete-project`, wide and narrow; wide only: `deadline-picker`, `priority-picker`,
+`assignee-picker`, `move-picker`, `description-edit`, `task-menu`, `view-menu`,
+`title-rename`, `label-dialog-duplicate`, `filter-dialog`, `sidebar-menu`; a 1024 x 600 window:
+`date-picker-short-<scheme>` (the calendar collapsed behind "Pick a Date"); in Chinese:
+`detail`, `date-picker`, `delete-project` and `project-dialog` (`<view>-zh-wide-<scheme>`).
+The drag icon is a surface of its own: in test mode the app remembers it and the pointer
+position, and `app.test-screenshot` draws it there.
+
 Wide only, both schemes: `p4-hover` and `p4-checked` (a recurring p4 task in its
 completed-pending state), `completing` (the 800 ms hold, kept with `TICK_TEST_HOLD=1`),
 `failed-change` (a change the server rejected) and `sync-popover-failed`, `tooltip`, and
@@ -202,5 +221,4 @@ completed-pending state), `completing` (the 800 ms hold, kept with `TICK_TEST_HO
 - The session's fontconfig maps `monospace` to Adwaita Mono, as on a GNOME desktop
   (the session has no GNOME settings, so libadwaita falls back to fontconfig's `monospace`).
 
-Not yet captured: the date picker and destructive buttons (their components come later) and a
-non-blue accent (the session's accent cannot be set yet).
+Not yet captured: a non-blue accent (the session's accent cannot be set yet).
