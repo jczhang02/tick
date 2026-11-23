@@ -89,7 +89,9 @@ impl TickWindow {
             .connect_collapsed_notify(move |split| docked(split));
         imp.detail_view.add_bottom_bar(&detail.composer);
         let _ = imp.detail.set(detail);
-        // Closing the overlay (a click on the list in B1-B3) closes the task too.
+        // Closing the overlay closes the task too. In B1-B3 libadwaita hides the overlay on
+        // a click anywhere on the list (3.3: "click on the list or Escape closes it"); the
+        // click itself does not reach the row under it.
         imp.detail_split.connect_show_sidebar_notify(|split| {
             if !split.shows_sidebar()
                 && let Some(w) = split.root().and_downcast::<TickWindow>()

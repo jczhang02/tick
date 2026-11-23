@@ -2,7 +2,12 @@
 //!
 //! - Task rows drag within a project list: between rows (an accent insertion line inset by
 //!   the target depth), into a section (onto its header or its "Add task" row), or onto the
-//!   right half of a row to nest under it (the row gets the inset accent outline).
+//!   right half of a row to nest under it (the row gets the inset accent outline). Moving
+//!   the pointer sideways changes the depth at the line in 32 px steps (4.6), between the
+//!   depth of the row below and one level under the row above.
+//! - In Upcoming and Today a task dropped into another day's group moves to that day and
+//!   keeps its time (4.7, 4.20).
+//! - Hovering a collapsed sidebar project for 600 ms while dragging expands it (4.1).
 //! - Tasks drop onto a sidebar project to move there ("Moved to ..." with Undo).
 //! - Projects drag in the sidebar: the top or bottom third of a project row places it before
 //!   or after, the middle third makes it a sub-project.
@@ -28,6 +33,25 @@ pub const PROJECT: &str = "tick-project:";
 const INDENT: f64 = 32.0;
 /// Sidebar indentation per level (4.1).
 const SIDEBAR_INDENT: f64 = 18.0;
+/// Hover time before a collapsed sidebar project opens during a drag (4.1).
+const HOVER_EXPAND: std::time::Duration = std::time::Duration::from_millis(600);
+
+thread_local! {
+    /// Where the drag in progress started, in window coordinates (4.6 depth steps).
+    static ORIGIN: std::cell::Cell<Option<(f64, f64)>> = const { std::cell::Cell::new(None) };
+}
+
+/// The depth at an insertion line (4.6): the default for the spot, moved by whole 32 px
+/// steps of sideways pointer movement, kept between the depth of the row below (`min`) and
+/// one level under the row above (`max`).
+pub(crate) fn line_depth(default: usize, dx: f64, min: usize, max: usize) -> Option<usize> {
+    if min > max {
+        return None;
+    }
+    let steps = (dx / INDENT).round() as i64;
+    let d = (default as i64 + steps).clamp(min as i64, max as i64);
+    Some(d as usize)
+}
 
 /// Where a dragged task would land in the task list.
 #[derive(Debug, Clone)]
@@ -42,6 +66,13 @@ enum TaskTarget {
     },
     /// Onto a row: nest as its last sub-task.
     Into { parent: String, row: gtk::Widget },
+    /// Into another day's group (Upcoming, Today): reschedule to `date`.
+    Day {
+        date: chrono::NaiveDate,
+        y: f64,
+        x: f64,
+        width: f64,
+    },
 }
 
 /// Where a dragged project would land in the sidebar.
@@ -167,6 +198,7 @@ impl TickWindow {
             if let Some(sb) = w.imp().sidebar.get() {
                 w.note_drag_pointer(&sb.list().clone().upcast(), x, y);
             }
+            w.hover_expand(x, y);
             let ok = if p.starts_with(TASK) {
                 match w.sidebar_project_at(x, y) {
                     Some((_, row)) => {
@@ -198,6 +230,7 @@ impl TickWindow {
         target.connect_leave(move |_| {
             if let Some(w) = weak.upgrade() {
                 w.hide_drop_feedback();
+                w.cancel_hover_expand();
             }
         });
         let weak = self.downgrade();
@@ -206,6 +239,7 @@ impl TickWindow {
                 return false;
             };
             w.hide_drop_feedback();
+            w.cancel_hover_expand();
             let Some(p) = payload(v) else { return false };
             if let Some(id) = p.strip_prefix(TASK) {
                 let Some((project, _)) = w.sidebar_project_at(x, y) else {
@@ -257,6 +291,8 @@ impl TickWindow {
         let imp = self.imp();
         imp.dragging.set(false);
         self.hide_drop_feedback();
+        self.cancel_hover_expand();
+        ORIGIN.with(|o| o.set(None));
         crate::test_mode::clear_drag_icon();
         if imp.refresh_pending.replace(false) {
             self.refresh_rows();
@@ -312,8 +348,11 @@ impl TickWindow {
     }
 
     /// The drop target for task `id` at (x, y) in the task list, if the view takes drops
-    /// (project lists, the Inbox included; 4.20 reorders in Today are not supported).
+    /// (project lists, the Inbox included; day groups in Upcoming and Today).
     fn task_target(&self, id: &str, x: f64, y: f64) -> Option<TaskTarget> {
+        if matches!(self.current_view(), ViewId::Upcoming | ViewId::Today) {
+            return self.day_target(id, x, y);
+        }
         let project = self.project_of_view()?;
         let list: gtk::Widget = self.imp().task_list.get().upcast();
         let (row_w, b) = row_at(&list, x, y)?;
@@ -326,7 +365,7 @@ impl TickWindow {
             f64::from(b.height()),
         );
         let line = |place: TaskPlace, after: Option<String>, y: f64, depth: usize| {
-            let indent = INDENT * depth as f64;
+            let indent = INDENT * depth.min(crate::rows::MAX_DEPTH) as f64;
             Some(TaskTarget::Place {
                 place,
                 after,
@@ -338,41 +377,17 @@ impl TickWindow {
         let r = row.row().clone();
         match r {
             Row::Task(t) => {
-                if self.within(&t.id, id) {
-                    return None; // onto itself or its own sub-tasks
-                }
-                let task = self.store().task(&t.id).ok().flatten()?;
-                let place = TaskPlace::of(&task);
                 let upper = y < by + bh / 2.0;
-                if upper {
-                    // Before this row: after its previous sibling (the dragged task aside).
-                    let sibs: Vec<String> = self
-                        .store()
-                        .task_siblings(&t.id)
-                        .ok()?
-                        .into_iter()
-                        .filter(|s| s != id)
-                        .collect();
-                    let pos = sibs.iter().position(|s| *s == t.id)?;
-                    let after = pos.checked_sub(1).map(|p| sibs[p].clone());
-                    return line(place, after, by, t.depth);
-                }
-                // Right half of the content: nest under it (4.4).
-                if x > bx + bw / 2.0 {
+                let own = self.within(&t.id, id);
+                // Right half of the content, lower half: nest under it (4.4).
+                if !upper && !own && x > bx + bw / 2.0 {
                     return Some(TaskTarget::Into {
                         parent: t.id.clone(),
                         row: row_w,
                     });
                 }
-                if t.has_children && !t.collapsed {
-                    // Below an expanded parent: its first sub-task.
-                    let place = TaskPlace {
-                        parent_id: Some(t.id.clone()),
-                        ..place
-                    };
-                    return line(place, None, by + bh, t.depth + 1);
-                }
-                line(place, Some(t.id.clone()), by + bh, t.depth)
+                let (place, after, depth) = self.gap_target(id, &t, upper, own, x)?;
+                line(place, after, if upper { by } else { by + bh }, depth)
             }
             Row::SectionHeader(s) => {
                 let place = TaskPlace {
@@ -418,6 +433,172 @@ impl TickWindow {
         }
     }
 
+    /// The real depth of task `id` and its ancestors (`[id, parent, ...]`).
+    fn task_chain(&self, id: &str) -> Vec<String> {
+        let store = self.store();
+        let mut out = Vec::new();
+        let mut cur = Some(id.to_owned());
+        while let Some(c) = cur {
+            if out.len() > 64 {
+                break;
+            }
+            cur = store
+                .task(&c)
+                .ok()
+                .flatten()
+                .and_then(|t| t.parent_id.clone());
+            out.push(c);
+        }
+        out
+    }
+
+    /// Sideways pointer movement since the drag started, at `x` in list coordinates.
+    fn drag_dx(&self, x: f64) -> f64 {
+        let Some((ox, _)) = ORIGIN.with(std::cell::Cell::get) else {
+            return 0.0;
+        };
+        let list = self.imp().task_list.get();
+        list.compute_point(self, &gtk::graphene::Point::new(x as f32, 0.0))
+            .map_or(0.0, |p| f64::from(p.x()) - ox)
+    }
+
+    /// A drop between two rows, before (`upper`) or after row `t`: where the dragged task
+    /// `id` goes and at which depth (4.6). `own`: `t` is the dragged task or inside it.
+    fn gap_target(
+        &self,
+        id: &str,
+        t: &crate::rows::TaskRow,
+        upper: bool,
+        own: bool,
+        x: f64,
+    ) -> Option<(TaskPlace, Option<String>, usize)> {
+        let store_rows = self.imp().rows.get()?;
+        let rows: Vec<TickRow> = (0..store_rows.n_items())
+            .filter_map(|i| store_rows.item(i).and_downcast::<TickRow>())
+            .collect();
+        let idx = rows.iter().position(|r| r.key() == t.key)?;
+        let gap = if upper { idx } else { idx + 1 };
+        // Neighbouring task rows of the gap in the same group, the dragged subtree aside.
+        let task_of = |r: &TickRow| r.row().task().map(|x| x.id.clone());
+        let mut above = None;
+        for r in rows[..gap].iter().rev() {
+            match task_of(r) {
+                Some(tid) if self.within(&tid, id) => continue,
+                Some(tid) => {
+                    above = Some(tid);
+                    break;
+                }
+                None => break,
+            }
+        }
+        let mut below = None;
+        for r in &rows[gap..] {
+            match task_of(r) {
+                Some(tid) if self.within(&tid, id) => continue,
+                Some(tid) => {
+                    below = Some(tid);
+                    break;
+                }
+                None => break,
+            }
+        }
+        let depth_of = |tid: &str| self.task_chain(tid).len().saturating_sub(1);
+        let row_depth = depth_of(&t.id);
+        let default = if own {
+            depth_of(id)
+        } else if !upper && t.has_children && !t.collapsed {
+            row_depth + 1
+        } else {
+            row_depth
+        };
+        let min = below.as_deref().map_or(0, depth_of);
+        let max = above.as_deref().map_or(0, |a| depth_of(a) + 1);
+        let d = line_depth(default, self.drag_dx(x), min, max)?;
+        let project = self.project_of_view()?;
+        match above {
+            Some(a) => {
+                let chain = self.task_chain(&a);
+                let da = chain.len() - 1;
+                let (parent, after) = if d == da + 1 {
+                    (Some(a.clone()), None)
+                } else {
+                    let anc = chain.get(da - d)?.clone();
+                    (chain.get(da - d + 1).cloned(), Some(anc))
+                };
+                let section = {
+                    let store = self.store();
+                    store
+                        .task(&a)
+                        .ok()
+                        .flatten()
+                        .and_then(|x| x.section_id.clone())
+                };
+                Some((
+                    TaskPlace {
+                        project_id: project,
+                        section_id: section,
+                        parent_id: parent,
+                    },
+                    after,
+                    d,
+                ))
+            }
+            None => {
+                let anchor = below.unwrap_or_else(|| t.id.clone());
+                let section = {
+                    let store = self.store();
+                    store
+                        .task(&anchor)
+                        .ok()
+                        .flatten()
+                        .and_then(|x| x.section_id.clone())
+                };
+                Some((
+                    TaskPlace {
+                        project_id: project,
+                        section_id: section,
+                        parent_id: None,
+                    },
+                    None,
+                    0,
+                ))
+            }
+        }
+    }
+
+    /// Upcoming and Today: the day group under (x, y), if it is another day than the task's
+    /// (4.7, 4.20). The Overdue group takes no drops.
+    fn day_target(&self, id: &str, x: f64, y: f64) -> Option<TaskTarget> {
+        let list: gtk::Widget = self.imp().task_list.get().upcast();
+        let (row_w, b) = row_at(&list, x, y)?;
+        let key = row_key(&row_w)?;
+        let store_rows = self.imp().rows.get()?;
+        let rows: Vec<TickRow> = (0..store_rows.n_items())
+            .filter_map(|i| store_rows.item(i).and_downcast::<TickRow>())
+            .collect();
+        let idx = rows.iter().position(|r| r.key() == key)?;
+        // The group's day header: this row's, or the nearest one above it.
+        let header = rows[..=idx].iter().rev().find_map(|r| match &*r.row() {
+            Row::DayHeader(d) => Some(d.key.clone()),
+            Row::ViewHeader(_) => Some(String::new()),
+            _ => None,
+        })?;
+        let date =
+            chrono::NaiveDate::parse_from_str(header.strip_prefix("day:")?, "%Y-%m-%d").ok()?;
+        let current = self.store().task(id).ok().flatten()?.due.map(|d| d.date);
+        if current == Some(date) {
+            return None;
+        }
+        let (by, bh) = (f64::from(b.y()), f64::from(b.height()));
+        let upper = y < by + bh / 2.0;
+        Some(TaskTarget::Day {
+            date,
+            y: if upper { by } else { by + bh },
+            x: f64::from(b.x()),
+            width: f64::from(b.width()),
+        })
+    }
+
     fn show_task_target(&self, target: &TaskTarget) {
         let imp = self.imp();
         match target {
@@ -430,6 +611,12 @@ impl TickWindow {
             TaskTarget::Into { row, .. } => {
                 imp.drop_line.set_visible(false);
                 self.show_into(row);
+            }
+            TaskTarget::Day { y, x, width, .. } => {
+                self.clear_into();
+                let list: gtk::Widget = imp.task_list.get().upcast();
+                let overlay: gtk::Widget = imp.list_overlay.get().upcast();
+                self.place_line(&imp.drop_line, &list, &overlay, *x, *y, *width);
             }
         }
     }
@@ -479,6 +666,20 @@ impl TickWindow {
 
     fn drop_task(&self, id: &str, target: TaskTarget) {
         let cmds = match target {
+            TaskTarget::Day { date, .. } => {
+                // A new day, the same time (4.7).
+                let time = self
+                    .store()
+                    .task(id)
+                    .ok()
+                    .flatten()
+                    .and_then(|t| t.due.and_then(|d| d.time));
+                let due = crate::edit::due_args(time, &crate::pickers::DateChoice::Date(date));
+                vec![tick_core::Command::item_update(
+                    id,
+                    serde_json::json!({ "due": due }),
+                )]
+            }
             TaskTarget::Place { place, after, .. } => self
                 .store()
                 .place_task_commands(id, &place, after.as_deref())
@@ -520,6 +721,46 @@ impl TickWindow {
     }
 
     // ---- sidebar ----
+
+    /// While dragging over the sidebar: a collapsed project under the pointer opens after
+    /// [`HOVER_EXPAND`] (a timer, since motion stops while the pointer rests).
+    fn hover_expand(&self, x: f64, y: f64) {
+        let Some(sb) = self.imp().sidebar.get() else {
+            return;
+        };
+        let list: gtk::Widget = sb.list().clone().upcast();
+        let row = row_at(&list, x, y)
+            .and_then(|(w, _)| w.first_child().and_downcast::<gtk::TreeExpander>())
+            .and_then(|e| e.list_row())
+            .filter(|r| r.is_expandable() && !r.is_expanded());
+        let imp = self.imp();
+        let same = match (&row, imp.hover_row.borrow().as_ref()) {
+            (Some(r), Some((h, _))) => h.upgrade().as_ref() == Some(r),
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        self.cancel_hover_expand();
+        let Some(row) = row else { return };
+        let weak = row.downgrade();
+        let win = self.downgrade();
+        let id = glib::timeout_add_local_once(HOVER_EXPAND, move || {
+            if let Some(w) = win.upgrade() {
+                w.imp().hover_row.replace(None);
+            }
+            if let Some(r) = weak.upgrade() {
+                r.set_expanded(true);
+            }
+        });
+        imp.hover_row.replace(Some((row.downgrade(), id)));
+    }
+
+    fn cancel_hover_expand(&self) {
+        if let Some((_, id)) = self.imp().hover_row.take() {
+            id.remove();
+        }
+    }
 
     /// The project row (Inbox included) under `y` in the sidebar list.
     fn sidebar_project_at(&self, x: f64, y: f64) -> Option<(String, gtk::Widget)> {
@@ -728,7 +969,13 @@ pub fn drag_source(
         icon_widget.set_margin_end(ICON_MARGIN);
         icon_widget.set_margin_top(ICON_MARGIN);
         icon_widget.set_margin_bottom(ICON_MARGIN);
-        let (hx, _) = hot.get();
+        let (hx, hy0) = hot.get();
+        // Where the drag started, in window coordinates (sideways steps, 4.6).
+        let origin = w.upgrade().and_then(|w| {
+            let root = w.root()?;
+            w.compute_point(&root, &gtk::graphene::Point::new(hx as f32, hy0 as f32))
+        });
+        ORIGIN.with(|o| o.set(origin.map(|p| (f64::from(p.x()), f64::from(p.y())))));
         let di = gtk::DragIcon::for_drag(drag);
         di.set_child(Some(&icon_widget));
         // The icon hangs just below the pointer, so the insertion line at the pointer stays
@@ -767,4 +1014,23 @@ pub fn drag_source(
         drag.connect_drop_performed(move |_| finish());
     });
     widget.add_controller(source);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::line_depth;
+
+    #[test]
+    fn sideways_steps_of_32_px() {
+        // No movement: the spot's own depth.
+        assert_eq!(line_depth(0, 0.0, 0, 1), Some(0));
+        // Half a step rounds to a step; one level at most under the row above.
+        assert_eq!(line_depth(0, 16.0, 0, 1), Some(1));
+        assert_eq!(line_depth(0, 100.0, 0, 1), Some(1));
+        assert_eq!(line_depth(2, -40.0, 0, 3), Some(1));
+        assert_eq!(line_depth(2, -200.0, 1, 3), Some(1));
+        assert_eq!(line_depth(1, 10.0, 0, 2), Some(1));
+        // No valid depth.
+        assert_eq!(line_depth(0, 0.0, 2, 1), None);
+    }
 }

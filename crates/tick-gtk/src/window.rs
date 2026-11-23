@@ -154,6 +154,8 @@ mod imp {
         pub refresh_pending: Cell<bool>,
         /// The row showing the "drop into" outline.
         pub drop_into: RefCell<Option<gtk::Widget>>,
+        /// The collapsed sidebar project under a drag and its expand timer (4.1).
+        pub hover_row: RefCell<Option<(glib::WeakRef<gtk::TreeListRow>, glib::SourceId)>>,
         /// The search entry takes focus when it is built (`views.rs`).
         pub focus_search: Rc<Cell<bool>>,
         /// The view before Search (Escape in the empty search entry goes back to it).
