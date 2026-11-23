@@ -734,6 +734,72 @@ async fn completed_history_pagination() {
     );
 }
 
+/// A history refresh drops cached completions the server no longer has, page by page, and
+/// reopening a completed task takes it out of the history at once and on the server.
+#[tokio::test]
+async fn completed_refresh_prunes_and_reopen_restores() {
+    let mut e = env_with("empty").await;
+    let base = chrono::DateTime::parse_from_rfc3339(NOW).unwrap();
+    let stamp = |h: i64| {
+        (base - chrono::Duration::hours(h))
+            .with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%S%.6fZ")
+            .to_string()
+    };
+    {
+        let mut st = e.server.state();
+        for i in 0..60 {
+            st.add_completed(
+                json!({"id": format!("d{i:03}"), "content": format!("Done {i}"),
+                "project_id": seed::INBOX_ID, "checked": true, "completed_at": stamp(i + 1),
+                "priority": 1}),
+            );
+        }
+    }
+    e.engine.sync_once().await.unwrap();
+    // Stale rows from an earlier session: one inside the first page's range, one in the
+    // second page's range, one older than the window (kept).
+    e.engine
+        .store_mut()
+        .cache_completed(&[
+            json!({"id": "gone1", "content": "Gone 1", "project_id": seed::INBOX_ID,
+                   "completed_at": stamp(2)}),
+            json!({"id": "gone2", "content": "Gone 2", "project_id": seed::INBOX_ID,
+                   "completed_at": stamp(58)}),
+            json!({"id": "ancient", "content": "Ancient", "project_id": seed::INBOX_ID,
+                   "completed_at": stamp(24 * 40)}),
+        ])
+        .unwrap();
+    let ids = |e: &Env| -> Vec<String> {
+        e.store()
+            .completed_history(None, 500)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.item.id)
+            .collect()
+    };
+    let (n, more) = e.engine.fetch_completed(true).await.unwrap();
+    assert_eq!((n, more), (50, true));
+    let after1 = ids(&e);
+    assert!(!after1.contains(&"gone1".to_owned()), "{after1:?}");
+    assert!(after1.contains(&"gone2".to_owned()));
+    let (n, _) = e.engine.fetch_completed(false).await.unwrap();
+    assert_eq!(n, 10);
+    let after2 = ids(&e);
+    assert!(!after2.contains(&"gone2".to_owned()), "{after2:?}");
+    assert!(after2.contains(&"ancient".to_owned()));
+    assert_eq!(after2.len(), 61);
+
+    // Reopen: gone from the history now, active again after the sync.
+    e.enqueue(Command::item_uncomplete("d005"));
+    assert!(e.store().completed_task("d005").unwrap().is_none());
+    assert!(e.task("d005").is_some_and(|t| !t.checked));
+    e.engine.sync_once().await.unwrap();
+    let server = e.server_item("d005").unwrap();
+    assert_eq!(server["checked"], false);
+    assert!(e.task("d005").is_some_and(|t| !t.checked));
+}
+
 #[tokio::test]
 async fn unsupported_filter_uses_the_server() {
     let mut e = env().await;

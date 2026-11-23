@@ -84,7 +84,7 @@ fn migrations_are_versioned_and_idempotent() {
         .connection()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(v, 2);
+    assert_eq!(v, 3);
     let mode: String = s
         .connection()
         .query_row("PRAGMA journal_mode", [], |r| r.get(0))
@@ -629,7 +629,7 @@ fn filter_view_with_huge_day_counts_does_not_panic() {
 
 /// A cache written by schema v1 upgrades in place and keeps its queue.
 #[test]
-fn v1_caches_upgrade_to_v2() {
+fn v1_caches_upgrade_to_the_latest() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cache.sqlite3");
     {
@@ -648,7 +648,7 @@ fn v1_caches_upgrade_to_v2() {
         .connection()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(v, 2);
+    assert_eq!(v, 3);
     let queued = s.pending_commands().unwrap();
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].not_before, None);

@@ -207,12 +207,25 @@ CREATE TABLE temp_ids (
 ALTER TABLE queue ADD COLUMN not_before INTEGER;
 ";
 
+/// v3: reminders already shown (`reminders.rs`), so a reminder notifies once across syncs
+/// and restarts.
+const V3: &str = "
+CREATE TABLE fired_reminders (
+    -- `<reminder id>@<fire instant, UTC>`: a moved reminder fires again.
+    key TEXT PRIMARY KEY,
+    reminder_id TEXT NOT NULL,
+    -- Unix ms.
+    fire_at INTEGER NOT NULL,
+    fired_at INTEGER NOT NULL
+) WITHOUT ROWID;
+";
+
 /// Bring the schema to the latest version.
 ///
 /// Each step runs in an immediate transaction and re-reads `user_version` inside it, so two
 /// connections opening the same cache at startup (UI and engine) cannot both run a step.
 pub(super) fn migrate(conn: &Connection) -> Result<()> {
-    let migrations: Vec<String> = vec![v1(), V2.to_owned()];
+    let migrations: Vec<String> = vec![v1(), V2.to_owned(), V3.to_owned()];
     for (idx, sql) in migrations.iter().enumerate() {
         let target = idx as i64 + 1;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;

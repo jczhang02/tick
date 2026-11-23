@@ -299,9 +299,23 @@ impl Store {
         tx.execute_batch(
             "DELETE FROM item_labels; DELETE FROM collaborator_states; DELETE FROM completed_info;
              DELETE FROM completed_items; DELETE FROM filter_cache; DELETE FROM queue;
-             DELETE FROM failed_commands; DELETE FROM meta; DELETE FROM temp_ids;",
+             DELETE FROM failed_commands; DELETE FROM meta; DELETE FROM temp_ids;
+             DELETE FROM fired_reminders;",
         )?;
         tx.commit()?;
+        Ok(())
+    }
+}
+
+impl Store {
+    /// Log out: delete every cached object, the queue, reminder state and the settings
+    /// except the device preferences (`color-scheme`, `run-at-login`).
+    pub fn clear_account(&mut self) -> Result<()> {
+        self.clear_all()?;
+        self.conn.execute(
+            "DELETE FROM settings WHERE key NOT IN ('color-scheme', 'run-at-login')",
+            [],
+        )?;
         Ok(())
     }
 }

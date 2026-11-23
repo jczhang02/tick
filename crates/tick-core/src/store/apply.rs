@@ -300,8 +300,38 @@ impl Store {
 
     /// Store a page of completed tasks in the history cache.
     pub fn cache_completed(&mut self, items: &[Value]) -> Result<Changes> {
+        self.cache_completed_range(items, None)
+    }
+
+    /// Store a page of completed tasks that covers every completion in `range`
+    /// (`[lower, upper)`, `completed_at` strings): cached rows in that range the server no
+    /// longer returns (reopened or deleted elsewhere) are dropped first.
+    pub fn cache_completed_range(
+        &mut self,
+        items: &[Value],
+        range: Option<(&str, &str)>,
+    ) -> Result<Changes> {
         let tx = self.write_tx()?;
         let mut changes = Changes::default();
+        if let Some((lower, upper)) = range {
+            let gone: Vec<String> = {
+                let mut stmt = tx.prepare_cached(
+                    "SELECT id FROM completed_items WHERE completed_at >= ?1 AND completed_at < ?2",
+                )?;
+                let rows = stmt.query_map(params![lower, upper], |r| r.get::<_, String>(0))?;
+                rows.collect::<std::result::Result<_, _>>()?
+            };
+            for id in gone {
+                if items
+                    .iter()
+                    .any(|v| id_of(v, "id").as_deref() == Some(id.as_str()))
+                {
+                    continue;
+                }
+                tx.execute("DELETE FROM completed_items WHERE id = ?1", [&id])?;
+                changes.add(Kind::CompletedItem, &id);
+            }
+        }
         for v in items {
             let Some(id) = id_of(v, "id") else { continue };
             let completed_at = v

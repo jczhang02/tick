@@ -129,10 +129,12 @@ pub enum EngineEvent {
     /// Objects changed in the store; refresh the affected models.
     Changed(Changes),
     Status(SyncStatus),
-    /// A page of completed history was cached.
+    /// A page of completed history was cached. `since` is the start of the window the page
+    /// came from (RFC 3339, UTC): the history is complete from there on.
     CompletedLoaded {
         count: usize,
         has_more: bool,
+        since: String,
     },
     /// Server results for an unsupported filter query were cached.
     FilterLoaded {
@@ -232,6 +234,9 @@ struct CompletedPager {
     since: chrono::DateTime<chrono::Utc>,
     until: chrono::DateTime<chrono::Utc>,
     cursor: Option<String>,
+    /// Upper bound (`completed_at`, exclusive) of what the next page covers: the window's
+    /// end for its first page, else the oldest completion of the previous page.
+    upper: String,
     windows: u32,
 }
 
@@ -250,6 +255,12 @@ pub struct SyncEngine {
 
 fn rfc3339(t: chrono::DateTime<chrono::Utc>) -> String {
     t.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// An instant written like the API's `completed_at` (`2025-01-21T21:28:43.841504Z`), so
+/// cached rows compare with it as strings.
+fn completed_stamp(t: chrono::DateTime<chrono::Utc>) -> String {
+    t.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()
 }
 
 impl SyncEngine {
@@ -547,10 +558,12 @@ impl SyncEngine {
     pub async fn fetch_completed(&mut self, restart: bool) -> Result<(usize, bool), EngineError> {
         let now = self.store.now().utc();
         if restart || self.completed.is_none() {
+            let until = now + chrono::Duration::minutes(1);
             self.completed = Some(CompletedPager {
                 since: now - chrono::Duration::days(COMPLETED_WINDOW_DAYS),
-                until: now + chrono::Duration::minutes(1),
+                until,
                 cursor: None,
+                upper: completed_stamp(until),
                 windows: 1,
             });
         }
@@ -569,20 +582,46 @@ impl SyncEngine {
             .await
             .map_err(|e| self.fail(e.into()))?;
         let count = page.items.len();
-        let changes = self.store.cache_completed(&page.items)?;
+        let window_since = rfc3339(pager.since);
+        let next = page.next_cursor.filter(|c| !c.is_empty());
+        // The page holds every completion from its oldest one (or, as the window's last
+        // page, from the window's start) up to `upper`: cached rows in that range that it
+        // does not hold are gone on the server.
+        let oldest = page
+            .items
+            .iter()
+            .filter_map(|v| v.get("completed_at").and_then(Value::as_str))
+            .min()
+            .map(str::to_owned);
+        let lower = match (&next, &oldest) {
+            (None, _) => completed_stamp(pager.since),
+            (Some(_), Some(o)) => o.clone(),
+            (Some(_), None) => pager.upper.clone(),
+        };
+        let changes = self
+            .store
+            .cache_completed_range(&page.items, Some((&lower, &pager.upper)))?;
         self.emit_changes(&changes);
-        match page.next_cursor.filter(|c| !c.is_empty()) {
-            Some(c) => pager.cursor = Some(c),
+        match next {
+            Some(c) => {
+                pager.cursor = Some(c);
+                pager.upper = lower;
+            }
             None => {
                 pager.until = pager.since;
                 pager.since -= chrono::Duration::days(COMPLETED_WINDOW_DAYS);
                 pager.cursor = None;
+                pager.upper = completed_stamp(pager.until);
                 pager.windows += 1;
             }
         }
         let has_more = pager.windows <= COMPLETED_MAX_WINDOWS;
         self.completed = Some(pager);
-        self.emit(EngineEvent::CompletedLoaded { count, has_more });
+        self.emit(EngineEvent::CompletedLoaded {
+            count,
+            has_more,
+            since: window_since,
+        });
         Ok((count, has_more))
     }
 
@@ -659,18 +698,23 @@ pub struct EngineConfig {
 }
 
 impl EngineConfig {
-    /// Defaults from the environment (`TICK_API_BASE`, `TICK_SYNC_INTERVAL_MS`).
+    /// Defaults from the environment (`TICK_API_BASE`, `TICK_SYNC_INTERVAL_MS`,
+    /// `TICK_BACKGROUND_SYNC_MS`).
     pub fn from_env(token: String, db_path: PathBuf) -> EngineConfig {
-        let fg = std::env::var("TICK_SYNC_INTERVAL_MS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .map_or(Duration::from_secs(15), Duration::from_millis);
+        let ms = |key: &str, default: Duration| {
+            std::env::var(key)
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map_or(default, Duration::from_millis)
+        };
+        let fg = ms("TICK_SYNC_INTERVAL_MS", Duration::from_secs(15));
+        let bg = ms("TICK_BACKGROUND_SYNC_MS", Duration::from_secs(300));
         EngineConfig {
             api_base: crate::api::api_base_from_env(),
             token,
             db_path,
             foreground_interval: fg,
-            background_interval: Duration::from_secs(300),
+            background_interval: bg,
             clock: None,
         }
     }
