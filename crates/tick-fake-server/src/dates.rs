@@ -456,4 +456,22 @@ mod tests {
         assert_eq!(item["due"]["is_recurring"], true);
         assert_eq!(item["project_id"], st.inbox_id());
     }
+
+    /// A recurring due moved to another day (`{"date", "string"}`, as in
+    /// `docs/api/pages/sync_tasks.md`) keeps its recurrence; a date alone is a one-off.
+    #[test]
+    fn a_date_with_a_recurring_string_stays_recurring() {
+        let st = State::new("t");
+        let due = normalize_due(
+            &st,
+            &json!({"date": "2026-03-12T08:00:00", "string": "every monday at 8", "lang": "en",
+                    "is_recurring": true}),
+        )
+        .unwrap();
+        assert_eq!(due["date"], "2026-03-12T08:00:00");
+        assert_eq!(due["string"], "every monday at 8");
+        assert_eq!(due["is_recurring"], true);
+        let once = normalize_due(&st, &json!({"date": "2026-03-12"})).unwrap();
+        assert_eq!(once["is_recurring"], false);
+    }
 }

@@ -734,6 +734,72 @@ async fn completed_history_pagination() {
     );
 }
 
+/// A history refresh drops cached completions the server no longer has, page by page, and
+/// reopening a completed task takes it out of the history at once and on the server.
+#[tokio::test]
+async fn completed_refresh_prunes_and_reopen_restores() {
+    let mut e = env_with("empty").await;
+    let base = chrono::DateTime::parse_from_rfc3339(NOW).unwrap();
+    let stamp = |h: i64| {
+        (base - chrono::Duration::hours(h))
+            .with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%S%.6fZ")
+            .to_string()
+    };
+    {
+        let mut st = e.server.state();
+        for i in 0..60 {
+            st.add_completed(
+                json!({"id": format!("d{i:03}"), "content": format!("Done {i}"),
+                "project_id": seed::INBOX_ID, "checked": true, "completed_at": stamp(i + 1),
+                "priority": 1}),
+            );
+        }
+    }
+    e.engine.sync_once().await.unwrap();
+    // Stale rows from an earlier session: one inside the first page's range, one in the
+    // second page's range, one older than the window (kept).
+    e.engine
+        .store_mut()
+        .cache_completed(&[
+            json!({"id": "gone1", "content": "Gone 1", "project_id": seed::INBOX_ID,
+                   "completed_at": stamp(2)}),
+            json!({"id": "gone2", "content": "Gone 2", "project_id": seed::INBOX_ID,
+                   "completed_at": stamp(58)}),
+            json!({"id": "ancient", "content": "Ancient", "project_id": seed::INBOX_ID,
+                   "completed_at": stamp(24 * 40)}),
+        ])
+        .unwrap();
+    let ids = |e: &Env| -> Vec<String> {
+        e.store()
+            .completed_history(None, 500)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.item.id)
+            .collect()
+    };
+    let (n, more) = e.engine.fetch_completed(true).await.unwrap();
+    assert_eq!((n, more), (50, true));
+    let after1 = ids(&e);
+    assert!(!after1.contains(&"gone1".to_owned()), "{after1:?}");
+    assert!(after1.contains(&"gone2".to_owned()));
+    let (n, _) = e.engine.fetch_completed(false).await.unwrap();
+    assert_eq!(n, 10);
+    let after2 = ids(&e);
+    assert!(!after2.contains(&"gone2".to_owned()), "{after2:?}");
+    assert!(after2.contains(&"ancient".to_owned()));
+    assert_eq!(after2.len(), 61);
+
+    // Reopen: gone from the history now, active again after the sync.
+    e.enqueue(Command::item_uncomplete("d005"));
+    assert!(e.store().completed_task("d005").unwrap().is_none());
+    assert!(e.task("d005").is_some_and(|t| !t.checked));
+    e.engine.sync_once().await.unwrap();
+    let server = e.server_item("d005").unwrap();
+    assert_eq!(server["checked"], false);
+    assert!(e.task("d005").is_some_and(|t| !t.checked));
+}
+
 #[tokio::test]
 async fn unsupported_filter_uses_the_server() {
     let mut e = env().await;
@@ -893,6 +959,89 @@ async fn background_engine_emits_events() {
     assert!(!ui.projects_tree().unwrap().is_empty());
     handle.sync_now();
     handle.shutdown();
+}
+
+/// `tick --background`: the engine is told it runs in the background before its first
+/// sync; that sync still goes out at once (not after the 5 min cadence).
+#[tokio::test]
+async fn background_start_syncs_at_once() {
+    let e = env().await;
+    let dir = tempfile::tempdir().unwrap();
+    let config = tick_core::EngineConfig {
+        api_base: e.server.base_url(),
+        token: e.server.token(),
+        db_path: dir.path().join("bg.sqlite3"),
+        foreground_interval: Duration::from_secs(60),
+        background_interval: Duration::from_secs(300),
+        clock: Some(fixed_clock()),
+    };
+    let (handle, _events) = tick_core::Engine::spawn(config).unwrap();
+    handle.set_foreground(false);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while e.server.requests_to("/api/v1/sync").is_empty() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(e.server.requests_to("/api/v1/sync").len(), 1);
+    handle.shutdown();
+}
+
+/// Log out (docs/architecture.md, Store): a stop does not wait for a request in flight, and
+/// the event stream ends only once the engine no longer writes, so a cache cleared then
+/// stays empty when the slow response finally arrives.
+#[tokio::test]
+async fn shutdown_abandons_a_request_in_flight() {
+    let e = env().await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("bg.sqlite3");
+    let config = tick_core::EngineConfig {
+        api_base: e.server.base_url(),
+        token: e.server.token(),
+        db_path: db.clone(),
+        foreground_interval: Duration::from_millis(200),
+        background_interval: Duration::from_secs(60),
+        clock: Some(fixed_clock()),
+    };
+    let (handle, events) = tick_core::Engine::spawn(config).unwrap();
+    // The first sync goes through, then every sync hangs for 5 s.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while e.server.requests_to("/api/v1/sync").is_empty() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    e.server.inject(Failure::Delay {
+        ms: 5000,
+        count: 10,
+    });
+    let n = e.server.requests_to("/api/v1/sync").len();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while e.server.requests_to("/api/v1/sync").len() == n && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        e.server.requests_to("/api/v1/sync").len() > n,
+        "a slow sync is on the wire"
+    );
+    let asked = Instant::now();
+    handle.shutdown();
+    // Queued requests do not hold the stop back either.
+    handle.sync_now();
+    handle.load_completed(true);
+    let ended = tokio::time::timeout(Duration::from_secs(2), async {
+        while events.recv().await.is_ok() {}
+    })
+    .await;
+    assert!(
+        ended.is_ok(),
+        "the event stream ends without waiting for the response"
+    );
+    assert!(asked.elapsed() < Duration::from_secs(2));
+    let mut ui = Store::open(&db).unwrap();
+    ui.clear_account().unwrap();
+    // The slow response would have arrived by now: nothing was written after the stop.
+    tokio::time::sleep(Duration::from_millis(5500)).await;
+    let ui = Store::open(&db).unwrap();
+    assert_eq!(ui.sync_token().unwrap(), None);
+    assert!(ui.user().unwrap().is_none());
+    assert!(ui.projects_tree().unwrap().is_empty());
 }
 
 #[tokio::test]

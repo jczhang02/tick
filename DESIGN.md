@@ -492,7 +492,7 @@ T, L, V, Space) act on that row, so the tint also marks the keyboard cursor. A p
 leaves it behind: a context menu opened by right-click or long-press selects its row while it is
 open, then the selection returns to the task in the detail pane (none when the pane is closed);
 closing the pane by pointer clears it too. Escape returns focus to the row, which stays selected
-as the cursor.
+as the cursor. (Owner-accepted in PR #5: the selection tint doubles as the keyboard cursor.)
 
 #### 2.4.7 Project, label and filter colors
 
@@ -714,7 +714,7 @@ the breakpoints sits on the screenshot widths (1280, 600).
 | Name | Condition | Sidebar | Task list | Detail |
 |---|---|---|---|---|
 | Wide | above 980 sp | docked | docked | docked, 340 to 420 px, pushes the list |
-| B1 medium | `max-width: 980sp` | docked | docked | `AdwOverlaySplitView.collapsed = true`: slides over the list from the end edge, same width rules, list stays full width underneath; click on the list or Escape closes it |
+| B1 medium | `max-width: 980sp` | docked | docked | `AdwOverlaySplitView.collapsed = true`: slides over the list from the end edge, same width rules, list stays full width underneath; click on the list or Escape closes it (libadwaita hides the overlay on any click on the list, empty space or a row; that click does not reach the row) |
 | B2 narrow | `max-width: 720sp` | `AdwNavigationSplitView.collapsed = true`: the sidebar becomes the root page; choosing a view pushes the list | full window width | overlay as in B1 (340 px) |
 | B3 phone | `max-width: 500sp` | as B2 | as B2 | overlay at full width: setters `min-sidebar-width = 0`, `max-sidebar-width = 500`, `sidebar-width-fraction = 1.0`; the close button becomes a back arrow at the start |
 
@@ -927,6 +927,10 @@ The signature control. `GtkCheckButton` with class `.tick-ring` and one of `.p1`
 | completed-pending (recurring, waiting for sync) | as checked | as checked | as checked, plus `AdwSpinner` 12 px in the meta line with "Completing" |
 | disabled (Completed history view) | `--tick-p4` | none | check in `--tick-p4` |
 
+The disabled ring's accessible name is "Completed". A history task is reopened from its detail
+pane (the pane's ring stays active, "Mark as not done", and its task menu offers "Reopen") or
+from the row's context menu ("Open", "Reopen"); a toast "Task reopened" confirms it (4.21).
+
 p4 uses `--tick-p4` (2.4.3) for the ring and 0 % fill at rest (no tint for "no priority"); its
 hover, pressed and checked fills are `--tick-p4` at 20 %, 30 % and 100 %, with the same check
 mark colors as the other priorities. The screenshot suite includes a p4 row at rest, hovered and
@@ -993,7 +997,7 @@ avatar column lines up.
 | completed-pending (recurring) | ring filled, title not struck, meta line shows the spinner and "Completing" until the sync returns with the next date; then the ring empties and the due date updates |
 | failed change | trailing `dialog-warning-symbolic` 16 px in `--tick-red` with the server message as tooltip; the row shows the server state (the change was rolled back). The tooltip is redundant (2.6): the same message is appended to the row's accessible description ("Not saved: <server message>") and listed in the sync popover (4.14), which the warning in the header bar opens |
 | dragging (source) | the row stays in place at 40 % opacity |
-| drag icon | the row rendered on the floating surface (2.6) at its own width, radius 15, opaque (a translucent icon lets the row text under it show through and overlap its own) |
+| drag icon | the row rendered on the floating surface (2.6) at its own width, radius 15, opaque (a translucent icon lets the row text under it show through and overlap its own; owner-accepted in PR #5) |
 | drop position | 2 px `--accent-color` line with a 6 px dot at its start, inset by the target depth's indent, between rows; dropping on the right half of a row's content nests it as a sub-task (row gets the inset accent outline instead) |
 | disabled | not used (read-only Completed rows use the ring's disabled state and full-contrast titles) |
 
@@ -1039,7 +1043,13 @@ opens its menu.
 Covered in 4.4. Additional rules: collapsing a parent removes descendants from the model;
 expanding restores them; the parent's sub-task count stays visible either way. Dragging a task
 horizontally while dragging changes its depth in 32 px steps (the insertion line indents to show
-the target depth).
+the target depth). The steps count from where the drag started (whole 32 px steps, so a little sideways drift
+during a vertical move changes nothing), on top
+of the spot's own depth (4.4: before a row at its depth, after it at its depth, or as the first
+sub-task of an expanded parent), and stay between the depth of the row below the line (deeper
+would adopt it) and one level under the row above. Over the task's own row only a changed depth is a
+drop target, so dragging a row sideways in place nests or un-nests it. The right half of a row
+still nests under that row (4.4).
 
 ### 4.7 Upcoming day groups
 
@@ -1338,6 +1348,16 @@ open. Results update while typing (FTS5), as normal task
 rows with the project item in the meta line; matched words are not highlighted in v1. Escape
 clears the entry; Escape on an empty entry returns to the previous view.
 
+- The result count sits 6 px under the entry (`.body .dimmed .numeric`, hidden when 0), as the
+  view header's subtitle (4.2). Before typing and without results the empty states of 4.13 follow.
+- Words are ANDed and each matches as a substring in titles and descriptions of active tasks
+  (Chinese included: words shorter than three characters use a plain substring match, longer
+  ones the FTS5 trigram index). At most 200 results, ordered like a filter (date, priority).
+- Keyboard: Down in the entry moves to the first result, Up from the first result returns to
+  the entry, Enter in the entry opens the first result in the detail pane.
+- The entry row is never rebuilt while it shows (typing keeps focus); only its count updates.
+- Search is not restored as the last view at startup (it would open with an empty entry).
+
 ### 4.16 Login page
 
 Window content when there is no token. `AdwToolbarView` with a flat header bar (no title,
@@ -1377,7 +1397,14 @@ connection and try again." Enter in the entry submits.
   after the window is closed."
 - Group "Account": `AdwButtonRow` "Log Out", plain style (libadwaita's `.destructive-action`
   row text measures 4.38:1 on a dark card, 2.4.4); confirms with an `AdwAlertDialog` (4.25), whose
-  "Log Out" response is the filled destructive button.
+  "Log Out" response is the filled destructive button. The main menu has the same item (3.4).
+- Run at Login asks the Background portal (`RequestBackground`, `autostart`, command line
+  `tick --background`, which starts without showing the window). While the portal answers the
+  switch is insensitive. When the portal is missing or fails, the switch goes back and a toast
+  in the dialog says "Run at Login is not available on this system."; when it says no, "Run at
+  Login was not allowed. Check Background Apps in Settings." (8 s). The choice is saved only
+  when the portal granted it.
+- The search button of `AdwPreferencesDialog` is off (one page, three groups).
 
 ### 4.18 Keyboard shortcuts window
 
@@ -1387,8 +1414,13 @@ menu. Sections and items:
 | Section | Items |
 |---|---|
 | General | Quick add `Q`; Search `/`; Preferences `Ctrl+,`; Keyboard shortcuts `Ctrl+?`; Close window `Ctrl+W`; Quit `Ctrl+Q`; Undo `Ctrl+Z` |
-| Navigation | Inbox `G I`; Today `G T`; Upcoming `G U`; Move focus `Up`/`Down` or `K`/`J`; Collapse/expand `Left`/`Right`; Back `Alt+Left` |
-| Tasks | Open `Enter`; Close details `Escape`; Complete `E` or `Space`; Set date `T`; Set priority `1`-`4`; Add labels `L`; Move to project `V`; Reorder `Alt+Shift+Up`/`Down`; Nest / un-nest `Alt+Shift+Right`/`Left`; Delete `Shift+Delete`; Context menu `Shift+F10` |
+| Navigation | Inbox `G I`; Today `G T`; Upcoming `G U`; Move focus `Up`/`Down` or `K`/`J`; Collapse or expand sub-tasks `Left`/`Right`; Back `Alt+Left` |
+| Tasks | Open `Enter`; Close details `Escape`; Complete `E` or `Space`; Set date `T`; Set priority `1`-`4`; Add labels `L`; Move to project `V`; Reorder `Alt+Shift+Up`/`Down`; Nest or un-nest `Alt+Shift+Right`/`Left`; Rename project or section `F2`; Delete `Shift+Delete`; Context menu `Shift+F10` or `Menu`; Add another task (quick add) `Ctrl+Enter` |
+
+libadwaita 1.9 leaves the dialog's rows and lists without accessible names and its search entry
+34 px tall: Tick names each row after its title and each list "Keyboard Shortcuts", gives the
+entry `.tick-entry` (44 px) and takes the scrolled window out of the focus order when the dialog
+maps.
 
 Sequences use `AdwShortcutLabel`'s sequential syntax with `+` (`g+t` renders G, then T);
 alternatives are space-separated (`e space`). Single-letter shortcuts are
@@ -1469,7 +1501,14 @@ Read-only history (SPEC: last 30 days, "Load more", cache first).
 | cache shown, refreshing | cached rows at once; the refresh line under the subtitle; rows update in place when the response arrives |
 | loaded, no tasks | the Completed empty state (4.13) |
 | request failed | rows (or the empty view) stay; toast "Couldn't load completed tasks" with "Retry", 8 s (4.12) |
-| offline | cache only, refresh line "Offline. Showing saved results.", Load More insensitive |
+| offline | cache only, refresh line "Offline. Showing saved results.", Load More insensitive; back online, the first page is fetched again |
+
+- Cache: every refreshed page replaces the cached completions in the range it covers, so a task
+  reopened or deleted elsewhere leaves the history. "Load More" before the first answer of a
+  visit is not shown (it would not know whether older pages exist); offline it is shown,
+  insensitive, when the cache has rows.
+- Reopen (4.3): `item_uncomplete`; the row leaves the history at once and the task is active
+  again in its project.
 
 ### 4.22 Filter views: local and server results
 
@@ -1509,7 +1548,7 @@ re-evaluate a query it cannot parse), so rows do not jump while the user works.
   [boxed list]
     [AdwEntryRow "Name"]                                   all three; focused on open
     [AdwEntryRow "Query", text in .monospace]              filters only
-    [AdwComboRow "Parent Project": None, then projects]    projects only
+    [row "Parent Project" opening the parent picker]       projects only
     [AdwSwitchRow "Add to Favorites"]                      all three
   [query hint .caption .dimmed, 6 below the list]         filters only
   [space 18]
@@ -1523,8 +1562,12 @@ re-evaluate a query it cannot parse), so rows do not jump while the user works.
   "Edit Filter". The primary button is "Add" for new items and "Save" for edits; it is
   insensitive while Name (or Query) is empty. Enter in the last entry row activates it
   (`activates-default`); Escape and Cancel close without saving.
-- Parent Project lists the project tree as "Vacation / Packing" paths and leaves out the project
-  itself and its descendants. Changing it is the dialog form of drag-to-nest (4.1).
+- Parent Project is an activatable row whose value is the current parent ("None" or a path); it
+  opens the parent picker (the Move to... picker layout, 4.10), which lists the project tree as
+  "Vacation / Packing" paths and leaves out the project itself and its descendants. Changing it is
+  the dialog form of drag-to-nest (4.1). Not `AdwComboRow`: on GTK 4.22 / libadwaita 1.9 its
+  popover list has no accessible name and 42 x 22 px items, which fail 2.7 and the naming rule
+  (owner-accepted in PR #5).
 - New items default to the API's `charcoal` color, no parent, not favorite. Rename or Color from
   a menu opens Edit with that field focused.
 - Query hint (filters), updated while typing by the local parser, no network:
@@ -1780,6 +1823,10 @@ Formats depend on the user's Todoist settings `date_format` (0 = day first, 1 = 
 | Color names | 4.23.1 | 4.23.1 |
 | Confirmation dialogs | 4.25 | 4.25 |
 | Notification actions | Complete / Open | 完成 / 打开 |
+| Reminder notification | title = task title; body = due ("Today 14:00") and project on two lines | |
+| History | Reopen / Task reopened / Completed {time} (row read aloud) | 重新打开 / 任务已重新打开 / 完成于 {time} |
+| Run at Login errors | Run at Login is not available on this system. / Run at Login was not allowed. Check Background Apps in Settings. | 此系统不支持登录时运行. / 登录时运行未获允许. 请在设置的 "后台应用" 中检查. |
+| Search | Search tasks / Search your tasks / No results for "milk" | 搜索任务 / 搜索任务 / 没有找到 "milk" |
 
 ---
 
@@ -1804,7 +1851,7 @@ Formats depend on the user's Todoist settings `date_format` (0 = day first, 1 = 
 | Toasts | `AdwToast` | `button-label`, `action-name` for Undo |
 | Pickers | `GtkPopover` | floating surface class applies to all popovers |
 | Date picker calendar | `GtkCalendar` | first weekday follows the locale; no property for Todoist's `start_day` (4.9) |
-| Edit dialogs | `AdwDialog` + `AdwEntryRow`, `AdwComboRow`, `AdwSwitchRow` | 4.23; color grid = `AdwWrapBox` of grouped `GtkCheckButton`s |
+| Edit dialogs | `AdwDialog` + `AdwEntryRow`, `AdwActionRow` (Parent Project, opens a picker), `AdwSwitchRow` | 4.23; color grid = `AdwWrapBox` of grouped `GtkCheckButton`s |
 | Confirmations | `AdwAlertDialog` | 4.25 |
 | Spinners | `AdwSpinner` (1.6); `AdwSpinnerPaintable` (1.6) inside entries | an entry icon takes a paintable, not a widget |
 | Avatars | `AdwAvatar` | `show-initials: true` |
@@ -2242,7 +2289,9 @@ otherwise bundle an SVG from GNOME's Icon Library (`org.gnome.design.IconLibrary
 gresource under `/dev/chengrui/Tick/icons/scalable/actions/` with the `tick-` name below.
 Symbolic icons stay one color: Adwaita's `task-due-symbolic` and `task-past-due-symbolic` carry a
 `warning` or `error` badge in a second hue, which would put an orange "warning" mark next to every
-plain date, so the due and overdue icons are Tick's own.
+plain date, so the due and overdue icons are Tick's own. `tick-next-week-symbolic`,
+`tick-clear-symbolic` and `tick-section-symbolic` are drawn by hand in the style of the outline
+icons around them, not taken from the Icon Library (owner-accepted in PR #5).
 
 | Role | Name | Source |
 |---|---|---|

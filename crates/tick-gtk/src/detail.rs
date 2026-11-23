@@ -98,6 +98,9 @@ pub struct DetailData {
     /// (done, total) direct sub-tasks.
     pub subtask_counts: Option<(usize, usize)>,
     pub comments: Vec<CommentRow>,
+    /// A task from the completed history (4.8, 4.21): nothing is editable; the ring reopens
+    /// it.
+    pub read_only: bool,
 }
 
 struct FieldRow {
@@ -129,6 +132,7 @@ pub struct TaskDetail {
     sub_count: gtk::Label,
     sub_list: gtk::Box,
     sub_entry: gtk::Entry,
+    sub_ghost: gtk::Button,
     comments_count: gtk::Label,
     comments: gtk::Box,
     /// The composer's multi-line text (Enter sends, Shift+Enter breaks the line; 4.8).
@@ -457,6 +461,7 @@ impl TaskDetail {
             sub_count,
             sub_list,
             sub_entry,
+            sub_ghost: sub_ghost.clone(),
             comments_count,
             comments,
             comment_view,
@@ -793,6 +798,9 @@ impl TaskDetail {
         let Some(d) = self.data.borrow().clone() else {
             return;
         };
+        if d.read_only {
+            return;
+        }
         self.desc_view.buffer().set_text(&d.description);
         self.desc_stack.set_visible_child_name("edit");
         self.desc_view.grab_focus();
@@ -830,7 +838,9 @@ impl TaskDetail {
         let Some(d) = self.data.borrow().clone() else {
             return;
         };
-        if d.description.trim().is_empty() {
+        if d.description.trim().is_empty() && d.read_only {
+            self.desc_label.set_markup("");
+        } else if d.description.trim().is_empty() {
             self.desc_label
                 .set_markup(&markdown::escape(&gettext("Add a description")));
             self.desc_label.add_css_class("dimmed");
@@ -901,6 +911,9 @@ impl TaskDetail {
             gtk::accessible::Property::Label(&ring_name),
             gtk::accessible::Property::Description(&data.title),
         ]);
+        self.set_read_only(data.read_only);
+        self.desc_stack
+            .set_visible(!(data.read_only && data.description.trim().is_empty()));
 
         // Title: never under the user's cursor.
         // Being edited: focused with uncommitted text (after Enter the buffer equals the
@@ -943,6 +956,39 @@ impl TaskDetail {
         let comments_changed = old.as_ref().map(|o| &o.comments) != Some(&data.comments);
         if (!same_task || comments_changed) && self.editing_comment.borrow().is_none() {
             self.rebuild_comments(&data);
+        }
+    }
+
+    /// History tasks (4.8): the title, description and fields do not react (no hover, no
+    /// editors); the ring stays active and reopens the task.
+    fn set_read_only(&self, ro: bool) {
+        self.title.set_editable(!ro);
+        self.title.set_cursor_visible(!ro);
+        self.crumb.set_can_target(!ro);
+        self.crumb.set_focusable(!ro);
+        for (_, row) in &self.fields {
+            row.button.set_can_target(!ro);
+            row.button.set_focusable(!ro);
+            if ro {
+                row.root.add_css_class("tick-read-only");
+            } else {
+                row.root.remove_css_class("tick-read-only");
+            }
+        }
+        if ro {
+            self.crumb.add_css_class("tick-read-only");
+        } else {
+            self.crumb.remove_css_class("tick-read-only");
+        }
+        self.desc_label.set_focusable(!ro);
+        self.sub_ghost.set_visible(!ro);
+        self.composer.set_visible(!ro);
+        // The history has no sub-tasks or comments to show.
+        for head in [self.sub_heading.parent(), self.comments_count.parent()]
+            .into_iter()
+            .flatten()
+        {
+            head.set_visible(!ro);
         }
     }
 
@@ -1035,7 +1081,8 @@ impl TaskDetail {
             row.value.add_css_class(c);
         }
         // Priority always has a value: "clear" (back to p4) would be unclear there (4.8).
-        row.clear.set_visible(has && f != Field::Priority);
+        row.clear
+            .set_visible(has && f != Field::Priority && !d.read_only);
         row.button
             .update_property(&[gtk::accessible::Property::Label(&fill(
                 &gettext("{field}: {value}"),
@@ -1483,5 +1530,80 @@ pub fn load(store: &tick_core::Store, id: &str) -> tick_core::store::Result<Opti
         subtasks,
         subtask_counts,
         comments,
+        read_only: false,
+    }))
+}
+
+/// A task of the completed history (4.21), read-only: from the history cache, without
+/// sub-tasks or comments (the cache does not have them).
+pub fn load_completed(
+    store: &tick_core::Store,
+    id: &str,
+) -> tick_core::store::Result<Option<DetailData>> {
+    let Some(c) = store.completed_task(id)? else {
+        return Ok(None);
+    };
+    let item = c.item;
+    let project = store.project(&item.project_id)?;
+    let section = match item.section_id.as_deref() {
+        Some(s) => store.section(s)?,
+        None => None,
+    };
+    let (pname, color) = match &project {
+        Some(p) if p.inbox_project => (gettext("Inbox"), p.color.clone()),
+        Some(p) => (p.name.clone(), p.color.clone()),
+        None => (String::new(), "charcoal".into()),
+    };
+    let crumb = match &section {
+        Some(s) => format!("{pname} / {}", s.name),
+        None => pname,
+    };
+    // The date it had when it was completed, without due-state colors.
+    let now = store.now();
+    let today = now.today();
+    let settings = crate::format::DateSettings::from_user(store.user()?.as_ref());
+    let due = item
+        .due
+        .as_ref()
+        .and_then(|d| d.date.as_deref())
+        .and_then(|d| tick_core::clock::resolve_due_date(d, now.offset()))
+        .map(|d| {
+            let date = field_date(d.date, today, settings);
+            FieldDue {
+                text: match d.time {
+                    Some(tm) => fill(
+                        &crate::i18n::pgettext("due", "{date} {time}"),
+                        &[
+                            ("date", &date),
+                            ("time", &crate::format::time(tm, settings)),
+                        ],
+                    ),
+                    None => date,
+                },
+                recurrence: None,
+                state: DueState::Other,
+            }
+        });
+    let deadline = item.deadline.as_ref().and_then(|dl| {
+        let date = chrono::NaiveDate::parse_from_str(dl.date.get(..10)?, "%Y-%m-%d").ok()?;
+        Some((field_date(date, today, settings), false))
+    });
+    Ok(Some(DetailData {
+        id: item.id.clone(),
+        title: item.content.clone(),
+        description: item.description.clone(),
+        p: item.p(),
+        checked: true,
+        crumb,
+        color,
+        shared: false,
+        due,
+        deadline,
+        labels: item.labels.clone(),
+        assignee: None,
+        subtasks: Vec::new(),
+        subtask_counts: None,
+        comments: Vec::new(),
+        read_only: true,
     }))
 }

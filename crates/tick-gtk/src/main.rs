@@ -7,15 +7,20 @@ mod login;
 mod manage;
 mod markdown;
 mod menus;
+mod notify;
 mod pickers;
+mod portal;
+mod prefs;
 mod quick_add;
 mod row_object;
 mod rows;
+mod shortcuts;
 mod sidebar;
 mod style;
 mod sync_status;
 mod task_list;
 mod test_mode;
+mod views;
 mod window;
 
 use std::cell::RefCell;
@@ -33,6 +38,9 @@ thread_local! {
     /// The cache, opened in `startup` (the theme is read from it before the first paint)
     /// and handed to the window in `activate`.
     static STORE: RefCell<Option<Store>> = const { RefCell::new(None) };
+    /// `--background` (autostart from "Run at Login"): the first activation builds the
+    /// window but does not show it.
+    static BACKGROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn main() -> glib::ExitCode {
@@ -40,6 +48,21 @@ fn main() -> glib::ExitCode {
     gio::resources_register_include!("resources.gresource").expect("failed to register resources");
 
     let app = adw::Application::builder().application_id(APP_ID).build();
+    app.add_main_option(
+        "background",
+        glib::Char::from(0),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        // Translators: the description of `tick --background` in `tick --help`.
+        &gettext("Start without showing the window (Run at Login)"),
+        None,
+    );
+    app.connect_handle_local_options(|_, options| {
+        if options.contains("background") {
+            BACKGROUND.with(|b| b.set(true));
+        }
+        std::ops::ControlFlow::Continue(())
+    });
     app.connect_startup(startup);
     app.connect_shutdown(|app| {
         for w in app.windows() {
@@ -80,12 +103,7 @@ fn startup(app: &adw::Application) {
     // TICK_COLOR_SCHEME overrides it (screenshots, tests).
     let saved = store.setting("color-scheme").ok().flatten();
     let scheme = std::env::var("TICK_COLOR_SCHEME").ok().or(saved);
-    let scheme = match scheme.as_deref() {
-        Some("light") => adw::ColorScheme::ForceLight,
-        Some("dark") => adw::ColorScheme::ForceDark,
-        _ => adw::ColorScheme::Default,
-    };
-    adw::StyleManager::default().set_color_scheme(scheme);
+    adw::StyleManager::default().set_color_scheme(prefs::scheme_of(scheme.as_deref()));
     style::install_font_provider();
     STORE.with(|s| s.replace(Some(store)));
 
@@ -103,6 +121,8 @@ fn startup(app: &adw::Application) {
         .activate(|app: &adw::Application, _, _| show_about(app))
         .build();
     app.add_action_entries([quit, about]);
+    prefs::install_actions(app);
+    notify::install_actions(app);
     app.set_accels_for_action("app.quit", &["<Control>q"]);
     app.set_accels_for_action("win.undo", &["<Control>z"]);
 }
@@ -142,14 +162,20 @@ fn activate(app: &adw::Application) {
     window.set_hide_on_close(true);
     if test_mode::enabled() {
         window.maximize();
-        test_mode::report_first_frame(&window);
     }
-    window.present();
+    let background = BACKGROUND.with(|b| b.replace(false));
+    if !background {
+        if test_mode::enabled() {
+            test_mode::report_first_frame(&window);
+        }
+        window.present();
+    }
 
     // No network before the first frame (docs/architecture.md, data flow 1): the token
-    // (keyring on a worker thread) and the sync engine start after the first paint.
+    // (keyring on a worker thread) and the sync engine start after the first paint. A
+    // window started in the background never paints: start them at once.
     let weak = window.downgrade();
-    after_first_frame(&window, move || {
+    let start = move || {
         let Some(window) = weak.upgrade() else { return };
         if let Some(token) = env_token {
             window.start_engine(token);
@@ -174,7 +200,12 @@ fn activate(app: &adw::Application) {
                 window.token_loaded(token);
             }
         });
-    });
+    };
+    if background {
+        glib::idle_add_local_once(start);
+    } else {
+        after_first_frame(&window, start);
+    }
 }
 
 /// Runs `f` once, after the window's first paint (an idle callback alone can run before it:

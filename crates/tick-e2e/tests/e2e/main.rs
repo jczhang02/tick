@@ -5,6 +5,7 @@
 
 mod a11y;
 mod app;
+mod completed;
 mod detail;
 mod dnd;
 mod fixture;
@@ -13,7 +14,10 @@ mod harness;
 mod layout;
 mod login;
 mod manage;
+mod prefs;
+mod reminders;
 mod screenshots;
+mod search;
 mod shortcuts;
 mod startup;
 mod tasks;

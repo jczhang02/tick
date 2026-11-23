@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: tick\n"
 "Report-Msgid-Bugs-To: https://github.com/jczhang02/tick/issues\n"
-"POT-Creation-Date: 2026-11-22 18:32-0800\n"
+"POT-Creation-Date: 2026-11-22 22:17-0800\n"
 "PO-Revision-Date: 2026-11-22 18:00+0800\n"
 "Last-Translator: Tick contributors\n"
 "Language-Team: Chinese (simplified)\n"
@@ -57,13 +57,14 @@ msgstr "例如: 明天 6pm 给妈妈打电话 p2 #Family"
 msgid "Task"
 msgstr "任务"
 
-#: crates/tick-gtk/data/ui/quick_add.blp:66 crates/tick-gtk/src/edit.rs:758
-#: crates/tick-gtk/src/manage.rs:420 crates/tick-gtk/src/manage.rs:973
+#: crates/tick-gtk/data/ui/quick_add.blp:66 crates/tick-gtk/src/edit.rs:868
+#: crates/tick-gtk/src/manage.rs:426 crates/tick-gtk/src/manage.rs:979
+#: crates/tick-gtk/src/prefs.rs:194
 msgid "Cancel"
 msgstr "取消"
 
 #: crates/tick-gtk/data/ui/window.blp:9 crates/tick-gtk/data/ui/window.blp:28
-#: crates/tick-gtk/src/main.rs:112
+#: crates/tick-gtk/src/main.rs:132
 msgid "Tick"
 msgstr "Tick"
 
@@ -80,8 +81,9 @@ msgid "Views"
 msgstr "视图"
 
 #: crates/tick-gtk/data/ui/window.blp:94 crates/tick-gtk/src/format.rs:129
-#: crates/tick-gtk/src/pickers.rs:323 crates/tick-gtk/src/rows.rs:847
-#: crates/tick-gtk/src/rows.rs:880 crates/tick-gtk/src/sidebar.rs:778
+#: crates/tick-gtk/src/pickers.rs:323 crates/tick-gtk/src/rows.rs:921
+#: crates/tick-gtk/src/rows.rs:954 crates/tick-gtk/src/rows.rs:1122
+#: crates/tick-gtk/src/shortcuts.rs:29 crates/tick-gtk/src/sidebar.rs:798
 msgid "Today"
 msgstr "今天"
 
@@ -94,7 +96,7 @@ msgstr "视图菜单"
 msgid "Sync Status"
 msgstr "同步状态"
 
-#: crates/tick-gtk/data/ui/window.blp:168
+#: crates/tick-gtk/data/ui/window.blp:168 crates/tick-gtk/src/shortcuts.rs:37
 msgid "Tasks"
 msgstr "任务"
 
@@ -113,225 +115,252 @@ msgstr "关闭任务"
 msgid "Task Menu"
 msgstr "任务菜单"
 
-#: crates/tick-gtk/data/ui/window.blp:249 crates/tick-gtk/src/edit.rs:781
+#: crates/tick-gtk/data/ui/window.blp:249 crates/tick-gtk/src/edit.rs:296
+#: crates/tick-gtk/src/edit.rs:904 crates/tick-gtk/src/notify.rs:131
+#: crates/tick-gtk/src/shortcuts.rs:41
 msgid "Complete"
 msgstr "完成"
 
-#: crates/tick-gtk/data/ui/window.blp:250 crates/tick-gtk/src/edit.rs:785
-#: crates/tick-gtk/src/manage.rs:232
+#: crates/tick-gtk/data/ui/window.blp:250 crates/tick-gtk/src/edit.rs:297
+#: crates/tick-gtk/src/edit.rs:908 crates/tick-gtk/src/manage.rs:232
 msgid "Move to..."
 msgstr "移动到..."
 
-#: crates/tick-gtk/data/ui/window.blp:254 crates/tick-gtk/src/edit.rs:788
+#: crates/tick-gtk/data/ui/window.blp:254 crates/tick-gtk/src/edit.rs:300
+#: crates/tick-gtk/src/edit.rs:911
 msgid "Delete Task"
 msgstr "删除任务"
 
-#: crates/tick-gtk/data/ui/window.blp:260
+#: crates/tick-gtk/data/ui/window.blp:260 crates/tick-gtk/src/prefs.rs:30
+#: crates/tick-gtk/src/shortcuts.rs:18
+msgid "Preferences"
+msgstr "首选项"
+
+#: crates/tick-gtk/data/ui/window.blp:261 crates/tick-gtk/src/shortcuts.rs:86
+msgid "Keyboard Shortcuts"
+msgstr "键盘快捷键"
+
+#: crates/tick-gtk/data/ui/window.blp:262
 msgid "About Tick"
 msgstr "关于 Tick"
 
-#: crates/tick-gtk/data/ui/window.blp:264
+#: crates/tick-gtk/data/ui/window.blp:266 crates/tick-gtk/src/prefs.rs:103
+#: crates/tick-gtk/src/prefs.rs:195
+msgid "Log Out"
+msgstr "退出登录"
+
+#: crates/tick-gtk/data/ui/window.blp:270 crates/tick-gtk/src/shortcuts.rs:21
 msgid "Quit"
 msgstr "退出"
 
-#: crates/tick-gtk/src/detail.rs:163 crates/tick-gtk/src/pickers.rs:286
+#: crates/tick-gtk/src/detail.rs:169 crates/tick-gtk/src/pickers.rs:286
 msgid "Date"
 msgstr "日期"
 
-#: crates/tick-gtk/src/detail.rs:164 crates/tick-gtk/src/pickers.rs:284
+#: crates/tick-gtk/src/detail.rs:170 crates/tick-gtk/src/pickers.rs:284
 msgid "Deadline"
 msgstr "截止日期"
 
-#: crates/tick-gtk/src/detail.rs:165 crates/tick-gtk/src/pickers.rs:566
-#: crates/tick-gtk/src/pickers.rs:568
+#: crates/tick-gtk/src/detail.rs:171 crates/tick-gtk/src/pickers.rs:592
+#: crates/tick-gtk/src/pickers.rs:594
 msgid "Priority"
 msgstr "优先级"
 
-#: crates/tick-gtk/src/detail.rs:166 crates/tick-gtk/src/pickers.rs:690
-#: crates/tick-gtk/src/pickers.rs:703 crates/tick-gtk/src/sidebar.rs:32
+#: crates/tick-gtk/src/detail.rs:172 crates/tick-gtk/src/pickers.rs:716
+#: crates/tick-gtk/src/pickers.rs:729 crates/tick-gtk/src/sidebar.rs:32
 msgid "Labels"
 msgstr "标签"
 
-#: crates/tick-gtk/src/detail.rs:167 crates/tick-gtk/src/pickers.rs:856
-#: crates/tick-gtk/src/pickers.rs:857
+#: crates/tick-gtk/src/detail.rs:173 crates/tick-gtk/src/pickers.rs:882
+#: crates/tick-gtk/src/pickers.rs:883
 msgid "Assignee"
 msgstr "负责人"
 
-#: crates/tick-gtk/src/detail.rs:168
+#: crates/tick-gtk/src/detail.rs:174
 msgid "Project"
 msgstr "项目"
 
-#: crates/tick-gtk/src/detail.rs:246
+#: crates/tick-gtk/src/detail.rs:252
 msgid "Task title"
 msgstr "任务标题"
 
-#: crates/tick-gtk/src/detail.rs:269
+#: crates/tick-gtk/src/detail.rs:275
 msgid "Description"
 msgstr "描述"
 
-#: crates/tick-gtk/src/detail.rs:307 crates/tick-gtk/src/detail.rs:883
+#: crates/tick-gtk/src/detail.rs:313 crates/tick-gtk/src/detail.rs:950
 msgid "Sub-tasks"
 msgstr "子任务"
 
-#: crates/tick-gtk/src/detail.rs:318 crates/tick-gtk/src/detail.rs:323
+#: crates/tick-gtk/src/detail.rs:324 crates/tick-gtk/src/detail.rs:329
 msgid "Sub-task name"
 msgstr "子任务名称"
 
-#: crates/tick-gtk/src/detail.rs:333 crates/tick-gtk/src/detail.rs:335
+#: crates/tick-gtk/src/detail.rs:339 crates/tick-gtk/src/detail.rs:341
 msgid "Add sub-task"
 msgstr "添加子任务"
 
-#: crates/tick-gtk/src/detail.rs:345
+#: crates/tick-gtk/src/detail.rs:351
 msgid "Comments"
 msgstr "评论"
 
-#: crates/tick-gtk/src/detail.rs:380 crates/tick-gtk/src/detail.rs:385
+#: crates/tick-gtk/src/detail.rs:398 crates/tick-gtk/src/detail.rs:411
 msgid "Write a comment"
 msgstr "写评论"
 
-#: crates/tick-gtk/src/detail.rs:392 crates/tick-gtk/src/detail.rs:394
+#: crates/tick-gtk/src/detail.rs:440 crates/tick-gtk/src/detail.rs:442
 msgid "Send Comment"
 msgstr "发送评论"
 
-#: crates/tick-gtk/src/detail.rs:474 crates/tick-gtk/src/detail.rs:479
+#: crates/tick-gtk/src/detail.rs:523 crates/tick-gtk/src/detail.rs:528
 msgid "Clear {field}"
 msgstr "清除{field}"
 
-#: crates/tick-gtk/src/detail.rs:781
+#: crates/tick-gtk/src/detail.rs:845
 msgid "Add a description"
 msgstr "添加描述"
 
-#: crates/tick-gtk/src/detail.rs:829
+#: crates/tick-gtk/src/detail.rs:893
 msgid "Move to... (now {project})"
 msgstr "移动到... (当前: {project})"
 
-#: crates/tick-gtk/src/detail.rs:842 crates/tick-gtk/src/detail.rs:1004
-#: crates/tick-gtk/src/task_list.rs:726
+#: crates/tick-gtk/src/detail.rs:906 crates/tick-gtk/src/detail.rs:1106
+#: crates/tick-gtk/src/task_list.rs:775
 msgid "Mark as not done"
 msgstr "标记为未完成"
 
-#: crates/tick-gtk/src/detail.rs:844 crates/tick-gtk/src/detail.rs:1006
-#: crates/tick-gtk/src/task_list.rs:728
+#: crates/tick-gtk/src/detail.rs:908 crates/tick-gtk/src/detail.rs:1108
+#: crates/tick-gtk/src/task_list.rs:777
 msgid "Complete task"
 msgstr "完成任务"
 
-#: crates/tick-gtk/src/detail.rs:919
+#: crates/tick-gtk/src/detail.rs:1019
 msgid "No date"
 msgstr "无日期"
 
-#: crates/tick-gtk/src/detail.rs:932
+#: crates/tick-gtk/src/detail.rs:1032
 msgid "No deadline"
 msgstr "无截止日期"
 
-#: crates/tick-gtk/src/detail.rs:938 crates/tick-gtk/src/pickers.rs:579
+#: crates/tick-gtk/src/detail.rs:1038 crates/tick-gtk/src/pickers.rs:605
 #: crates/tick-gtk/src/quick_add.rs:315
 msgid "Priority {n}"
 msgstr "优先级 {n}"
 
-#: crates/tick-gtk/src/detail.rs:945
+#: crates/tick-gtk/src/detail.rs:1045
 msgid "No labels"
 msgstr "无标签"
 
-#: crates/tick-gtk/src/detail.rs:970 crates/tick-gtk/src/pickers.rs:861
+#: crates/tick-gtk/src/detail.rs:1070 crates/tick-gtk/src/pickers.rs:887
 msgid "Unassigned"
 msgstr "未分配"
 
-#: crates/tick-gtk/src/detail.rs:986
+#: crates/tick-gtk/src/detail.rs:1088
 msgid "{field}: {value}"
 msgstr "{field}: {value}"
 
-#: crates/tick-gtk/src/detail.rs:1038
+#: crates/tick-gtk/src/detail.rs:1142
 msgid "Open {title}"
 msgstr "打开 {title}"
 
-#: crates/tick-gtk/src/detail.rs:1092 crates/tick-gtk/src/detail.rs:1095
+#: crates/tick-gtk/src/detail.rs:1198 crates/tick-gtk/src/detail.rs:1201
 msgid "Comment Actions"
 msgstr "评论操作"
 
-#: crates/tick-gtk/src/detail.rs:1150
+#: crates/tick-gtk/src/detail.rs:1256
 msgid "Open attachment {name}"
 msgstr "打开附件 {name}"
 
-#: crates/tick-gtk/src/detail.rs:1182
+#: crates/tick-gtk/src/detail.rs:1288
 msgid "Edit comment"
 msgstr "编辑评论"
 
-#: crates/tick-gtk/src/detail.rs:1252 crates/tick-gtk/src/manage.rs:247
+#: crates/tick-gtk/src/detail.rs:1358 crates/tick-gtk/src/manage.rs:247
 #: crates/tick-gtk/src/manage.rs:257
 msgid "Edit"
 msgstr "编辑"
 
-#: crates/tick-gtk/src/detail.rs:1254
+#: crates/tick-gtk/src/detail.rs:1360
 msgid "Delete Comment..."
 msgstr "删除评论..."
 
-#: crates/tick-gtk/src/detail.rs:1270 crates/tick-gtk/src/pickers.rs:348
+#: crates/tick-gtk/src/detail.rs:1376 crates/tick-gtk/src/pickers.rs:352
 msgid "{weekday} {date}"
 msgstr "{date} {weekday}"
 
-#: crates/tick-gtk/src/detail.rs:1299 crates/tick-gtk/src/edit.rs:505
-#: crates/tick-gtk/src/edit.rs:589 crates/tick-gtk/src/rows.rs:482
-#: crates/tick-gtk/src/rows.rs:645 crates/tick-gtk/src/rows.rs:646
-#: crates/tick-gtk/src/rows.rs:709 crates/tick-gtk/src/sidebar.rs:772
+#: crates/tick-gtk/src/detail.rs:1405 crates/tick-gtk/src/detail.rs:1553
+#: crates/tick-gtk/src/edit.rs:615 crates/tick-gtk/src/edit.rs:699
+#: crates/tick-gtk/src/notify.rs:113 crates/tick-gtk/src/rows.rs:528
+#: crates/tick-gtk/src/rows.rs:717 crates/tick-gtk/src/rows.rs:718
+#: crates/tick-gtk/src/rows.rs:783 crates/tick-gtk/src/shortcuts.rs:28
+#: crates/tick-gtk/src/sidebar.rs:792
 msgid "Inbox"
 msgstr "收件箱"
 
 #. Translators: a due date with a time, for example "Tomorrow 14:00".
-#: crates/tick-gtk/src/detail.rs:1324 crates/tick-gtk/src/format.rs:176
+#: crates/tick-gtk/src/detail.rs:1430 crates/tick-gtk/src/detail.rs:1575
+#: crates/tick-gtk/src/format.rs:176
 msgctxt "due"
 msgid "{date} {time}"
 msgstr "{date} {time}"
 
-#: crates/tick-gtk/src/detail.rs:1381
+#: crates/tick-gtk/src/detail.rs:1484
 msgid "Someone"
 msgstr "某人"
 
-#: crates/tick-gtk/src/detail.rs:1400
+#: crates/tick-gtk/src/detail.rs:1503
 msgid "Attachment"
 msgstr "附件"
 
-#: crates/tick-gtk/src/edit.rs:611
+#: crates/tick-gtk/src/edit.rs:291 crates/tick-gtk/src/edit.rs:893
+msgid "Reopen"
+msgstr "重新打开"
+
+#: crates/tick-gtk/src/edit.rs:721
 msgid "Moved to {name}"
 msgstr "已移动到 {name}"
 
-#: crates/tick-gtk/src/edit.rs:646
+#: crates/tick-gtk/src/edit.rs:756
 msgid "Task deleted"
 msgstr "任务已删除"
 
-#: crates/tick-gtk/src/edit.rs:654
+#: crates/tick-gtk/src/edit.rs:764
 msgid "The task was already deleted and could not be restored"
 msgstr "任务已经删除, 无法恢复"
 
-#: crates/tick-gtk/src/edit.rs:687 crates/tick-gtk/src/window.rs:1482
+#: crates/tick-gtk/src/edit.rs:797 crates/tick-gtk/src/shortcuts.rs:22
+#: crates/tick-gtk/src/window.rs:1573
 msgid "Undo"
 msgstr "撤销"
 
-#: crates/tick-gtk/src/edit.rs:755
+#: crates/tick-gtk/src/edit.rs:865
 msgid "Delete comment?"
 msgstr "删除评论?"
 
-#: crates/tick-gtk/src/edit.rs:756 crates/tick-gtk/src/manage.rs:1017
-#: crates/tick-gtk/src/manage.rs:1045
+#: crates/tick-gtk/src/edit.rs:866 crates/tick-gtk/src/manage.rs:1023
+#: crates/tick-gtk/src/manage.rs:1051
 msgid "This can't be undone."
 msgstr "此操作无法撤销."
 
-#: crates/tick-gtk/src/edit.rs:759
+#: crates/tick-gtk/src/edit.rs:869
 msgid "Delete Comment"
 msgstr "删除评论"
 
-#: crates/tick-gtk/src/edit.rs:780 crates/tick-gtk/src/window.rs:1752
+#: crates/tick-gtk/src/edit.rs:892 crates/tick-gtk/src/edit.rs:903
+#: crates/tick-gtk/src/notify.rs:135 crates/tick-gtk/src/shortcuts.rs:39
+#: crates/tick-gtk/src/window.rs:1857
 msgid "Open"
 msgstr "打开"
 
-#: crates/tick-gtk/src/edit.rs:782
+#: crates/tick-gtk/src/edit.rs:905
 msgid "Date..."
 msgstr "日期..."
 
-#: crates/tick-gtk/src/edit.rs:783
+#: crates/tick-gtk/src/edit.rs:906
 msgid "Priority..."
 msgstr "优先级..."
 
-#: crates/tick-gtk/src/edit.rs:784
+#: crates/tick-gtk/src/edit.rs:907
 msgid "Labels..."
 msgstr "标签..."
 
@@ -546,11 +575,11 @@ msgid "{mon} {day}, {year}"
 msgstr "{year} 年 {mon} {day} 日"
 
 #: crates/tick-gtk/src/format.rs:130 crates/tick-gtk/src/pickers.rs:326
-#: crates/tick-gtk/src/rows.rs:849
+#: crates/tick-gtk/src/rows.rs:923
 msgid "Tomorrow"
 msgstr "明天"
 
-#: crates/tick-gtk/src/format.rs:131
+#: crates/tick-gtk/src/format.rs:131 crates/tick-gtk/src/rows.rs:1123
 msgid "Yesterday"
 msgstr "昨天"
 
@@ -578,22 +607,35 @@ msgctxt "date"
 msgid "{weekday} {day} {month_name}"
 msgstr "{month_name} {day} 日 {weekday}"
 
-#. Translators: Upcoming month header. Chinese: "{month} 月".
+#. Translators: a day and full month name, month first. Chinese: "{month} 月 {day} 日".
 #: crates/tick-gtk/src/format.rs:198
+msgctxt "date"
+msgid "{month_name} {day}"
+msgstr "{month} 月 {day} 日"
+
+#. Translators: a day and full month name, day first. Chinese: "{month} 月 {day} 日".
+#: crates/tick-gtk/src/format.rs:201
+msgctxt "date"
+msgid "{day} {month_name}"
+msgstr "{month} 月 {day} 日"
+
+#. Translators: Upcoming month header. Chinese: "{month} 月".
+#: crates/tick-gtk/src/format.rs:210
 msgctxt "date"
 msgid "{month_name}"
 msgstr "{month_name}"
 
 #. Translators: Upcoming month header in another year. Chinese: "{year} 年 {month} 月".
-#: crates/tick-gtk/src/format.rs:201 crates/tick-gtk/src/format.rs:207
+#: crates/tick-gtk/src/format.rs:213 crates/tick-gtk/src/format.rs:219
 msgctxt "date"
 msgid "{month_name} {year}"
 msgstr "{year} 年 {month_name}"
 
 #: crates/tick-gtk/src/i18n.rs:58 crates/tick-gtk/src/i18n.rs:59
-#: crates/tick-gtk/src/manage.rs:1000 crates/tick-gtk/src/manage.rs:1040
-#: crates/tick-gtk/src/manage.rs:1068 crates/tick-gtk/src/sidebar.rs:550
-#: crates/tick-gtk/src/task_list.rs:328 crates/tick-gtk/src/task_list.rs:437
+#: crates/tick-gtk/src/manage.rs:1006 crates/tick-gtk/src/manage.rs:1046
+#: crates/tick-gtk/src/manage.rs:1074 crates/tick-gtk/src/sidebar.rs:564
+#: crates/tick-gtk/src/task_list.rs:364 crates/tick-gtk/src/task_list.rs:475
+#: crates/tick-gtk/src/task_list.rs:1162
 msgid "{n} task"
 msgid_plural "{n} tasks"
 msgstr[0] "{n} 个任务"
@@ -606,7 +648,12 @@ msgstr "这个令牌无效. 请检查后重试."
 msgid "Can't reach Todoist. Check your connection and try again."
 msgstr "无法连接 Todoist. 请检查网络后重试."
 
-#: crates/tick-gtk/src/main.rs:114
+#. Translators: the description of `tick --background` in `tick --help`.
+#: crates/tick-gtk/src/main.rs:57
+msgid "Start without showing the window (Run at Login)"
+msgstr "启动时不显示窗口 (登录时运行)"
+
+#: crates/tick-gtk/src/main.rs:134
 msgid "A Todoist client"
 msgstr "Todoist 客户端"
 
@@ -731,12 +778,12 @@ msgid "Favorite"
 msgstr "收藏"
 
 #: crates/tick-gtk/src/manage.rs:222 crates/tick-gtk/src/manage.rs:224
-#: crates/tick-gtk/src/task_list.rs:547
+#: crates/tick-gtk/src/task_list.rs:585
 msgid "Rename"
 msgstr "重命名"
 
-#: crates/tick-gtk/src/manage.rs:226 crates/tick-gtk/src/manage.rs:541
-#: crates/tick-gtk/src/manage.rs:553
+#: crates/tick-gtk/src/manage.rs:226 crates/tick-gtk/src/manage.rs:547
+#: crates/tick-gtk/src/manage.rs:559
 msgid "Color"
 msgstr "颜色"
 
@@ -760,154 +807,154 @@ msgstr "删除标签..."
 msgid "Delete Filter..."
 msgstr "删除过滤器..."
 
-#: crates/tick-gtk/src/manage.rs:274 crates/tick-gtk/src/sidebar.rs:491
+#: crates/tick-gtk/src/manage.rs:280 crates/tick-gtk/src/sidebar.rs:500
 msgid "Add Project"
 msgstr "添加项目"
 
-#: crates/tick-gtk/src/manage.rs:275 crates/tick-gtk/src/sidebar.rs:492
+#: crates/tick-gtk/src/manage.rs:281 crates/tick-gtk/src/sidebar.rs:501
 msgid "Add Label"
 msgstr "添加标签"
 
-#: crates/tick-gtk/src/manage.rs:276 crates/tick-gtk/src/sidebar.rs:493
+#: crates/tick-gtk/src/manage.rs:282 crates/tick-gtk/src/sidebar.rs:502
 msgid "Add Filter"
 msgstr "添加过滤器"
 
-#: crates/tick-gtk/src/manage.rs:282
+#: crates/tick-gtk/src/manage.rs:288
 msgid "Expand"
 msgstr "展开"
 
-#: crates/tick-gtk/src/manage.rs:284
+#: crates/tick-gtk/src/manage.rs:290
 msgid "Collapse"
 msgstr "折叠"
 
-#: crates/tick-gtk/src/manage.rs:366 crates/tick-gtk/src/manage.rs:472
+#: crates/tick-gtk/src/manage.rs:372 crates/tick-gtk/src/manage.rs:478
 msgid "None"
 msgstr "无"
 
-#: crates/tick-gtk/src/manage.rs:403
+#: crates/tick-gtk/src/manage.rs:409
 msgid "New Project"
 msgstr "新建项目"
 
-#: crates/tick-gtk/src/manage.rs:404
+#: crates/tick-gtk/src/manage.rs:410
 msgid "Edit Project"
 msgstr "编辑项目"
 
-#: crates/tick-gtk/src/manage.rs:405
+#: crates/tick-gtk/src/manage.rs:411
 msgid "New Label"
 msgstr "新建标签"
 
-#: crates/tick-gtk/src/manage.rs:406
+#: crates/tick-gtk/src/manage.rs:412
 msgid "Edit Label"
 msgstr "编辑标签"
 
-#: crates/tick-gtk/src/manage.rs:407
+#: crates/tick-gtk/src/manage.rs:413
 msgid "New Filter"
 msgstr "新建过滤器"
 
-#: crates/tick-gtk/src/manage.rs:408 crates/tick-gtk/src/task_list.rs:990
+#: crates/tick-gtk/src/manage.rs:414 crates/tick-gtk/src/task_list.rs:1050
 msgid "Edit Filter"
 msgstr "编辑过滤器"
 
-#: crates/tick-gtk/src/manage.rs:425
+#: crates/tick-gtk/src/manage.rs:431
 msgid "Save"
 msgstr "保存"
 
-#: crates/tick-gtk/src/manage.rs:427
+#: crates/tick-gtk/src/manage.rs:433
 msgid "Add"
 msgstr "添加"
 
-#: crates/tick-gtk/src/manage.rs:447
+#: crates/tick-gtk/src/manage.rs:453
 msgid "Name"
 msgstr "名称"
 
-#: crates/tick-gtk/src/manage.rs:453
+#: crates/tick-gtk/src/manage.rs:459
 msgid "Query"
 msgstr "查询"
 
-#: crates/tick-gtk/src/manage.rs:479
+#: crates/tick-gtk/src/manage.rs:485
 msgid "Parent Project"
 msgstr "上级项目"
 
-#: crates/tick-gtk/src/manage.rs:519
+#: crates/tick-gtk/src/manage.rs:525
 msgid "Add to Favorites"
 msgstr "添加到收藏"
 
-#: crates/tick-gtk/src/manage.rs:532
+#: crates/tick-gtk/src/manage.rs:538
 msgid "A label with this name already exists."
 msgstr "已有同名标签."
 
-#: crates/tick-gtk/src/manage.rs:954
+#: crates/tick-gtk/src/manage.rs:960
 msgid "Archived \"{name}\""
 msgstr "已归档 \"{name}\""
 
-#: crates/tick-gtk/src/manage.rs:1001
+#: crates/tick-gtk/src/manage.rs:1007
 msgid "{n} sub-project"
 msgid_plural "{n} sub-projects"
 msgstr[0] "{n} 个子项目"
 
-#: crates/tick-gtk/src/manage.rs:1005 crates/tick-gtk/src/manage.rs:1039
+#: crates/tick-gtk/src/manage.rs:1011 crates/tick-gtk/src/manage.rs:1045
 msgid "Its {tasks} will be deleted too."
 msgstr "其中的 {tasks}也会被删除."
 
-#: crates/tick-gtk/src/manage.rs:1009
+#: crates/tick-gtk/src/manage.rs:1015
 msgid "Its {projects} will be deleted too."
 msgstr "其中的 {projects}也会被删除."
 
-#: crates/tick-gtk/src/manage.rs:1013
+#: crates/tick-gtk/src/manage.rs:1019
 msgid "Its {tasks} and {projects} will be deleted too."
 msgstr "其中的 {tasks}和 {projects}也会被删除."
 
-#: crates/tick-gtk/src/manage.rs:1020
+#: crates/tick-gtk/src/manage.rs:1026
 msgid "Delete \"{name}\"?"
 msgstr "删除 \"{name}\"?"
 
-#: crates/tick-gtk/src/manage.rs:1022
+#: crates/tick-gtk/src/manage.rs:1028
 msgid "Delete Project"
 msgstr "删除项目"
 
-#: crates/tick-gtk/src/manage.rs:1048
+#: crates/tick-gtk/src/manage.rs:1054
 msgid "Delete section \"{name}\"?"
 msgstr "删除分区 \"{name}\"?"
 
-#: crates/tick-gtk/src/manage.rs:1050
+#: crates/tick-gtk/src/manage.rs:1056
 msgid "Delete Section"
 msgstr "删除分区"
 
-#: crates/tick-gtk/src/manage.rs:1067
+#: crates/tick-gtk/src/manage.rs:1073
 msgid "It will be removed from {tasks}. The tasks stay."
 msgstr "它会从 {tasks}上移除, 任务本身会保留."
 
-#: crates/tick-gtk/src/manage.rs:1071
+#: crates/tick-gtk/src/manage.rs:1077
 msgid "No tasks use it."
 msgstr "没有任务使用它."
 
-#: crates/tick-gtk/src/manage.rs:1076
+#: crates/tick-gtk/src/manage.rs:1082
 msgid "Delete label \"{name}\"?"
 msgstr "删除标签 \"{name}\"?"
 
-#: crates/tick-gtk/src/manage.rs:1080
+#: crates/tick-gtk/src/manage.rs:1086
 msgid "Delete Label"
 msgstr "删除标签"
 
-#: crates/tick-gtk/src/manage.rs:1097
+#: crates/tick-gtk/src/manage.rs:1103
 msgid "Delete filter \"{name}\"?"
 msgstr "删除过滤器 \"{name}\"?"
 
-#: crates/tick-gtk/src/manage.rs:1098
+#: crates/tick-gtk/src/manage.rs:1104
 msgid "Only the filter is deleted. No tasks change."
 msgstr "只删除过滤器, 不会改动任何任务."
 
-#: crates/tick-gtk/src/manage.rs:1099
+#: crates/tick-gtk/src/manage.rs:1105
 msgid "Delete Filter"
 msgstr "删除过滤器"
 
-#: crates/tick-gtk/src/manage.rs:1148
+#: crates/tick-gtk/src/manage.rs:1154
 msgid "Moved \"{name}\""
 msgstr "已移动 \"{name}\""
 
 #. Translators: two sentences of a confirmation body. Chinese: "{first}\n{second}" (a line
 #. break between them).
-#: crates/tick-gtk/src/manage.rs:1313
+#: crates/tick-gtk/src/manage.rs:1299
 msgctxt "sentences"
 msgid "{first} {second}"
 msgstr ""
@@ -930,53 +977,101 @@ msgstr "快捷选项"
 msgid "This Weekend"
 msgstr "本周末"
 
-#: crates/tick-gtk/src/pickers.rs:337 crates/tick-gtk/src/pickers.rs:339
+#: crates/tick-gtk/src/pickers.rs:339 crates/tick-gtk/src/pickers.rs:343
 msgid "Next Week"
 msgstr "下周"
 
-#: crates/tick-gtk/src/pickers.rs:360
+#: crates/tick-gtk/src/pickers.rs:364
 msgid "No Deadline"
 msgstr "无截止日期"
 
-#: crates/tick-gtk/src/pickers.rs:362
+#: crates/tick-gtk/src/pickers.rs:366
 msgid "No Date"
 msgstr "无日期"
 
-#: crates/tick-gtk/src/pickers.rs:396
+#: crates/tick-gtk/src/pickers.rs:399
 msgid "Calendar"
 msgstr "日历"
 
-#: crates/tick-gtk/src/pickers.rs:462
+#: crates/tick-gtk/src/pickers.rs:465
 msgid "Previous Month"
 msgstr "上个月"
 
-#: crates/tick-gtk/src/pickers.rs:465
+#: crates/tick-gtk/src/pickers.rs:468
 msgid "Next Month"
 msgstr "下个月"
 
-#: crates/tick-gtk/src/pickers.rs:496 crates/tick-gtk/src/pickers.rs:499
+#: crates/tick-gtk/src/pickers.rs:499 crates/tick-gtk/src/pickers.rs:502
 msgid "Pick a Date"
 msgstr "选择日期"
 
-#: crates/tick-gtk/src/pickers.rs:696 crates/tick-gtk/src/pickers.rs:700
+#: crates/tick-gtk/src/pickers.rs:722 crates/tick-gtk/src/pickers.rs:726
 msgid "Search or create a label"
 msgstr "搜索或创建标签"
 
-#: crates/tick-gtk/src/pickers.rs:743
+#: crates/tick-gtk/src/pickers.rs:769
 msgid "Create label \"{name}\""
 msgstr "创建标签 \"{name}\""
 
-#: crates/tick-gtk/src/pickers.rs:922
+#: crates/tick-gtk/src/pickers.rs:948
 msgid "Move to"
 msgstr "移动到"
 
-#: crates/tick-gtk/src/pickers.rs:928 crates/tick-gtk/src/pickers.rs:932
+#: crates/tick-gtk/src/pickers.rs:954 crates/tick-gtk/src/pickers.rs:958
 msgid "Search projects"
 msgstr "搜索项目"
 
-#: crates/tick-gtk/src/pickers.rs:935 crates/tick-gtk/src/sidebar.rs:31
+#: crates/tick-gtk/src/pickers.rs:961 crates/tick-gtk/src/sidebar.rs:31
 msgid "Projects"
 msgstr "项目"
+
+#: crates/tick-gtk/src/prefs.rs:37
+msgid "Appearance"
+msgstr "外观"
+
+#: crates/tick-gtk/src/prefs.rs:42
+msgid "Follow System"
+msgstr "跟随系统"
+
+#: crates/tick-gtk/src/prefs.rs:43
+msgid "Light"
+msgstr "浅色"
+
+#: crates/tick-gtk/src/prefs.rs:44
+msgid "Dark"
+msgstr "深色"
+
+#: crates/tick-gtk/src/prefs.rs:76
+msgid "Background"
+msgstr "后台"
+
+#: crates/tick-gtk/src/prefs.rs:79
+msgid "Run at Login"
+msgstr "登录时运行"
+
+#: crates/tick-gtk/src/prefs.rs:81 crates/tick-gtk/src/prefs.rs:144
+msgid "Keep syncing and sending reminders after the window is closed."
+msgstr "关闭窗口后继续同步并发送提醒."
+
+#: crates/tick-gtk/src/prefs.rs:101
+msgid "Account"
+msgstr "账户"
+
+#: crates/tick-gtk/src/prefs.rs:157
+msgid "Run at Login was not allowed. Check Background Apps in Settings."
+msgstr "登录时运行未获允许. 请在设置的 \"后台应用\" 中检查."
+
+#: crates/tick-gtk/src/prefs.rs:161
+msgid "Run at Login is not available on this system."
+msgstr "此系统不支持登录时运行."
+
+#: crates/tick-gtk/src/prefs.rs:189
+msgid "Log out of Tick?"
+msgstr "退出 Tick 登录?"
+
+#: crates/tick-gtk/src/prefs.rs:191
+msgid "The local cache and unsynced changes on this computer will be removed."
+msgstr "本机的缓存和未同步的更改会被删除."
 
 #: crates/tick-gtk/src/quick_add.rs:325
 msgid "No project named \"{name}\". The task goes to the Inbox."
@@ -990,139 +1085,270 @@ msgstr "离线. 恢复联网后会自动添加这个任务."
 msgid "Enter to add, Esc to close"
 msgstr "按 Enter 添加, 按 Esc 关闭"
 
-#: crates/tick-gtk/src/rows.rs:183 crates/tick-gtk/src/task_list.rs:779
+#: crates/tick-gtk/src/rows.rs:195
+msgid "Completed {time}"
+msgstr "完成于 {time}"
+
+#: crates/tick-gtk/src/rows.rs:198 crates/tick-gtk/src/task_list.rs:910
 msgid "Completing"
 msgstr "正在完成"
 
-#: crates/tick-gtk/src/rows.rs:186
+#: crates/tick-gtk/src/rows.rs:201
 msgid "Due {date}"
 msgstr "日期 {date}"
 
-#: crates/tick-gtk/src/rows.rs:189
+#: crates/tick-gtk/src/rows.rs:204
 msgid "deadline {date}"
 msgstr "截止日期 {date}"
 
-#: crates/tick-gtk/src/rows.rs:193
+#: crates/tick-gtk/src/rows.rs:208
 msgid "{done} of {n} sub-task"
 msgid_plural "{done} of {n} sub-tasks"
 msgstr[0] "子任务已完成 {done}/{n}"
 
-#: crates/tick-gtk/src/rows.rs:198
+#: crates/tick-gtk/src/rows.rs:213
 msgid "{n} comment"
 msgid_plural "{n} comments"
 msgstr[0] "{n} 条评论"
 
-#: crates/tick-gtk/src/rows.rs:202
+#: crates/tick-gtk/src/rows.rs:217
 msgid "labels {names}"
 msgstr "标签 {names}"
 
-#: crates/tick-gtk/src/rows.rs:207
+#: crates/tick-gtk/src/rows.rs:222
 msgid "project {name}"
 msgstr "项目 {name}"
 
-#: crates/tick-gtk/src/rows.rs:210 crates/tick-gtk/src/task_list.rs:858
+#: crates/tick-gtk/src/rows.rs:225 crates/tick-gtk/src/task_list.rs:835
 msgid "Assigned to {name}"
 msgstr "负责人 {name}"
 
-#: crates/tick-gtk/src/rows.rs:213
+#: crates/tick-gtk/src/rows.rs:228
 msgid "Not saved: {message}"
 msgstr "未保存: {message}"
 
 #. Translators: separator between the parts of a task's meta line read aloud.
-#: crates/tick-gtk/src/rows.rs:216
+#: crates/tick-gtk/src/rows.rs:231
 msgctxt "list separator"
 msgid ", "
 msgstr ", "
 
-#: crates/tick-gtk/src/rows.rs:691
+#: crates/tick-gtk/src/rows.rs:765
 msgid "Inbox is empty"
 msgstr "收件箱是空的"
 
-#: crates/tick-gtk/src/rows.rs:692
+#: crates/tick-gtk/src/rows.rs:766
 msgid "New tasks land here. Press Q to add one."
 msgstr "新任务会先放在这里. 按 Q 添加一个."
 
-#: crates/tick-gtk/src/rows.rs:746
+#: crates/tick-gtk/src/rows.rs:820
 msgid "No tasks yet"
 msgstr "还没有任务"
 
-#: crates/tick-gtk/src/rows.rs:747
+#: crates/tick-gtk/src/rows.rs:821
 msgid "Press Q to add the first one."
 msgstr "按 Q 添加第一个任务."
 
-#: crates/tick-gtk/src/rows.rs:868
+#: crates/tick-gtk/src/rows.rs:942
 msgid "Overdue"
 msgstr "已逾期"
 
-#: crates/tick-gtk/src/rows.rs:892
+#: crates/tick-gtk/src/rows.rs:966
 msgid "All done for today"
 msgstr "今天的任务都完成了"
 
-#: crates/tick-gtk/src/rows.rs:893
+#: crates/tick-gtk/src/rows.rs:967
 msgid "Enjoy the rest of your day."
 msgstr "好好享受剩下的时间."
 
-#: crates/tick-gtk/src/rows.rs:924 crates/tick-gtk/src/sidebar.rs:784
+#: crates/tick-gtk/src/rows.rs:998 crates/tick-gtk/src/shortcuts.rs:30
+#: crates/tick-gtk/src/sidebar.rs:804
 msgid "Upcoming"
 msgstr "即将到来"
 
-#: crates/tick-gtk/src/rows.rs:934
+#: crates/tick-gtk/src/rows.rs:1008
 msgid "Nothing scheduled"
 msgstr "近期没有安排"
 
-#: crates/tick-gtk/src/rows.rs:935
+#: crates/tick-gtk/src/rows.rs:1009
 msgid "Tasks with a date show up here, day by day."
 msgstr "设置了日期的任务会按天显示在这里."
 
-#: crates/tick-gtk/src/rows.rs:1007
-msgid "No tasks with @{name}"
-msgstr "没有带 @{name} 的任务"
+#: crates/tick-gtk/src/rows.rs:1079
+msgid "Search your tasks"
+msgstr "搜索任务"
 
-#: crates/tick-gtk/src/rows.rs:1009
-msgid "Add @{name} to a task to see it here."
-msgstr "给任务加上 @{name}, 它就会出现在这里."
+#: crates/tick-gtk/src/rows.rs:1080
+msgid "Titles and descriptions of active tasks."
+msgstr "搜索进行中任务的标题和描述."
 
-#: crates/tick-gtk/src/rows.rs:1088
-msgid "Offline. Showing results from {time}."
-msgstr "离线. 显示的是 {time} 的结果."
+#: crates/tick-gtk/src/rows.rs:1085
+msgid "No results for \"{query}\""
+msgstr "没有找到 \"{query}\""
 
-#: crates/tick-gtk/src/rows.rs:1094
+#: crates/tick-gtk/src/rows.rs:1086
+msgid "Completed tasks and comments are not searched."
+msgstr "不会搜索已完成的任务和评论."
+
+#: crates/tick-gtk/src/rows.rs:1098 crates/tick-gtk/src/shortcuts.rs:17
+#: crates/tick-gtk/src/sidebar.rs:810 crates/tick-gtk/src/task_list.rs:380
+msgid "Search"
+msgstr "搜索"
+
+#: crates/tick-gtk/src/rows.rs:1145 crates/tick-gtk/src/sidebar.rs:816
+#: crates/tick-gtk/src/task_list.rs:773
+msgid "Completed"
+msgstr "已完成"
+
+#: crates/tick-gtk/src/rows.rs:1152
+msgid "Since {date}"
+msgstr "自 {date}起"
+
+#: crates/tick-gtk/src/rows.rs:1155
+msgid "Last 30 days"
+msgstr "最近 30 天"
+
+#: crates/tick-gtk/src/rows.rs:1158
+msgid "Offline. Showing saved results."
+msgstr "离线. 显示的是已保存的结果."
+
+#: crates/tick-gtk/src/rows.rs:1160 crates/tick-gtk/src/rows.rs:1353
 msgid "Updating"
 msgstr "正在更新"
 
-#: crates/tick-gtk/src/rows.rs:1098
+#: crates/tick-gtk/src/rows.rs:1167
+msgid "Loading completed tasks"
+msgstr "正在加载已完成的任务"
+
+#: crates/tick-gtk/src/rows.rs:1172
+msgid "No completed tasks"
+msgstr "没有已完成的任务"
+
+#: crates/tick-gtk/src/rows.rs:1173
+msgid "Tasks you complete in the next 30 days show up here."
+msgstr "最近 30 天内完成的任务会显示在这里."
+
+#: crates/tick-gtk/src/rows.rs:1266
+msgid "No tasks with @{name}"
+msgstr "没有带 @{name} 的任务"
+
+#: crates/tick-gtk/src/rows.rs:1268
+msgid "Add @{name} to a task to see it here."
+msgstr "给任务加上 @{name}, 它就会出现在这里."
+
+#: crates/tick-gtk/src/rows.rs:1347
+msgid "Offline. Showing results from {time}."
+msgstr "离线. 显示的是 {time} 的结果."
+
+#: crates/tick-gtk/src/rows.rs:1357
 msgid "Results from Todoist, updated {time}"
 msgstr "来自 Todoist 的结果, 更新于 {time}"
 
-#: crates/tick-gtk/src/rows.rs:1116
+#: crates/tick-gtk/src/rows.rs:1375
 msgid "Todoist couldn't read this filter"
 msgstr "Todoist 无法识别这个过滤器"
 
-#: crates/tick-gtk/src/rows.rs:1117
+#: crates/tick-gtk/src/rows.rs:1376
 msgid "Check the query and try again."
 msgstr "请检查查询后重试."
 
-#: crates/tick-gtk/src/rows.rs:1122
+#: crates/tick-gtk/src/rows.rs:1381
 msgid "Can't show this filter offline"
 msgstr "离线时无法显示这个过滤器"
 
-#: crates/tick-gtk/src/rows.rs:1123
+#: crates/tick-gtk/src/rows.rs:1382
 msgid ""
 "Tick can't evaluate part of this query on this computer. Connect to see "
 "results."
 msgstr "Tick 无法在本机计算这个查询的一部分. 联网后即可查看结果."
 
-#: crates/tick-gtk/src/rows.rs:1127
+#: crates/tick-gtk/src/rows.rs:1386
 msgid "Loading results"
 msgstr "正在加载结果"
 
-#: crates/tick-gtk/src/rows.rs:1139
+#: crates/tick-gtk/src/rows.rs:1398
 msgid "No matching tasks"
 msgstr "没有匹配的任务"
 
-#: crates/tick-gtk/src/rows.rs:1140
+#: crates/tick-gtk/src/rows.rs:1399
 msgid "Nothing matches this filter right now."
 msgstr "目前没有任务符合这个过滤器."
+
+#: crates/tick-gtk/src/shortcuts.rs:14
+msgid "General"
+msgstr "常规"
+
+#: crates/tick-gtk/src/shortcuts.rs:16
+msgid "Quick add"
+msgstr "快速添加"
+
+#: crates/tick-gtk/src/shortcuts.rs:19
+msgid "Keyboard shortcuts"
+msgstr "键盘快捷键"
+
+#: crates/tick-gtk/src/shortcuts.rs:20
+msgid "Close window"
+msgstr "关闭窗口"
+
+#: crates/tick-gtk/src/shortcuts.rs:26
+msgid "Navigation"
+msgstr "导航"
+
+#: crates/tick-gtk/src/shortcuts.rs:31
+msgid "Move focus"
+msgstr "移动焦点"
+
+#: crates/tick-gtk/src/shortcuts.rs:32
+msgid "Collapse or expand sub-tasks"
+msgstr "折叠或展开子任务"
+
+#: crates/tick-gtk/src/shortcuts.rs:33
+msgid "Back"
+msgstr "返回"
+
+#: crates/tick-gtk/src/shortcuts.rs:40
+msgid "Close details"
+msgstr "关闭详情"
+
+#: crates/tick-gtk/src/shortcuts.rs:42
+msgid "Set date"
+msgstr "设置日期"
+
+#: crates/tick-gtk/src/shortcuts.rs:43
+msgid "Set priority"
+msgstr "设置优先级"
+
+#: crates/tick-gtk/src/shortcuts.rs:44
+msgid "Add labels"
+msgstr "添加标签"
+
+#: crates/tick-gtk/src/shortcuts.rs:45
+msgid "Move to project"
+msgstr "移动到项目"
+
+#: crates/tick-gtk/src/shortcuts.rs:46
+msgid "Reorder"
+msgstr "调整顺序"
+
+#: crates/tick-gtk/src/shortcuts.rs:48
+msgid "Nest or un-nest"
+msgstr "缩进或取消缩进"
+
+#: crates/tick-gtk/src/shortcuts.rs:51
+msgid "Rename project or section"
+msgstr "重命名项目或分区"
+
+#: crates/tick-gtk/src/shortcuts.rs:52
+msgid "Delete"
+msgstr "删除"
+
+#: crates/tick-gtk/src/shortcuts.rs:53
+msgid "Context menu"
+msgstr "上下文菜单"
+
+#: crates/tick-gtk/src/shortcuts.rs:54
+msgid "Add another task (quick add)"
+msgstr "继续添加任务 (快速添加)"
 
 #: crates/tick-gtk/src/sidebar.rs:30
 msgid "Favorites"
@@ -1132,27 +1358,27 @@ msgstr "收藏"
 msgid "Filters"
 msgstr "过滤器"
 
-#: crates/tick-gtk/src/sidebar.rs:474 crates/tick-gtk/src/task_list.rs:319
+#: crates/tick-gtk/src/sidebar.rs:483 crates/tick-gtk/src/task_list.rs:355
 msgid "collapsed"
 msgstr "已折叠"
 
-#: crates/tick-gtk/src/sidebar.rs:476 crates/tick-gtk/src/task_list.rs:321
+#: crates/tick-gtk/src/sidebar.rs:485 crates/tick-gtk/src/task_list.rs:357
 msgid "expanded"
 msgstr "已展开"
 
-#: crates/tick-gtk/src/sidebar.rs:479
+#: crates/tick-gtk/src/sidebar.rs:488
 msgid "{name}, {state}"
 msgstr "{name}, {state}"
 
-#: crates/tick-gtk/src/sidebar.rs:547
+#: crates/tick-gtk/src/sidebar.rs:561
 msgid "{name}, {count}"
 msgstr "{name}, {count}"
 
-#: crates/tick-gtk/src/sidebar.rs:608 crates/tick-gtk/src/task_list.rs:511
+#: crates/tick-gtk/src/sidebar.rs:622 crates/tick-gtk/src/task_list.rs:549
 msgid "Collapse {name}"
 msgstr "折叠 {name}"
 
-#: crates/tick-gtk/src/sidebar.rs:610 crates/tick-gtk/src/task_list.rs:509
+#: crates/tick-gtk/src/sidebar.rs:624 crates/tick-gtk/src/task_list.rs:547
 msgid "Expand {name}"
 msgstr "展开 {name}"
 
@@ -1187,116 +1413,137 @@ msgstr "立即同步"
 msgid "Dismiss Errors"
 msgstr "忽略错误"
 
-#: crates/tick-gtk/src/task_list.rs:325
+#: crates/tick-gtk/src/task_list.rs:361
 msgid "{name}, {count}, {state}"
 msgstr "{name}, {count}, {state}"
 
-#: crates/tick-gtk/src/task_list.rs:335 crates/tick-gtk/src/task_list.rs:950
+#: crates/tick-gtk/src/task_list.rs:371 crates/tick-gtk/src/task_list.rs:1010
 msgid "Add task"
 msgstr "添加任务"
 
-#: crates/tick-gtk/src/task_list.rs:343 crates/tick-gtk/src/task_list.rs:600
+#: crates/tick-gtk/src/task_list.rs:379 crates/tick-gtk/src/task_list.rs:644
 msgid "Section name"
 msgstr "分区名称"
 
-#: crates/tick-gtk/src/task_list.rs:394
+#: crates/tick-gtk/src/task_list.rs:381 crates/tick-gtk/src/task_list.rs:1180
+#: crates/tick-gtk/src/task_list.rs:1193
+msgid "Load More"
+msgstr "加载更多"
+
+#: crates/tick-gtk/src/task_list.rs:432
 msgid "Project name"
 msgstr "项目名称"
 
-#: crates/tick-gtk/src/task_list.rs:548
+#: crates/tick-gtk/src/task_list.rs:586
 msgid "Add Task Here"
 msgstr "在此添加任务"
 
-#: crates/tick-gtk/src/task_list.rs:550
+#: crates/tick-gtk/src/task_list.rs:588
 msgid "Delete Section..."
 msgstr "删除分区..."
 
-#: crates/tick-gtk/src/task_list.rs:557
+#: crates/tick-gtk/src/task_list.rs:595
 msgid "Section Menu"
 msgstr "分区菜单"
 
-#: crates/tick-gtk/src/task_list.rs:560
+#: crates/tick-gtk/src/task_list.rs:598
 msgid "{name} section menu"
 msgstr "{name} 分区菜单"
 
-#: crates/tick-gtk/src/task_list.rs:870
+#: crates/tick-gtk/src/task_list.rs:847
 msgid "Expand sub-tasks"
 msgstr "展开子任务"
 
-#: crates/tick-gtk/src/task_list.rs:872
+#: crates/tick-gtk/src/task_list.rs:849
 msgid "Collapse sub-tasks"
 msgstr "折叠子任务"
 
-#: crates/tick-gtk/src/window.rs:746
-msgid "Couldn't update this filter"
-msgstr "无法更新这个过滤器"
+#: crates/tick-gtk/src/task_list.rs:1103 crates/tick-gtk/src/task_list.rs:1108
+msgid "Search tasks"
+msgstr "搜索任务"
 
-#: crates/tick-gtk/src/window.rs:747
+#: crates/tick-gtk/src/task_list.rs:1178 crates/tick-gtk/src/task_list.rs:1191
+msgid "Loading"
+msgstr "正在加载"
+
+#: crates/tick-gtk/src/views.rs:186
+msgid "Couldn't load completed tasks"
+msgstr "无法加载已完成的任务"
+
+#: crates/tick-gtk/src/views.rs:187 crates/tick-gtk/src/window.rs:798
 msgid "Retry"
 msgstr "重试"
 
-#: crates/tick-gtk/src/window.rs:863
+#: crates/tick-gtk/src/views.rs:226
+msgid "Task reopened"
+msgstr "任务已重新打开"
+
+#: crates/tick-gtk/src/window.rs:797
+msgid "Couldn't update this filter"
+msgstr "无法更新这个过滤器"
+
+#: crates/tick-gtk/src/window.rs:925
 msgid "Couldn't save \"{title}\""
 msgstr "无法保存 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:866
+#: crates/tick-gtk/src/window.rs:928
 msgid "Details"
 msgstr "详情"
 
-#: crates/tick-gtk/src/window.rs:1116
+#: crates/tick-gtk/src/window.rs:1190
 msgid "Complete \"{title}\""
 msgstr "完成 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1117
+#: crates/tick-gtk/src/window.rs:1191
 msgid "Reopen \"{title}\""
 msgstr "重新打开 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1118
+#: crates/tick-gtk/src/window.rs:1192
 msgid "Add \"{title}\""
 msgstr "添加 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1119
+#: crates/tick-gtk/src/window.rs:1193
 msgid "Delete \"{title}\""
 msgstr "删除 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1120
+#: crates/tick-gtk/src/window.rs:1194
 msgid "Move \"{title}\""
 msgstr "移动 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1121
+#: crates/tick-gtk/src/window.rs:1195
 msgid "Change project \"{title}\""
 msgstr "修改项目 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1122
+#: crates/tick-gtk/src/window.rs:1196
 msgid "Change section \"{title}\""
 msgstr "修改分区 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1123
+#: crates/tick-gtk/src/window.rs:1197
 msgid "Change label \"{title}\""
 msgstr "修改标签 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1124
+#: crates/tick-gtk/src/window.rs:1198
 msgid "Change filter \"{title}\""
 msgstr "修改过滤器 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1125
+#: crates/tick-gtk/src/window.rs:1199
 msgid "Change \"{title}\""
 msgstr "修改 \"{title}\""
 
-#: crates/tick-gtk/src/window.rs:1474
+#: crates/tick-gtk/src/window.rs:1565
 msgid "Task completed"
 msgstr "任务已完成"
 
-#: crates/tick-gtk/src/window.rs:1476
+#: crates/tick-gtk/src/window.rs:1567
 msgid "{n} task completed"
 msgid_plural "{n} tasks completed"
 msgstr[0] "已完成 {n} 个任务"
 
-#: crates/tick-gtk/src/window.rs:1565
+#: crates/tick-gtk/src/window.rs:1656
 msgid "{n} task was already saved and could not be restored"
 msgid_plural "{n} tasks were already saved and could not be restored"
 msgstr[0] "{n} 个任务已经保存, 无法恢复"
 
-#: crates/tick-gtk/src/window.rs:1751
+#: crates/tick-gtk/src/window.rs:1856
 msgid "Task added"
 msgstr "任务已添加"

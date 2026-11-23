@@ -13,6 +13,7 @@ mod a11y;
 mod input;
 pub mod keysym;
 mod notify;
+mod portal;
 mod session;
 
 use std::path::PathBuf;
@@ -22,6 +23,7 @@ pub use a11y::{A11y, Node, Query, Rect};
 pub use atspi::{Role, State, StateSet};
 pub use input::Input;
 pub use notify::{Backend, Notification, NotificationButton, Notifications};
+pub use portal::{BackgroundCall, Portal, PortalMode};
 pub use session::{ColorScheme, Session, SessionBuilder};
 
 /// Errors are `anyhow` errors: tests unwrap them, and the context chain is the report.

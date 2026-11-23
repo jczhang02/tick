@@ -659,35 +659,48 @@ async fn editing(scheme: ColorScheme, narrow: bool) {
     shoot(&s, &name("project-dialog")).await;
     esc().await;
     if !narrow {
-        let add = window
-            .wait_for(&Query::role(Role::Button).name("Add Label").showing(), WAIT)
+        let app_node = window.parent().await.unwrap().unwrap();
+        // The Labels and Filters headers are below the fold of the demo sidebar.
+        let add = sidebar_button(&s, &window, "Add Label").await;
+        s.click(&add).await.unwrap();
+        app_node
+            .wait_for(&Query::role(Role::Dialog).name("New Label"), WAIT)
             .await
             .unwrap();
-        s.click(&add).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(400)).await;
         s.type_text("Waiting").await.unwrap();
-        shoot(&s, &name("label-dialog-duplicate")).await;
-        esc().await;
-        // The Filters header is below the fold of the demo sidebar.
-        let sb = app::sidebar(&window).await.extents().await.unwrap();
-        input.move_to(sb.x + 100, sb.y + 300).await.unwrap();
-        input.scroll(20).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let add = window
+        // The duplicate name state (4.23): the caption shows under the list.
+        app_node
             .wait_for(
-                &Query::role(Role::Button).name("Add Filter").showing(),
+                &Query::role(Role::Label)
+                    .name("A label with this name already exists.")
+                    .showing(),
                 WAIT,
             )
             .await
             .unwrap();
+        shoot(&s, &name("label-dialog-duplicate")).await;
+        esc().await;
+        app_node
+            .wait_gone(&Query::role(Role::Dialog).name("New Label"), WAIT)
+            .await
+            .unwrap();
+        let add = sidebar_button(&s, &window, "Add Filter").await;
         s.click(&add).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        app_node
+            .wait_for(&Query::role(Role::Dialog).name("New Filter"), WAIT)
+            .await
+            .unwrap();
         s.type_text("Due soon").await.unwrap();
         s.key(keysym::TAB).await.unwrap();
         s.type_text("due before: next week & p1").await.unwrap();
         shoot(&s, &name("filter-dialog")).await;
         esc().await;
+        app_node
+            .wait_gone(&Query::role(Role::Dialog).name("New Filter"), WAIT)
+            .await
+            .unwrap();
         // The sidebar context menu of a project.
+        let sb = app::sidebar(&window).await.extents().await.unwrap();
         input.move_to(sb.x + 100, sb.y + 300).await.unwrap();
         input.scroll(-20).await.unwrap();
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -834,4 +847,196 @@ async fn editing_narrow_dark() {
     if full() {
         editing(ColorScheme::Dark, true).await;
     }
+}
+
+/// Milestone 4 surfaces: search (results, empty, no results), the completed history and a
+/// read-only task, preferences, the shortcuts dialog and the log-out confirmation.
+async fn features(scheme: ColorScheme, narrow: bool) {
+    let server = app::server("demo").await;
+    let s = session(&server, scheme, narrow).await;
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    let size = if narrow { "narrow" } else { "wide" };
+    let sc = scheme_name(scheme);
+    let name = |view: &str| format!("{view}-{size}-{sc}");
+    if narrow {
+        app::sidebar(&window).await;
+        app::open_view(&s, &window, "Today").await;
+    }
+    wait_row(&window, "Overdue").await;
+
+    // Search: before typing, with results, without.
+    s.type_text("/").await.unwrap();
+    crate::search::entry(&window).await;
+    shoot(&s, &name("search-empty")).await;
+    s.type_text("plan").await.unwrap();
+    app::task_list(&window)
+        .await
+        .wait_for(
+            &Query::role(Role::ListItem).name("Prepare the quarterly planning deck"),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    shoot(&s, &name("search")).await;
+    s.key(keysym::ESCAPE).await.unwrap();
+    s.type_text("zebra").await.unwrap();
+    wait_row(&window, "No results for \"zebra\"").await;
+    shoot(&s, &name("search-none")).await;
+    s.key(keysym::ESCAPE).await.unwrap();
+
+    // Completed history.
+    if narrow {
+        back_to_sidebar(&s, &window).await;
+    }
+    app::open_view(&s, &window, "Completed").await;
+    wait_row(&window, "Send the meeting notes").await;
+    shoot(&s, &name("completed")).await;
+    if !narrow {
+        crate::detail::open_task(&s, &window, "Book the flight").await;
+        shoot(&s, &name("completed-detail")).await;
+        s.key(keysym::ESCAPE).await.unwrap();
+    }
+
+    // Preferences and the shortcuts dialog.
+    s.chord(&[keysym::CONTROL_L, u32::from(b',')])
+        .await
+        .unwrap();
+    window
+        .wait_for(&Query::role(Role::Label).name("Appearance").showing(), WAIT)
+        .await
+        .unwrap();
+    shoot(&s, &name("preferences")).await;
+    if !narrow {
+        let log_out = window
+            .wait_for(&Query::role(Role::Button).name("Log Out").showing(), WAIT)
+            .await
+            .unwrap();
+        s.click(&log_out).await.unwrap();
+        window
+            .wait_for(
+                &Query::role(Role::Label).name("Log out of Tick?").showing(),
+                WAIT,
+            )
+            .await
+            .unwrap();
+        shoot(&s, &name("log-out")).await;
+        s.key(keysym::ESCAPE).await.unwrap();
+    }
+    s.key(keysym::ESCAPE).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    s.chord(&[keysym::CONTROL_L, u32::from(b'?')])
+        .await
+        .unwrap();
+    window
+        .wait_for(&Query::role(Role::Label).name("Navigation").showing(), WAIT)
+        .await
+        .unwrap();
+    shoot(&s, &name("shortcuts")).await;
+}
+
+/// Search and the history in Chinese.
+async fn features_chinese(scheme: ColorScheme) {
+    let sc = scheme_name(scheme);
+    let name = |view: &str| format!("{view}-zh-wide-{sc}");
+    let server = app::server("demo").await;
+    let s = app::session(&server)
+        .color_scheme(scheme)
+        .locale("zh_CN.UTF-8")
+        .env("LANGUAGE", "zh_CN")
+        .env("TICK_LOCALEDIR", zh_catalog().display().to_string())
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    wait_row(&window, "已逾期").await;
+    s.type_text("/").await.unwrap();
+    window
+        .wait_for(&Query::role(Role::Entry).name("搜索任务").showing(), WAIT)
+        .await
+        .unwrap();
+    shoot(&s, &name("search-empty")).await;
+    s.type_text("复习").await.unwrap();
+    wait_row(&window, "复习 Rust 所有权章节").await;
+    shoot(&s, &name("search")).await;
+    app::open_view(&s, &window, "已完成").await;
+    wait_row(&window, "Send the meeting notes").await;
+    shoot(&s, &name("completed")).await;
+    s.chord(&[keysym::CONTROL_L, u32::from(b',')])
+        .await
+        .unwrap();
+    window
+        .wait_for(&Query::role(Role::Label).name("外观").showing(), WAIT)
+        .await
+        .unwrap();
+    shoot(&s, &name("preferences")).await;
+    s.key(keysym::ESCAPE).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    s.chord(&[keysym::CONTROL_L, u32::from(b'?')])
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    shoot(&s, &name("shortcuts")).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn features_wide_light() {
+    if full() {
+        features(ColorScheme::Light, false).await;
+        features_chinese(ColorScheme::Light).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn features_wide_dark() {
+    if full() {
+        features(ColorScheme::Dark, false).await;
+        features_chinese(ColorScheme::Dark).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn features_narrow_light() {
+    if full() {
+        features(ColorScheme::Light, true).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn features_narrow_dark() {
+    if full() {
+        features(ColorScheme::Dark, true).await;
+    }
+}
+
+/// The sidebar button named `name`, scrolled into the visible part of the sidebar. A row
+/// just below the fold still reports `showing` (a click at its extents lands on whatever is
+/// there); one further down is not built yet.
+async fn sidebar_button(s: &Session, window: &Node, name: &str) -> Node {
+    let input = s.input().await.unwrap();
+    let sidebar = app::sidebar(window).await;
+    let sb = sidebar.extents().await.unwrap();
+    for _ in 0..60 {
+        let step = match sidebar
+            .find(&Query::role(Role::Button).name(name).showing())
+            .await
+        {
+            Some(button) => {
+                let b = button.extents().await.unwrap();
+                if b.y >= sb.y && b.y + b.height <= sb.y + sb.height {
+                    return button;
+                }
+                if b.y < sb.y { -1 } else { 1 }
+            }
+            None => 1,
+        };
+        input.move_to(sb.x + 100, sb.y + 300).await.unwrap();
+        input.scroll(step).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    panic!(
+        "{name} does not scroll into the sidebar:\n{}",
+        sidebar.dump().await
+    );
 }

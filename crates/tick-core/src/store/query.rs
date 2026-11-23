@@ -715,6 +715,45 @@ impl Store {
         Ok(out)
     }
 
+    /// Cached completions at or after `since` (a `completed_at` string), newest first.
+    pub fn completed_since(&self, since: &str) -> Result<Vec<CompletedTask>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT raw, completed_at FROM completed_items WHERE completed_at >= ?1
+             ORDER BY completed_at DESC, id",
+        )?;
+        let rows = stmt.query_map([since], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (raw, completed_at) = row?;
+            out.push(CompletedTask {
+                item: parse(&raw)?,
+                completed_at,
+            });
+        }
+        Ok(out)
+    }
+
+    /// One cached completion.
+    pub fn completed_task(&self, id: &str) -> Result<Option<CompletedTask>> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT raw, completed_at FROM completed_items WHERE id = ?1",
+                [id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        row.map(|(raw, completed_at)| {
+            Ok(CompletedTask {
+                item: parse(&raw)?,
+                completed_at,
+            })
+        })
+        .transpose()
+    }
+
     // ---- sidebar ----
 
     /// Non-archived projects as a flattened tree in display order (Inbox first), with

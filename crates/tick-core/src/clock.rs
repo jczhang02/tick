@@ -2,7 +2,9 @@
 //!
 //! `TICK_NOW` (RFC 3339) fixes the clock for deterministic tests and screenshots. Its UTC
 //! offset is also used as the local offset, so "today" does not depend on the machine's time
-//! zone (CI runs in UTC). Without `TICK_NOW` the system clock and local zone are used.
+//! zone (CI runs in UTC). With `TICK_NOW_ADVANCE=1` that clock runs from `TICK_NOW` on
+//! (reminder timers in E2E tests). Without `TICK_NOW` the system clock and local zone are
+//! used.
 
 use chrono::{
     DateTime, Duration, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime, Offset, Utc,
@@ -56,11 +58,19 @@ impl Now {
     }
 }
 
-/// Read the clock, honoring `TICK_NOW`.
+/// When this process first read the clock (`TICK_NOW_ADVANCE`).
+static FIRST_READ: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// Read the clock, honoring `TICK_NOW` (and `TICK_NOW_ADVANCE=1`: the fixed clock starts at
+/// `TICK_NOW` when the process first reads it and then runs, so timers can be tested).
 pub fn now() -> Now {
     if let Ok(s) = std::env::var("TICK_NOW")
         && let Some(n) = Now::fixed(s.trim())
     {
+        if std::env::var("TICK_NOW_ADVANCE").is_ok_and(|v| v == "1") {
+            let elapsed = FIRST_READ.get_or_init(std::time::Instant::now).elapsed();
+            return n.plus(Duration::from_std(elapsed).unwrap_or_default());
+        }
         return n;
     }
     let local = Local::now();

@@ -280,6 +280,42 @@ async fn due_by_picker_text_and_clear() {
     field(&window, "Date: No date").await;
 }
 
+/// A calendar day for a recurring task moves this occurrence; the task stays recurring
+/// (the date alone would make it a one-off).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_calendar_day_keeps_a_recurring_task_recurring() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Home").await;
+    open_task(&s, &window, "Water the plants").await;
+    s.click(&field(&window, "Date").await).await.unwrap();
+    let app_node = window.parent().await.unwrap().unwrap();
+    s.click(&november_day(&app_node, "25").await).await.unwrap();
+    wait_item(&server, "h1", "occurrence on the 25th", |v| {
+        v["due"]["date"] == "2026-11-25"
+    })
+    .await;
+    let item = server.state().get("items", "h1").cloned().unwrap();
+    assert_eq!(item["due"]["is_recurring"], true, "{item}");
+    assert_eq!(item["due"]["string"], "every monday", "{item}");
+    assert_eq!(
+        update_sent(&server, "h1", "due").last().unwrap(),
+        &serde_json::json!({"date": "2026-11-25", "string": "every monday",
+                            "is_recurring": true})
+    );
+    field(&window, "Date: Wed 25 Nov").await;
+    // The recurrence still shows under the date.
+    window
+        .wait_for(
+            &Query::role(Role::Label).name("every monday").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn deadline_set_and_clear() {
     let (server, s, window) = open_in_inbox("Read the article").await;

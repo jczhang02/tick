@@ -16,6 +16,7 @@ use tokio::sync::{OnceCell, OwnedSemaphorePermit};
 use crate::a11y::{A11y, Node, Query};
 use crate::input::Input;
 use crate::notify::Notifications;
+use crate::portal::{Portal, PortalMode};
 use crate::{Result, Role, poll};
 
 /// App ID (and D-Bus name) of Tick.
@@ -57,10 +58,12 @@ pub struct SessionBuilder {
     width: u32,
     height: u32,
     env: Vec<(String, String)>,
+    args: Vec<String>,
     app_bin: Option<PathBuf>,
     app_id: String,
     launch: bool,
     gtk_notifications: bool,
+    portal: Option<PortalMode>,
 }
 
 impl Default for SessionBuilder {
@@ -74,10 +77,12 @@ impl Default for SessionBuilder {
                 // Ctrl+Shift+U hex input; the default Wayland context ignores it.
                 ("GTK_IM_MODULE".into(), "gtk-im-context-simple".into()),
             ],
+            args: Vec::new(),
             app_bin: None,
             app_id: TICK_APP_ID.into(),
             launch: true,
             gtk_notifications: true,
+            portal: None,
         }
     }
 }
@@ -100,6 +105,12 @@ impl SessionBuilder {
         let key = key.into();
         self.env.retain(|(k, _)| *k != key);
         self.env.push((key, value.into()));
+        self
+    }
+
+    /// Adds a command-line argument for the app (every launch, e.g. `--background`).
+    pub fn arg(mut self, arg: impl Into<String>) -> Self {
+        self.args.push(arg.into());
         self
     }
 
@@ -147,6 +158,13 @@ impl SessionBuilder {
     /// falls back to its freedesktop backend.
     pub fn freedesktop_notifications_only(mut self) -> Self {
         self.gtk_notifications = false;
+        self
+    }
+
+    /// Owns `org.freedesktop.portal.Desktop` with a fake Background portal (see
+    /// [`crate::Portal`]).
+    pub fn fake_portal(mut self, mode: PortalMode) -> Self {
+        self.portal = Some(mode);
         self
     }
 
@@ -274,11 +292,13 @@ pub struct Session {
     a11y: OnceCell<A11y>,
     input: OnceCell<Input>,
     notifications: Notifications,
+    portal: Option<Portal>,
     bus: zbus::Connection,
     procs: Procs,
     _slot: OwnedSemaphorePermit,
     base_env: Vec<(String, String)>,
     app_env: Vec<(String, String)>,
+    app_args: Vec<String>,
     app_bin: PathBuf,
     app_id: String,
     app_log_offset: u64,
@@ -377,6 +397,10 @@ impl Session {
                 .context("connecting to the private session bus")?;
             // Own the notification names before anything can activate a real server.
             let notifications = Notifications::install(&bus, opts.gtk_notifications).await?;
+            let portal = match opts.portal {
+                Some(mode) => Some(Portal::install(&bus, mode).await?),
+                None => None,
+            };
 
             let mut mutter = Command::new("mutter");
             mutter
@@ -396,10 +420,10 @@ impl Session {
                 }
             })
             .await?;
-            anyhow::Ok((bus, notifications))
+            anyhow::Ok((bus, notifications, portal))
         }
         .await;
-        let (bus, notifications) = match started {
+        let (bus, notifications, portal) = match started {
             Ok(v) => v,
             Err(err) => {
                 let mutter = procs.log_tail("mutter.log", 30);
@@ -414,11 +438,13 @@ impl Session {
             a11y: OnceCell::new(),
             input: OnceCell::new(),
             notifications,
+            portal,
             bus,
             procs,
             _slot: slot,
             base_env,
             app_env: opts.env,
+            app_args: opts.args,
             app_bin,
             app_id: opts.app_id,
             app_log_offset: 0,
@@ -444,7 +470,8 @@ impl Session {
             .open(&log_path)?;
         self.app_log_offset = log.metadata()?.len();
         let mut cmd = Command::new(&self.app_bin);
-        cmd.env_clear()
+        cmd.args(&self.app_args)
+            .env_clear()
             .envs(self.base_env.iter().cloned())
             .env("WAYLAND_DISPLAY", WAYLAND_DISPLAY)
             .env("GDK_BACKEND", "wayland")
@@ -570,6 +597,11 @@ impl Session {
     /// The fake notification servers.
     pub fn notifications(&self) -> &Notifications {
         &self.notifications
+    }
+
+    /// The fake Background portal, if the session has one ([`SessionBuilder::fake_portal`]).
+    pub fn portal(&self) -> Option<&Portal> {
+        self.portal.as_ref()
     }
 
     /// AT-SPI access (connects to the accessibility bus on first use).

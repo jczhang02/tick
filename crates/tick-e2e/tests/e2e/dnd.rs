@@ -233,3 +233,263 @@ async fn reorder_and_nest_projects_by_drag() {
     let h = row("Home, 2 tasks").await;
     assert!(h.y > w.y, "{h:?} {w:?}");
 }
+
+/// 4.6: moving the pointer sideways while dragging changes the depth in 32 px steps.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sideways_drag_changes_depth() {
+    let (server, s, window) = start(
+        "Inbox",
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    // On its own row, a step and a half right (drops land a few pixels off, docs/testing.md):
+    // one level in, under the task above.
+    let (fx, fy, _) = title_point(&window, "Read the article").await;
+    let input = s.input().await.unwrap();
+    input.press_at(fx, fy).await.unwrap();
+    // Well past GTK's 8 px drag threshold (it must be exceeded, not met) before the
+    // sideways move, and a pause before the drop for a busy runner.
+    input.drag_by(0, 12, 4).await.unwrap();
+    input.drag_by(48, 0, 12).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    input.release().await.unwrap();
+    wait_item(&server, "i3", "one level in", |v| v["parent_id"] == "i2").await;
+    let moves = app::commands_sent(&server, "item_move");
+    assert_eq!(moves[0]["args"]["parent_id"], "i2", "{moves:?}");
+
+    // A step and a half left: back out to the top level, after "Renew passport".
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (fx, fy, _) = title_point(&window, "Read the article").await;
+    input.press_at(fx, fy).await.unwrap();
+    // Well past GTK's 8 px drag threshold (it must be exceeded, not met) before the
+    // sideways move, and a pause before the drop for a busy runner.
+    input.drag_by(0, 12, 4).await.unwrap();
+    input.drag_by(-48, 0, 12).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    input.release().await.unwrap();
+    wait_item(&server, "i3", "back out", |v| v["parent_id"].is_null()).await;
+    tick_e2e::poll(Duration::from_secs(15), "after Renew passport", || async {
+        let st = server.state();
+        (key(&st, "i3") > key(&st, "i2")).then_some(())
+    })
+    .await
+    .unwrap();
+}
+
+/// 4.7: dropping a task into another day's group in Upcoming reschedules it, keeping its
+/// time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn drop_on_another_upcoming_day_reschedules() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server)
+        .monitor(1280, 1200)
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Upcoming").await;
+    app::wait_tasks(
+        &window,
+        &[
+            "Renew passport",
+            "Plan the deck",
+            "Call the dentist",
+            "Water the plants",
+            "Book the venue",
+        ],
+    )
+    .await;
+    // 14:00 today onto Wednesday 25's group: the 25th at 14:00.
+    let (fx, fy, _) = title_point(&window, "Plan the deck").await;
+    let (tx, ty, _) = title_point(&window, "Book the venue").await;
+    drag(&s, (fx, fy), (tx, ty)).await;
+    wait_item(&server, "w1", "moved to the 25th", |v| {
+        v["due"]["date"] == "2026-11-25T14:00:00"
+    })
+    .await;
+    let updates = app::commands_sent(&server, "item_update");
+    assert_eq!(
+        updates.last().unwrap()["args"]["due"],
+        serde_json::json!({"date": "2026-11-25T14:00:00"}),
+        "{updates:?}"
+    );
+    // A full-day overdue task onto tomorrow's group: tomorrow, still full-day.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (fx, fy, _) = title_point(&window, "Renew passport").await;
+    let (tx, ty, _) = title_point(&window, "Water the plants").await;
+    drag(&s, (fx, fy), (tx, ty)).await;
+    wait_item(&server, "i2", "moved to tomorrow", |v| {
+        v["due"]["date"] == "2026-11-23"
+    })
+    .await;
+    // A recurring task ("every monday") onto Wednesday's group: this occurrence moves, the
+    // recurrence stays.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (fx, fy, _) = title_point(&window, "Water the plants").await;
+    let (tx, ty, _) = title_point(&window, "Book the venue").await;
+    drag(&s, (fx, fy), (tx, ty)).await;
+    wait_item(&server, "h1", "occurrence moved to the 25th", |v| {
+        v["due"]["date"] == "2026-11-25"
+    })
+    .await;
+    let h1 = server.state().get("items", "h1").cloned().unwrap();
+    assert_eq!(h1["due"]["is_recurring"], true, "{h1}");
+    assert_eq!(h1["due"]["string"], "every monday", "{h1}");
+    let updates = app::commands_sent(&server, "item_update");
+    assert_eq!(
+        updates.last().unwrap()["args"]["due"],
+        serde_json::json!({"date": "2026-11-25", "string": "every monday", "is_recurring": true}),
+        "{updates:?}"
+    );
+}
+
+/// 4.20: in Today an overdue task dropped on the Today group is due today (same time);
+/// the Overdue group takes no drops.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn drop_on_today_in_the_today_view() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Today").await;
+    app::wait_tasks(
+        &window,
+        &["Renew passport", "Plan the deck", "Call the dentist"],
+    )
+    .await;
+    // Onto Overdue: nothing happens.
+    let (fx, fy, _) = title_point(&window, "Call the dentist").await;
+    let (tx, ty, _) = title_point(&window, "Renew passport").await;
+    drag(&s, (fx, fy), (tx, ty)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(
+        app::commands_sent(&server, "item_update").is_empty(),
+        "{:?}",
+        app::commands_sent(&server, "item_update")
+    );
+    assert_eq!(
+        server.state().get("items", "i1").unwrap()["due"]["date"],
+        "2026-11-22"
+    );
+    // The overdue task onto the Today group: due today.
+    let (fx, fy, _) = title_point(&window, "Renew passport").await;
+    let (tx, ty, _) = title_point(&window, "Plan the deck").await;
+    drag(&s, (fx, fy), (tx, ty)).await;
+    wait_item(&server, "i2", "due today", |v| {
+        v["due"]["date"] == "2026-11-22"
+    })
+    .await;
+    let updates = app::commands_sent(&server, "item_update");
+    assert_eq!(
+        updates.last().unwrap()["args"]["due"],
+        serde_json::json!({"date": "2026-11-22"}),
+        "{updates:?}"
+    );
+}
+
+/// 4.1: hovering a collapsed sidebar project for 600 ms while dragging expands it, so a
+/// sub-project can take the drop.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hovering_a_collapsed_project_expands_it() {
+    let mut f = app::fixture();
+    f["projects"].as_array_mut().unwrap().push(
+        serde_json::json!({"id": "pk", "name": "Kitchen", "color": "green",
+                                 "parent_id": "ph", "child_order": 1}),
+    );
+    f["projects"][1]["is_collapsed"] = serde_json::json!(true);
+    let server = app::server_with(f).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Inbox").await;
+    app::wait_tasks(
+        &window,
+        &["Call the dentist", "Renew passport", "Read the article"],
+    )
+    .await;
+    let sidebar = app::sidebar(&window).await;
+    let home = sidebar
+        .wait_for(
+            &Query::role(Role::ListItem).name("Home, 2 tasks").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    assert!(
+        sidebar
+            .find(&Query::role(Role::ListItem).name("Kitchen").showing())
+            .await
+            .is_none(),
+        "Home starts collapsed"
+    );
+    let h = home.extents().await.unwrap();
+    let (fx, fy, _) = title_point(&window, "Read the article").await;
+    let input = s.input().await.unwrap();
+    input.press_at(fx, fy).await.unwrap();
+    input
+        .drag_by(h.x + 80 - fx, h.y + h.height / 2 - fy, 20)
+        .await
+        .unwrap();
+    // Rest on it: it opens after 600 ms.
+    let kitchen = sidebar
+        .wait_for(&Query::role(Role::ListItem).name("Kitchen").showing(), WAIT)
+        .await
+        .unwrap();
+    let k = kitchen.extents().await.unwrap();
+    input
+        .drag_by(0, k.y + k.height / 2 - (h.y + h.height / 2), 6)
+        .await
+        .unwrap();
+    input.release().await.unwrap();
+    wait_item(&server, "i3", "moved to Kitchen", |v| {
+        v["project_id"] == "pk"
+    })
+    .await;
+}
+
+/// B1 (3.3): a click on the list, empty space included, closes the overlaid detail pane
+/// (libadwaita's overlay split view does it; the click does not reach a row under it).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn b1_click_on_the_list_closes_the_detail() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server)
+        .monitor(900, 800)
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Inbox").await;
+    crate::detail::open_task(&s, &window, "Read the article").await;
+    // Below the last row, left of the overlaid pane.
+    let list = app::task_list(&window).await.extents().await.unwrap();
+    s.input()
+        .await
+        .unwrap()
+        .click(list.x + 60, list.y + list.height - 40)
+        .await
+        .unwrap();
+    let title = Query::role(Role::Text).name("Task title").showing();
+    window.wait_gone(&title, WAIT).await.unwrap();
+    // On a row: closes too, and does not open that row.
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    crate::detail::open_task(&s, &window, "Read the article").await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let r = app::task_row(&window, "Call the dentist")
+        .await
+        .extents()
+        .await
+        .unwrap();
+    s.input()
+        .await
+        .unwrap()
+        .click(r.x + 120, r.y + 22)
+        .await
+        .unwrap();
+    window.wait_gone(&title, WAIT).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert!(window.find(&title).await.is_none());
+    // The next click opens it.
+    crate::detail::open_task(&s, &window, "Call the dentist").await;
+}

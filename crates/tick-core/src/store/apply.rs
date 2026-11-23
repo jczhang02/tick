@@ -300,15 +300,50 @@ impl Store {
 
     /// Store a page of completed tasks in the history cache.
     pub fn cache_completed(&mut self, items: &[Value]) -> Result<Changes> {
+        self.cache_completed_range(items, None)
+    }
+
+    /// Store a page of completed tasks that covers every completion in `range`: cached rows
+    /// in that range the server no longer returns (reopened or deleted elsewhere) are
+    /// dropped first. `completed_at` is stored as [`completed_stamp`] so it compares as a
+    /// string whatever precision the server wrote.
+    pub fn cache_completed_range(
+        &mut self,
+        items: &[Value],
+        range: Option<CompletedRange<'_>>,
+    ) -> Result<Changes> {
         let tx = self.write_tx()?;
         let mut changes = Changes::default();
+        if let Some(range) = range {
+            // A coarse pass on whole seconds (rows cached before stamps were normalized
+            // may have another precision), the exact check below.
+            let (lo, hi) = range.seconds();
+            let cached: Vec<(String, String)> = {
+                let mut stmt = tx.prepare_cached(
+                    "SELECT id, completed_at FROM completed_items
+                     WHERE completed_at >= ?1 AND completed_at <= ?2",
+                )?;
+                let rows = stmt.query_map(params![lo, hi], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.collect::<std::result::Result<_, _>>()?
+            };
+            for (id, at) in cached {
+                let at = completed_stamp(&at);
+                if !range.contains(&at)
+                    || range.keep.contains(&id)
+                    || items
+                        .iter()
+                        .any(|v| id_of(v, "id").as_deref() == Some(id.as_str()))
+                {
+                    continue;
+                }
+                tx.execute("DELETE FROM completed_items WHERE id = ?1", [&id])?;
+                changes.add(Kind::CompletedItem, &id);
+            }
+        }
         for v in items {
             let Some(id) = id_of(v, "id") else { continue };
-            let completed_at = v
-                .get("completed_at")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_owned();
+            let completed_at =
+                completed_stamp(v.get("completed_at").and_then(Value::as_str).unwrap_or(""));
             tx.prepare_cached(
                 "INSERT INTO completed_items (id, project_id, completed_at, raw) VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id,
@@ -357,5 +392,61 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(changes)
+    }
+}
+
+/// `completed_at` in one precision (`2026-11-22T08:00:00.000000Z`, UTC, six fraction
+/// digits), so stamps compare as strings: the API writes six digits, but `...00Z` sorts
+/// after `...00.5Z` (`'Z' > '.'`). Text that is not RFC 3339 is kept as it is.
+pub fn completed_stamp(s: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(s).map_or_else(
+        |_| s.to_owned(),
+        |t| {
+            t.with_timezone(&chrono::Utc)
+                .format("%Y-%m-%dT%H:%M:%S%.6fZ")
+                .to_string()
+        },
+    )
+}
+
+/// The completions a page of history vouches for (see [`Store::cache_completed_range`]),
+/// as [`completed_stamp`] strings.
+#[derive(Debug, Clone, Copy)]
+pub struct CompletedRange<'a> {
+    pub lower: std::ops::Bound<&'a str>,
+    pub upper: std::ops::Bound<&'a str>,
+    /// Rows to keep although in range: ones an earlier page of the same walk returned at
+    /// its oldest instant (the boundary this page starts from inclusively).
+    pub keep: &'a [String],
+}
+
+impl CompletedRange<'_> {
+    /// String bounds that hold every stamp of the range whatever its precision.
+    fn seconds(&self) -> (String, String) {
+        use std::ops::Bound;
+        let second = |b: Bound<&str>| match b {
+            Bound::Included(s) | Bound::Excluded(s) => Some(s.get(..19).unwrap_or(s).to_owned()),
+            Bound::Unbounded => None,
+        };
+        (
+            second(self.lower).unwrap_or_default(),
+            // '~' sorts after '.' and 'Z'.
+            second(self.upper).map_or_else(|| "~".to_owned(), |s| s + "~"),
+        )
+    }
+
+    fn contains(&self, at: &str) -> bool {
+        use std::ops::Bound;
+        let above = match self.lower {
+            Bound::Included(l) => at >= l,
+            Bound::Excluded(l) => at > l,
+            Bound::Unbounded => true,
+        };
+        let below = match self.upper {
+            Bound::Included(u) => at <= u,
+            Bound::Excluded(u) => at < u,
+            Bound::Unbounded => true,
+        };
+        above && below
     }
 }

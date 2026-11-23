@@ -129,7 +129,17 @@ async fn quits_on_ctrl_q() {
   and prints the paths and log tails (`app.log`, `mutter.log`, `dbus.log`). `TICK_E2E_KEEP=1`
   always keeps it. CI uploads the logs of failed sessions as the `e2e-logs` artifact.
 - Builder options: `.narrow()` (600x800), `.monitor(w, h)`, `.color_scheme(..)`, `.now(..)`,
-  `.locale(..)`, `.env(k, v)`, `.api(base_url, token)`, `.no_launch()`.
+  `.locale(..)`, `.env(k, v)`, `.arg(..)` (a command-line argument, e.g. `--background`),
+  `.api(base_url, token)`, `.no_launch()`,
+  `.fake_portal(PortalMode::Grant | Deny | NoBackground)`.
+- Fake Background portal (opt-in): the harness owns `org.freedesktop.portal.Desktop` on the
+  private bus and records `RequestBackground` calls (`Session::portal().calls()`); `Grant`
+  answers `Response` 0 with what was asked, `Deny` answers 1, `NoBackground` owns the name
+  without the interface (every call fails, like a portal without a Background backend). Opt-in,
+  because owning the name also turns away the Settings portal calls GTK and libadwaita make.
+- AT-SPI: libadwaita's switch rows report the "switch" role, which the `atspi` crate does not
+  know (`Role` shows it as unknown): find them by name and the `checkable` state.
+- Theme checks sample screenshot pixels (`png` dev-dependency) rather than a test hook.
 - Harness self-tests that Tick cannot exercise yet (typing into an entry, notifications) run
   against `crates/tick-gtk/examples/e2e_fixture.rs`, a minimal GTK app that is not part of Tick.
 
@@ -153,7 +163,7 @@ Control endpoints (JSON bodies):
 | `POST /__test/seed` | `{"preset": "demo" \| "empty" \| "bulk", "count": N}` or a fixture `{"token"?, "now"?, "user"?, "projects": [...], "items": [...], ..., "collaborator_states": [...], "completed": [...]}` (missing fields get documented defaults) |
 | `GET /__test/state` | the whole account as JSON (including deleted objects and completion records) |
 | `GET /__test/requests`, `DELETE /__test/requests` | request log (method, path, query, decoded body, status, `at_ms`: arrival time in ms since the server state was created) |
-| `POST /__test/fail` | inject one failure or a list: `{"kind": "offline"}` / `{"kind": "online"}` (API connections are dropped), `{"kind": "status", "status": 429, "retry_after": 2, "count": 1, "path"?, "body_contains"?}` (`body_contains`: only requests whose decoded body contains the text), `{"kind": "error_after_commit", "status": 503}` (commands run, the response is an error), `{"kind": "command_error", "command_type": "item_add", "args_contain"?, "error"?}` |
+| `POST /__test/fail` | inject one failure or a list: `{"kind": "offline"}` / `{"kind": "online"}` (API connections are dropped), `{"kind": "status", "status": 429, "retry_after": 2, "count": 1, "path"?, "body_contains"?}` (`body_contains`: only requests whose decoded body contains the text), `{"kind": "error_after_commit", "status": 503}` (commands run, the response is an error), `{"kind": "delay", "ms": 15000, "count": 1}` (the next `/sync` requests are logged on arrival, held for `ms`, then processed and answered), `{"kind": "command_error", "command_type": "item_add", "args_contain"?, "error"?}` |
 | `DELETE /__test/fail` | clear injected failures and go online |
 | `POST /__test/reset` | empty account (token and clock kept) |
 | `POST /__test/now` | `{"now": "<RFC 3339>"}` fixes the server clock (`null` = system clock) |
@@ -235,5 +245,11 @@ completed-pending state), `completing` (the 800 ms hold, kept with `TICK_TEST_HO
   (no hover tint) and from the scrolled window's edge (where GTK shows the scrollbar).
 - The session's fontconfig maps `monospace` to Adwaita Mono, as on a GNOME desktop
   (the session has no GNOME settings, so libadwaita falls back to fontconfig's `monospace`).
+
+Milestone 4 (both schemes, wide and narrow): `search-empty`, `search` (results), `search-none`,
+`completed` (the demo history: day groups and "Load More"), `preferences`, `shortcuts`; wide
+only: `completed-detail` (read-only pane) and `log-out` (the confirmation over preferences); in
+Chinese (`<view>-zh-wide-<scheme>`): `search-empty`, `search`, `completed`, `preferences`,
+`shortcuts`.
 
 Not yet captured: a non-blue accent (the session's accent cannot be set yet).

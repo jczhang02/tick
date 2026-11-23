@@ -47,6 +47,16 @@ pub enum RowAction {
     /// A task row drag started or ended.
     DragBegin,
     DragEnd,
+    /// The Search view's entry changed (4.15).
+    SearchChanged(String),
+    /// Enter in the search entry (its text): open the first result.
+    SearchActivate(String),
+    /// Down in the search entry: focus the first result.
+    SearchDown,
+    /// Escape in the empty search entry: leave Search.
+    SearchEscape,
+    /// "Load More" in the Completed view (4.21).
+    LoadMore,
 }
 
 /// A frameless inline editor: Enter or focus-out commits, Escape cancels. `select` selects
@@ -143,8 +153,8 @@ fn in_button(w: Option<gtk::Widget>, row: &gtk::Widget) -> bool {
     false
 }
 
-/// Open on click, context menu on right-click and long-press (4.4).
-fn row_gestures(root: &gtk::Box, id: &str, key: &str, ctx: &RenderCtx) {
+/// Open the task on a click outside the row's buttons.
+fn open_on_click(root: &gtk::Box, id: &str, ctx: &RenderCtx) {
     let click = gtk::GestureClick::new();
     click.set_button(gtk::gdk::BUTTON_PRIMARY);
     let dispatch = ctx.dispatch.clone();
@@ -157,6 +167,11 @@ fn row_gestures(root: &gtk::Box, id: &str, key: &str, ctx: &RenderCtx) {
         dispatch(RowAction::Open(id_c.clone()));
     });
     root.add_controller(click);
+}
+
+/// Open on click, context menu on right-click and long-press (4.4).
+fn row_gestures(root: &gtk::Box, id: &str, key: &str, ctx: &RenderCtx) {
+    open_on_click(root, id, ctx);
     let menu_at = {
         let dispatch = ctx.dispatch.clone();
         let key = key.to_owned();
@@ -206,6 +221,8 @@ pub struct RenderCtx {
     pub task_bound: Rc<Cell<bool>>,
     /// The view header's height, for the header bar title hand-off (4.2).
     pub header_height: Rc<Cell<i32>>,
+    /// The search entry takes focus when it is next built (the Search view was opened).
+    pub focus_search: Rc<Cell<bool>>,
 }
 
 /// Connect the factory to `list` and return the model and its selection.
@@ -260,6 +277,14 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
         return;
     };
     let row = obj.row().clone();
+    // The search entry is never rebuilt while it shows: typing would lose focus (4.15).
+    if let Row::SearchHeader { count, .. } = &row
+        && let Some(existing) = bin.child()
+        && existing.widget_name() == obj.key()
+    {
+        update_search_count(&existing, *count);
+        return;
+    }
     let (selectable, interactive) = match &row {
         Row::Task(_) => (true, true),
         Row::SectionHeader(_) | Row::Ghost { .. } => (false, true),
@@ -278,6 +303,15 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
         Row::GroupHeader { title, .. } => group_header(title),
         Row::DayHeader(d) => day_header(d),
         Row::MonthHeader { title, .. } => month_header(title),
+        Row::Task(t) if t.read_only => {
+            ctx.task_bound.set(true);
+            let w = task_row(t, ctx);
+            // Open and Reopen in its menu; nothing to drag (4.21).
+            if let Some(b) = w.downcast_ref::<gtk::Box>() {
+                row_gestures(b, &t.id, &t.key, ctx);
+            }
+            w
+        }
         Row::Task(t) => {
             ctx.task_bound.set(true);
             let w = task_row(t, ctx);
@@ -305,6 +339,8 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
         Row::Loading { text, .. } => loading_row(text),
         Row::SourceLine { text, spinner, .. } => source_line(text, *spinner),
         Row::SectionEditor { id, name, .. } => section_editor(id.clone(), name, ctx),
+        Row::SearchHeader { query, count } => search_header(query, *count, ctx),
+        Row::LoadMore { loading, sensitive } => load_more_row(*loading, *sensitive, ctx),
     };
     // The key lets keyboard navigation map the focused row back to its model position.
     widget.set_widget_name(&obj.key());
@@ -341,6 +377,8 @@ fn accessible_text(row: &Row) -> (String, String) {
         Row::Empty(e) => (e.title.clone(), e.description.clone()),
         Row::Loading { text, .. } | Row::SourceLine { text, .. } => (text.clone(), String::new()),
         Row::SectionEditor { .. } => (gettext("Section name"), String::new()),
+        Row::SearchHeader { .. } => (gettext("Search"), String::new()),
+        Row::LoadMore { .. } => (gettext("Load More"), String::new()),
     }
 }
 
@@ -728,7 +766,12 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
         .css_classes(["tick-ring".to_owned(), format!("p{}", t.p)])
         .active(t.checked)
         .build();
-    let ring_name = if t.checked {
+    let ring_name = if t.read_only {
+        // The history is read-only (4.3 "disabled"): reopen from the detail pane or menu.
+        ring.set_sensitive(false);
+        ring.add_css_class("tick-done");
+        gettext("Completed")
+    } else if t.checked {
         gettext("Mark as not done")
     } else {
         gettext("Complete task")
@@ -855,6 +898,10 @@ pub fn meta_line(t: &TaskRow) -> Option<adw::WrapBox> {
         .css_classes(["caption", "tick-meta"])
         .build();
     let mut has_meta = false;
+    if let Some(at) = &t.done_at {
+        meta.append(&label(at, &["dimmed", "numeric"]));
+        has_meta = true;
+    }
     if t.completed_pending {
         let b = gtk::Box::new(gtk::Orientation::Horizontal, 3);
         let spinner = adw::Spinner::new();
@@ -938,6 +985,7 @@ fn drag_icon(t: &TaskRow, width: i32) -> gtk::Widget {
         narrow: Rc::default(),
         task_bound: Rc::default(),
         header_height: Rc::default(),
+        focus_search: Rc::default(),
     };
     let row = task_row(&shown, &ctx);
     row.set_can_target(false);
@@ -1039,4 +1087,114 @@ fn source_line(text: &str, spinner: bool) -> gtk::Widget {
     }
     root.append(&label(text, &["caption", "dimmed"]));
     root.upcast()
+}
+
+/// The Search view's header (4.15): a 44 px search entry in the place of the large title,
+/// with the result count under it as the view header's subtitle (4.2).
+fn search_header(query: &str, count: usize, ctx: &RenderCtx) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .margin_top(if ctx.narrow.get() { 24 } else { 48 })
+        // The entry lines up with the rows below: its left edge with the rings, its right
+        // edge with the end of the row content (an avatar's right edge).
+        .margin_start(12)
+        .css_classes(["tick-view-header", "tick-search-header"])
+        .build();
+    let entry = gtk::SearchEntry::builder()
+        .placeholder_text(gettext("Search tasks"))
+        .text(query)
+        .hexpand(true)
+        .css_classes(["tick-entry", "title-4", "tick-search-entry"])
+        .build();
+    entry.update_property(&[gtk::accessible::Property::Label(&gettext("Search tasks"))]);
+    let dispatch = ctx.dispatch.clone();
+    entry.connect_search_changed(move |e| dispatch(RowAction::SearchChanged(e.text().into())));
+    let dispatch = ctx.dispatch.clone();
+    entry.connect_activate(move |e| dispatch(RowAction::SearchActivate(e.text().into())));
+    let dispatch = ctx.dispatch.clone();
+    // Escape (stop-search) clears the entry, or leaves Search when it is empty.
+    entry.connect_stop_search(move |e| {
+        if e.text().is_empty() {
+            dispatch(RowAction::SearchEscape);
+        } else {
+            e.set_text("");
+        }
+    });
+    let keys = gtk::EventControllerKey::new();
+    let dispatch = ctx.dispatch.clone();
+    keys.connect_key_pressed(move |_, key, _, mods| {
+        if mods.is_empty() && matches!(key, gtk::gdk::Key::Down | gtk::gdk::Key::KP_Down) {
+            dispatch(RowAction::SearchDown);
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    entry.add_controller(keys);
+    let focus = ctx.focus_search.clone();
+    entry.connect_map(move |e| {
+        if focus.replace(false) {
+            let e = e.clone();
+            glib::idle_add_local_once(move || {
+                e.grab_focus();
+                e.set_position(-1);
+            });
+        }
+    });
+    root.append(&entry);
+    let count_label = label("", &["body", "dimmed", "numeric"]);
+    count_label.set_widget_name("search-count");
+    count_label.set_margin_top(6);
+    root.append(&count_label);
+    update_search_count(root.upcast_ref(), count);
+    let height = ctx.header_height.clone();
+    root.connect_map(move |w| {
+        let w = w.clone();
+        let height = height.clone();
+        glib::idle_add_local_once(move || height.set(w.height() + 48 + 24));
+    });
+    root.upcast()
+}
+
+/// Show `count` results under the search entry (hidden when 0: the empty state says it).
+fn update_search_count(header: &gtk::Widget, count: usize) {
+    let Some(label) = header.last_child().and_downcast::<gtk::Label>() else {
+        return;
+    };
+    label.set_label(&ncount("{n} task", "{n} tasks", count));
+    label.set_visible(count > 0);
+}
+
+/// "Load More" (4.21): a full-width flat button, 44 px tall; a spinner and "Loading" while
+/// the page loads.
+fn load_more_row(loading: bool, sensitive: bool, ctx: &RenderCtx) -> gtk::Widget {
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(9)
+        .halign(gtk::Align::Center)
+        .build();
+    if loading {
+        let spinner = adw::Spinner::new();
+        spinner.set_size_request(16, 16);
+        content.append(&spinner);
+        content.append(&label(&gettext("Loading"), &["dimmed"]));
+    } else {
+        content.append(&label(&gettext("Load More"), &[]));
+    }
+    let button = gtk::Button::builder()
+        .child(&content)
+        .hexpand(true)
+        .sensitive(sensitive)
+        .margin_top(12)
+        .margin_bottom(24)
+        .css_classes(["flat", "tick-load-more"])
+        .build();
+    let name = if loading {
+        gettext("Loading")
+    } else {
+        gettext("Load More")
+    };
+    button.update_property(&[gtk::accessible::Property::Label(&name)]);
+    let dispatch = ctx.dispatch.clone();
+    button.connect_clicked(move |_| dispatch(RowAction::LoadMore));
+    button.upcast()
 }

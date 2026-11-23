@@ -140,7 +140,25 @@ pub(crate) fn execute(
             let raw = id_str(args.get("id")).ok_or_else(|| missing("id"))?;
             let id = ctx.temp.get(&raw).cloned().unwrap_or(raw);
             if !ctx.st.map("items").contains_key(&id) {
-                return Err(not_found("item"));
+                // A task completed long ago is only in the completed archive (seeded
+                // history): reopening brings it back as an active task.
+                let Some(rec) = ctx
+                    .st
+                    .completed
+                    .iter()
+                    .rev()
+                    .find(|c| c["id"].as_str() == Some(id.as_str()))
+                    .cloned()
+                else {
+                    return Err(not_found("item"));
+                };
+                let mut v = rec;
+                if let Some(o) = v.as_object_mut() {
+                    o.remove("completed_by_uid");
+                }
+                v["checked"] = json!(true);
+                v["is_deleted"] = json!(false);
+                ctx.st.put("items", v);
             }
             uncomplete(ctx.st, &id);
             None

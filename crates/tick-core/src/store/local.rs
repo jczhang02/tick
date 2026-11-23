@@ -474,8 +474,10 @@ pub(crate) fn apply_command(
                     v["completed_at"] = Value::Null;
                     put(tx, Kind::Item, &v, now, ch)?;
                 }
+                forget_completed(tx, id, ch)?;
                 return Ok(());
             }
+            forget_completed(tx, id, ch)?;
             // The task and its ancestors become active again.
             let mut cur = Some(id.to_owned());
             while let Some(x) = cur {
@@ -860,6 +862,15 @@ fn rename_label_on_items(
             .collect();
         v["labels"] = Value::Array(labels);
         put(tx, Kind::Item, &v, now, ch)?;
+    }
+    Ok(())
+}
+
+/// A reopened task leaves the completed history at once (the next history refresh agrees
+/// with the server either way).
+fn forget_completed(tx: &Transaction<'_>, id: &str, ch: &mut Changes) -> Result<()> {
+    if tx.execute("DELETE FROM completed_items WHERE id = ?1", [id])? > 0 {
+        ch.add(Kind::CompletedItem, id);
     }
     Ok(())
 }

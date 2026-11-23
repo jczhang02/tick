@@ -29,7 +29,12 @@ use serde_json::Value;
 
 use crate::api::{ApiError, Client, RESOURCE_TYPES};
 use crate::command::QUICK_ADD;
-use crate::store::{Changes, Clock, Kind, MAX_ATTEMPTS, QueuedCommand, Store, StoreError, wall_ms};
+use std::ops::Bound;
+
+use crate::store::{
+    Changes, Clock, CompletedRange, Kind, MAX_ATTEMPTS, QueuedCommand, Store, StoreError,
+    completed_stamp, wall_ms,
+};
 
 /// Maximum commands per `/sync` request (`docs/api/pages/request-limits.md`).
 pub const MAX_BATCH: usize = 100;
@@ -129,10 +134,12 @@ pub enum EngineEvent {
     /// Objects changed in the store; refresh the affected models.
     Changed(Changes),
     Status(SyncStatus),
-    /// A page of completed history was cached.
+    /// A page of completed history was cached. `since` is the start of the window the page
+    /// came from (RFC 3339, UTC): the history is complete from there on.
     CompletedLoaded {
         count: usize,
         has_more: bool,
+        since: String,
     },
     /// Server results for an unsupported filter query were cached.
     FilterLoaded {
@@ -232,6 +239,13 @@ struct CompletedPager {
     since: chrono::DateTime<chrono::Utc>,
     until: chrono::DateTime<chrono::Utc>,
     cursor: Option<String>,
+    /// Upper bound ([`completed_stamp`]) of what the next page covers: the window's end
+    /// (exclusive) for its first page, else the oldest completion of the previous page
+    /// (inclusive: the server may put more completions of that instant on this page).
+    upper: String,
+    upper_inclusive: bool,
+    /// Ids the previous pages returned at `upper` (kept when this page lacks them).
+    at_upper: Vec<String>,
     windows: u32,
 }
 
@@ -250,6 +264,12 @@ pub struct SyncEngine {
 
 fn rfc3339(t: chrono::DateTime<chrono::Utc>) -> String {
     t.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// An instant written like the API's `completed_at` (`2025-01-21T21:28:43.841504Z`), so
+/// cached rows compare with it as strings.
+fn completed_stamp_at(t: chrono::DateTime<chrono::Utc>) -> String {
+    t.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()
 }
 
 impl SyncEngine {
@@ -547,10 +567,14 @@ impl SyncEngine {
     pub async fn fetch_completed(&mut self, restart: bool) -> Result<(usize, bool), EngineError> {
         let now = self.store.now().utc();
         if restart || self.completed.is_none() {
+            let until = now + chrono::Duration::minutes(1);
             self.completed = Some(CompletedPager {
                 since: now - chrono::Duration::days(COMPLETED_WINDOW_DAYS),
-                until: now + chrono::Duration::minutes(1),
+                until,
                 cursor: None,
+                upper: completed_stamp_at(until),
+                upper_inclusive: false,
+                at_upper: Vec::new(),
                 windows: 1,
             });
         }
@@ -569,20 +593,79 @@ impl SyncEngine {
             .await
             .map_err(|e| self.fail(e.into()))?;
         let count = page.items.len();
-        let changes = self.store.cache_completed(&page.items)?;
+        let window_since = rfc3339(pager.since);
+        let next = page.next_cursor.filter(|c| !c.is_empty());
+        // The page holds every completion from its oldest one (or, as the window's last
+        // page, from the window's start) up to `upper`: cached rows in that range that it
+        // does not hold are gone on the server. With more pages to come, the oldest instant
+        // itself is left out: the next page may hold more completions of it.
+        let stamped: Vec<(String, String)> = page
+            .items
+            .iter()
+            .filter_map(|v| {
+                let id = match v.get("id")? {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                let at = v.get("completed_at").and_then(Value::as_str)?;
+                Some((id, completed_stamp(at)))
+            })
+            .collect();
+        let oldest = stamped.iter().map(|(_, at)| at.clone()).min();
+        let since_stamp = completed_stamp_at(pager.since);
+        let lower = match (&next, &oldest) {
+            (None, _) => Some(Bound::Included(since_stamp.as_str())),
+            (Some(_), Some(o)) => Some(Bound::Excluded(o.as_str())),
+            // More pages but no stamps on this one: it vouches for nothing.
+            (Some(_), None) => None,
+        };
+        let upper = if pager.upper_inclusive {
+            Bound::Included(pager.upper.as_str())
+        } else {
+            Bound::Excluded(pager.upper.as_str())
+        };
+        let range = lower.map(|lower| CompletedRange {
+            lower,
+            upper,
+            keep: &pager.at_upper,
+        });
+        let changes = self.store.cache_completed_range(&page.items, range)?;
         self.emit_changes(&changes);
-        match page.next_cursor.filter(|c| !c.is_empty()) {
-            Some(c) => pager.cursor = Some(c),
+        match next {
+            Some(c) => {
+                pager.cursor = Some(c);
+                if let Some(o) = oldest {
+                    let here = stamped
+                        .iter()
+                        .filter(|(_, at)| *at == o)
+                        .map(|(id, _)| id.clone());
+                    if pager.upper_inclusive && o == pager.upper {
+                        // A whole page of the same instant: the earlier ones still count.
+                        pager.at_upper.extend(here);
+                    } else {
+                        pager.at_upper = here.collect();
+                    }
+                    pager.upper = o;
+                    pager.upper_inclusive = true;
+                }
+            }
             None => {
                 pager.until = pager.since;
                 pager.since -= chrono::Duration::days(COMPLETED_WINDOW_DAYS);
                 pager.cursor = None;
+                pager.upper = completed_stamp_at(pager.until);
+                pager.upper_inclusive = false;
+                pager.at_upper.clear();
                 pager.windows += 1;
             }
         }
         let has_more = pager.windows <= COMPLETED_MAX_WINDOWS;
         self.completed = Some(pager);
-        self.emit(EngineEvent::CompletedLoaded { count, has_more });
+        self.emit(EngineEvent::CompletedLoaded {
+            count,
+            has_more,
+            since: window_since,
+        });
         Ok((count, has_more))
     }
 
@@ -659,18 +742,23 @@ pub struct EngineConfig {
 }
 
 impl EngineConfig {
-    /// Defaults from the environment (`TICK_API_BASE`, `TICK_SYNC_INTERVAL_MS`).
+    /// Defaults from the environment (`TICK_API_BASE`, `TICK_SYNC_INTERVAL_MS`,
+    /// `TICK_BACKGROUND_SYNC_MS`).
     pub fn from_env(token: String, db_path: PathBuf) -> EngineConfig {
-        let fg = std::env::var("TICK_SYNC_INTERVAL_MS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .map_or(Duration::from_secs(15), Duration::from_millis);
+        let ms = |key: &str, default: Duration| {
+            std::env::var(key)
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map_or(default, Duration::from_millis)
+        };
+        let fg = ms("TICK_SYNC_INTERVAL_MS", Duration::from_secs(15));
+        let bg = ms("TICK_BACKGROUND_SYNC_MS", Duration::from_secs(300));
         EngineConfig {
             api_base: crate::api::api_base_from_env(),
             token,
             db_path,
             foreground_interval: fg,
-            background_interval: Duration::from_secs(300),
+            background_interval: bg,
             clock: None,
         }
     }
@@ -683,14 +771,15 @@ enum Request {
     LoadCompleted { restart: bool },
     FetchFilter(String),
     SetToken(String),
-    Shutdown,
 }
 
-/// Handle to a running background engine. Cheap to clone; dropping all handles does not
-/// stop the engine, call [`EngineHandle::shutdown`].
+/// Handle to a running background engine. Cheap to clone. [`EngineHandle::shutdown`] (or
+/// dropping every handle) stops the engine.
 #[derive(Clone, Debug)]
 pub struct EngineHandle {
     tx: async_channel::Sender<Request>,
+    /// Out of band, so a stop never waits behind queued requests.
+    stop: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 impl EngineHandle {
@@ -714,8 +803,13 @@ impl EngineHandle {
     pub fn set_token(&self, token: &str) {
         let _ = self.tx.try_send(Request::SetToken(token.to_owned()));
     }
+    /// Stop the engine at once: a request in flight is abandoned and its response never
+    /// applied, queued requests are dropped. The engine finishes the store write it may be
+    /// in (a transaction is never cut short), then closes its connection and drops its event
+    /// sender: the event stream ends only once the engine can no longer write, so a caller
+    /// that clears the cache (log out) waits for that.
     pub fn shutdown(&self) {
-        let _ = self.tx.try_send(Request::Shutdown);
+        self.stop.send_replace(true);
     }
 }
 
@@ -733,6 +827,7 @@ impl Engine {
         }
         let (req_tx, req_rx) = async_channel::unbounded();
         let (ev_tx, ev_rx) = async_channel::unbounded();
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         std::thread::Builder::new()
             .name("tick-sync".into())
             .spawn(move || {
@@ -740,10 +835,16 @@ impl Engine {
                     .enable_all()
                     .build()
                     .expect("tokio runtime");
-                rt.block_on(run(config, store, req_rx, ev_tx));
+                rt.block_on(run(config, store, req_rx, ev_tx, stop_rx));
             })
             .map_err(StoreError::Io)?;
-        Ok((EngineHandle { tx: req_tx }, ev_rx))
+        Ok((
+            EngineHandle {
+                tx: req_tx,
+                stop: std::sync::Arc::new(stop_tx),
+            },
+            ev_rx,
+        ))
     }
 }
 
@@ -789,7 +890,25 @@ impl Backoff {
     }
 }
 
+/// The background loop until [`EngineHandle::shutdown`] (or every handle is gone). The loop
+/// owns the store connection and the event sender, so both are dropped when the stop wins
+/// the race, wherever the loop was waiting (an HTTP request included).
 async fn run(
+    config: EngineConfig,
+    store: Store,
+    rx: async_channel::Receiver<Request>,
+    events: async_channel::Sender<EngineEvent>,
+    mut stop: tokio::sync::watch::Receiver<bool>,
+) {
+    tokio::select! {
+        biased;
+        // `Err`: every handle was dropped.
+        _ = stop.wait_for(|s| *s) => {}
+        () = run_loop(config, store, rx, events) => {}
+    }
+}
+
+async fn run_loop(
     config: EngineConfig,
     store: Store,
     rx: async_channel::Receiver<Request>,
@@ -819,14 +938,15 @@ async fn run(
         match tokio::time::timeout(wait, rx.recv()).await {
             Err(_) => want_sync = true, // timer
             Ok(Err(_)) => return,       // all handles dropped
-            Ok(Ok(Request::Shutdown)) => return,
             Ok(Ok(Request::SyncNow)) => want_sync = true,
             Ok(Ok(Request::Foreground(f))) => {
                 let was = foreground;
                 foreground = f;
                 want_sync = f && !was;
                 if !f {
-                    next_sync = Instant::now() + config.background_interval;
+                    // The 5 min cadence from now on, but a sync already due sooner (the
+                    // first one of a `--background` start) still goes out.
+                    next_sync = next_sync.min(Instant::now() + config.background_interval);
                 }
             }
             Ok(Ok(Request::LoadCompleted { restart })) => {

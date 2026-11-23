@@ -38,17 +38,49 @@ pub struct UndoAction {
 
 /// Arguments of `due` for a picked date (4.9): a calendar day keeps the task's existing
 /// `time` as the floating `YYYY-MM-DDTHH:MM:SS`; typed text goes to the server as `string`.
-pub fn due_args(time: Option<chrono::NaiveTime>, choice: &DateChoice) -> Value {
+///
+/// A recurring task (`current`) moved to a day keeps its recurrence: a `date` alone would
+/// make the due a one-off (`docs/api/openapi.json`, `Due.is_recurring`: "Recurring dues
+/// require string"), so its `string` and `lang` go along, and the server moves only this
+/// occurrence (`docs/api/pages/sync_tasks.md`: `{"date": ..., "string": "every day"}`).
+pub fn due_args(
+    time: Option<chrono::NaiveTime>,
+    current: Option<&tick_core::model::Due>,
+    choice: &DateChoice,
+) -> Value {
     match choice {
-        DateChoice::Date(d) => match time {
-            Some(t) => {
-                json!({ "date": format!("{}T{}", d.format("%Y-%m-%d"), t.format("%H:%M:%S")) })
+        DateChoice::Date(d) => {
+            let date = match time {
+                Some(t) => format!("{}T{}", d.format("%Y-%m-%d"), t.format("%H:%M:%S")),
+                None => d.format("%Y-%m-%d").to_string(),
+            };
+            match current {
+                Some(due) if due.is_recurring && !due.string.is_empty() => {
+                    let mut v = json!({
+                        "date": date,
+                        "string": due.string,
+                        "is_recurring": true,
+                    });
+                    if let Some(lang) = &due.lang {
+                        v["lang"] = json!(lang);
+                    }
+                    v
+                }
+                _ => json!({ "date": date }),
             }
-            None => json!({ "date": d.format("%Y-%m-%d").to_string() }),
-        },
+        }
         DateChoice::Text(s) => json!({ "string": s }),
         DateChoice::Clear => Value::Null,
     }
+}
+
+/// [`due_args`] for `task` as it is now.
+pub fn task_due_args(task: &Task, choice: &DateChoice) -> Value {
+    due_args(
+        task.due.and_then(|d| d.time),
+        task.item.due.as_ref(),
+        choice,
+    )
 }
 
 /// Arguments of `deadline` (`docs/api/pages/deadlines.md`: a plain date, no time).
@@ -89,7 +121,9 @@ impl TickWindow {
             .connect_collapsed_notify(move |split| docked(split));
         imp.detail_view.add_bottom_bar(&detail.composer);
         let _ = imp.detail.set(detail);
-        // Closing the overlay (a click on the list in B1-B3) closes the task too.
+        // Closing the overlay closes the task too. In B1-B3 libadwaita hides the overlay on
+        // a click anywhere on the list (3.3: "click on the list or Escape closes it"); the
+        // click itself does not reach the row under it.
         imp.detail_split.connect_show_sidebar_notify(|split| {
             if !split.shows_sidebar()
                 && let Some(w) = split.root().and_downcast::<TickWindow>()
@@ -119,6 +153,12 @@ impl TickWindow {
                 }
             }),
             ("task-complete", |w| w.complete_selected()),
+            ("task-reopen", |w| w.reopen_selected()),
+            ("detail-reopen", |w| {
+                if let Some(id) = w.open_task_id() {
+                    w.reopen_completed(&id);
+                }
+            }),
             ("task-date", |w| w.pick_for_selected(Field::Date)),
             ("task-deadline", |w| w.pick_for_selected(Field::Deadline)),
             ("task-priority", |w| w.pick_for_selected(Field::Priority)),
@@ -209,13 +249,60 @@ impl TickWindow {
         let data = {
             let store = imp.store.borrow();
             let Some(store) = store.as_ref() else { return };
-            detail::load(store, &id)
+            // A history task has no active row: read-only from the history cache (4.21).
+            // A history row is read-only even when the task is still in the active data
+            // (completed on this computer, or a recurring task's earlier completion).
+            if self.view_is_read_only() {
+                match detail::load_completed(store, &id) {
+                    Ok(None) => detail::load(store, &id).map(|d| {
+                        d.map(|mut d| {
+                            d.read_only = true;
+                            d.checked = true;
+                            d
+                        })
+                    }),
+                    other => other,
+                }
+            } else {
+                detail::load(store, &id)
+            }
         };
+        if let Ok(Some(d)) = &data {
+            self.set_detail_menu(d.read_only);
+        }
         match data {
             Ok(Some(d)) => self.detail().set_data(Some(d)),
             Ok(None) => self.close_task(false),
             Err(e) => eprintln!("tick: reading the task: {e}"),
         }
+    }
+
+    /// The pane's task menu: Complete, Move to..., Delete; or Reopen for a history task.
+    fn set_detail_menu(&self, read_only: bool) {
+        let button = self.imp().detail_menu_button.get();
+        let has_reopen = button
+            .menu_model()
+            .is_some_and(|m| m.n_items() == 1 && m.item_link(0, "section").is_none());
+        if read_only == has_reopen {
+            return;
+        }
+        let menu = if read_only {
+            let m = gio::Menu::new();
+            m.append(Some(&gettext("Reopen")), Some("win.detail-reopen"));
+            m.upcast::<gio::MenuModel>()
+        } else {
+            let m = gio::Menu::new();
+            let main = gio::Menu::new();
+            main.append(Some(&gettext("Complete")), Some("win.detail-complete"));
+            main.append(Some(&gettext("Move to...")), Some("win.detail-move"));
+            m.append_section(None, &main);
+            let danger = gio::Menu::new();
+            danger.append(Some(&gettext("Delete Task")), Some("win.detail-delete"));
+            m.append_section(None, &danger);
+            m.upcast()
+        };
+        button.set_menu_model(Some(&menu));
+        crate::menus::name_button(&button);
     }
 
     fn detail_complete(&self) {
@@ -252,6 +339,11 @@ impl TickWindow {
 
     /// Uncheck a task: take back a completion in progress, else reopen it.
     fn reopen(&self, id: &str) {
+        if self.store().task(id).ok().flatten().is_none() || self.view_is_read_only() {
+            // Only in the completed history.
+            self.reopen_completed(id);
+            return;
+        }
         self.uncheck(id);
         let still = self
             .store()
@@ -405,7 +497,7 @@ impl TickWindow {
                     };
                     w.enqueue(vec![Command::item_update(
                         &id,
-                        json!({ "due": due_args(t.due.and_then(|d| d.time), &c) }),
+                        json!({ "due": task_due_args(&t, &c) }),
                     )]);
                 })
             }
@@ -795,6 +887,19 @@ impl TickWindow {
     pub(crate) fn task_menu(&self, rect: gtk::gdk::Rectangle) -> gtk::PopoverMenu {
         let menu = gio::Menu::new();
         let main = gio::Menu::new();
+        if self.view_is_read_only() {
+            // A history row: open it, or reopen it (4.21).
+            main.append(Some(&gettext("Open")), Some("win.task-open"));
+            main.append(Some(&gettext("Reopen")), Some("win.task-reopen"));
+            menu.append_section(None, &main);
+            let pop = gtk::PopoverMenu::from_model(Some(&menu));
+            crate::menus::name_items(&pop);
+            pop.set_has_arrow(false);
+            pop.set_position(gtk::PositionType::Bottom);
+            let list = self.imp().task_list.get();
+            pickers::present(pop.upcast_ref(), &list, Some(rect));
+            return pop;
+        }
         main.append(Some(&gettext("Open")), Some("win.task-open"));
         main.append(Some(&gettext("Complete")), Some("win.task-complete"));
         main.append(Some(&gettext("Date...")), Some("win.task-date"));
@@ -847,16 +952,16 @@ mod tests {
     fn a_picked_day_keeps_the_time_as_a_floating_date() {
         let t = NaiveTime::from_hms_opt(14, 0, 0);
         assert_eq!(
-            due_args(t, &DateChoice::Date(day())),
+            due_args(t, None, &DateChoice::Date(day())),
             json!({ "date": "2026-11-25T14:00:00" })
         );
         let t = NaiveTime::from_hms_opt(9, 5, 30);
         assert_eq!(
-            due_args(t, &DateChoice::Date(day())),
+            due_args(t, None, &DateChoice::Date(day())),
             json!({ "date": "2026-11-25T09:05:30" })
         );
         assert_eq!(
-            due_args(None, &DateChoice::Date(day())),
+            due_args(None, None, &DateChoice::Date(day())),
             json!({ "date": "2026-11-25" })
         );
     }
@@ -864,18 +969,52 @@ mod tests {
     #[test]
     fn typed_text_and_clearing() {
         assert_eq!(
-            due_args(None, &DateChoice::Text("every monday".into())),
+            due_args(None, None, &DateChoice::Text("every monday".into())),
             json!({ "string": "every monday" })
         );
         // Text keeps no time of its own: the server parses it.
         assert_eq!(
             due_args(
                 NaiveTime::from_hms_opt(14, 0, 0),
+                None,
                 &DateChoice::Text("fri".into())
             ),
             json!({ "string": "fri" })
         );
-        assert_eq!(due_args(None, &DateChoice::Clear), Value::Null);
+        assert_eq!(due_args(None, None, &DateChoice::Clear), Value::Null);
+    }
+
+    #[test]
+    fn a_recurring_task_moved_to_a_day_stays_recurring() {
+        let due: tick_core::model::Due = serde_json::from_value(json!({
+            "date": "2026-11-23T08:00:00", "string": "every monday at 8", "lang": "en",
+            "is_recurring": true, "timezone": null
+        }))
+        .unwrap();
+        assert_eq!(
+            due_args(
+                NaiveTime::from_hms_opt(8, 0, 0),
+                Some(&due),
+                &DateChoice::Date(day())
+            ),
+            json!({ "date": "2026-11-25T08:00:00", "string": "every monday at 8",
+                    "lang": "en", "is_recurring": true })
+        );
+        // Typed text replaces the recurrence on purpose; clearing clears it.
+        assert_eq!(
+            due_args(None, Some(&due), &DateChoice::Text("fri".into())),
+            json!({ "string": "fri" })
+        );
+        assert_eq!(due_args(None, Some(&due), &DateChoice::Clear), Value::Null);
+        // A one-off due sends the date alone.
+        let once: tick_core::model::Due = serde_json::from_value(json!({
+            "date": "2026-11-23", "string": "23 Nov", "is_recurring": false
+        }))
+        .unwrap();
+        assert_eq!(
+            due_args(None, Some(&once), &DateChoice::Date(day())),
+            json!({ "date": "2026-11-25" })
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@ pub mod filter;
 pub mod highlight;
 pub mod model;
 pub mod order_key;
+pub mod reminders;
 pub mod store;
 pub mod token;
 

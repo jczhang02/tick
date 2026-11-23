@@ -84,7 +84,7 @@ fn migrations_are_versioned_and_idempotent() {
         .connection()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(v, 2);
+    assert_eq!(v, 3);
     let mode: String = s
         .connection()
         .query_row("PRAGMA journal_mode", [], |r| r.get(0))
@@ -629,7 +629,7 @@ fn filter_view_with_huge_day_counts_does_not_panic() {
 
 /// A cache written by schema v1 upgrades in place and keeps its queue.
 #[test]
-fn v1_caches_upgrade_to_v2() {
+fn v1_caches_upgrade_to_the_latest() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cache.sqlite3");
     {
@@ -648,7 +648,7 @@ fn v1_caches_upgrade_to_v2() {
         .connection()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(v, 2);
+    assert_eq!(v, 3);
     let queued = s.pending_commands().unwrap();
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].not_before, None);
@@ -682,4 +682,86 @@ fn today_count_matches_today() {
     assert_eq!(s.today_count().unwrap(), count(&s));
     s.enqueue(Command::item_close("a")).unwrap();
     assert_eq!(s.today_count().unwrap(), count(&s));
+}
+
+fn done(id: &str, at: &str) -> Value {
+    json!({"id": id, "project_id": "inbox", "content": id, "checked": true, "completed_at": at})
+}
+
+fn history_ids(s: &Store) -> Vec<String> {
+    let mut ids: Vec<String> = s
+        .completed_history(None, 100)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.item.id.clone())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// Pages of a cursor walk share their boundary instant: a row at the oldest instant of one
+/// page that the next page holds is not dropped in between, and one that neither holds is.
+#[test]
+fn completed_pages_share_their_boundary_instant() {
+    use std::ops::Bound;
+    let mut s = store();
+    let t = "2026-03-09T10:00:00.000000Z";
+    s.cache_completed(&[
+        done("a", "2026-03-09T12:00:00.000000Z"),
+        done("b", t),
+        done("c", t),
+        done("gone", t),
+    ])
+    .unwrap();
+    // Page 1 ends at `t` with "b"; "c" waits for page 2.
+    let p1 = [done("a", "2026-03-09T12:00:00.000000Z"), done("b", t)];
+    s.cache_completed_range(
+        &p1,
+        Some(CompletedRange {
+            lower: Bound::Excluded(t),
+            upper: Bound::Excluded("2026-03-10T00:00:00.000000Z"),
+            keep: &[],
+        }),
+    )
+    .unwrap();
+    assert_eq!(history_ids(&s), ["a", "b", "c", "gone"]);
+    // Page 2 (the last) starts at `t` inclusively and holds "c"; "b" came with page 1.
+    s.cache_completed_range(
+        &[done("c", t)],
+        Some(CompletedRange {
+            lower: Bound::Included("2026-03-01T00:00:00.000000Z"),
+            upper: Bound::Included(t),
+            keep: &["b".to_owned()],
+        }),
+    )
+    .unwrap();
+    assert_eq!(history_ids(&s), ["a", "b", "c"]);
+}
+
+/// `completed_at` without a fraction compares like the six-digit stamps of the bounds.
+#[test]
+fn completed_stamps_are_normalized() {
+    use std::ops::Bound;
+    assert_eq!(
+        completed_stamp("2026-03-09T10:00:00Z"),
+        "2026-03-09T10:00:00.000000Z"
+    );
+    assert_eq!(
+        completed_stamp("2026-03-09T18:00:00.5+08:00"),
+        "2026-03-09T10:00:00.500000Z"
+    );
+    let mut s = store();
+    s.cache_completed(&[done("x", "2026-03-09T10:00:00Z")])
+        .unwrap();
+    // `[10:00:00.000000, 10:00:00.500000)` holds "x" (raw "...00Z" would sort after it).
+    s.cache_completed_range(
+        &[],
+        Some(CompletedRange {
+            lower: Bound::Included("2026-03-09T10:00:00.000000Z"),
+            upper: Bound::Excluded("2026-03-09T10:00:00.500000Z"),
+            keep: &[],
+        }),
+    )
+    .unwrap();
+    assert!(history_ids(&s).is_empty());
 }

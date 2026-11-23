@@ -144,6 +144,8 @@ async fn empty_account_keeps_sidebar_headers() {
         "Inbox",
         "Today",
         "Upcoming",
+        "Search",
+        "Completed",
         "Projects, expanded",
         "Labels, expanded",
         "Filters, expanded",

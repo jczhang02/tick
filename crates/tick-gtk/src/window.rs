@@ -154,6 +154,18 @@ mod imp {
         pub refresh_pending: Cell<bool>,
         /// The row showing the "drop into" outline.
         pub drop_into: RefCell<Option<gtk::Widget>>,
+        /// The collapsed sidebar project under a drag and its expand timer (4.1).
+        pub hover_row: RefCell<Option<(glib::WeakRef<gtk::TreeListRow>, glib::SourceId)>>,
+        /// The search entry takes focus when it is built (`views.rs`).
+        pub focus_search: Rc<Cell<bool>>,
+        /// The view before Search (Escape in the empty search entry goes back to it).
+        pub previous_view: RefCell<Option<ViewId>>,
+        /// Log out in progress: waiting for the engine to stop (`prefs.rs`).
+        pub logging_out: Cell<bool>,
+        /// The next reminder check (`notify.rs`).
+        pub reminder_timer: RefCell<Option<glib::SourceId>>,
+        /// Reminder notifications on screen: (notification id, task id).
+        pub sent_reminders: RefCell<Vec<(String, String)>>,
     }
 
     impl TickWindow {
@@ -238,7 +250,7 @@ impl TickWindow {
         win.setup_login();
         win.setup_title_handoff();
         win.load_settings();
-        match start {
+        match &start {
             Start::Main => win.show_main(),
             Start::Login => win.show_login(),
         }
@@ -249,6 +261,15 @@ impl TickWindow {
         win.open_view(initial, false);
         win.refresh_sidebar();
         win.refresh_sync();
+        // Reminders from the cache, before any sync (a missed one shows at start, 1 h grace).
+        if matches!(start, Start::Main) {
+            let weak = win.downgrade();
+            glib::idle_add_local_once(move || {
+                if let Some(w) = weak.upgrade() {
+                    w.check_reminders();
+                }
+            });
+        }
         win
     }
 
@@ -347,6 +368,7 @@ impl TickWindow {
             narrow: imp.narrow_cell.clone(),
             task_bound: imp.task_bound.clone(),
             header_height: imp.header_height.clone(),
+            focus_search: imp.focus_search.clone(),
         };
         let (store, selection) = task_list::setup(&imp.task_list, ctx);
         let _ = imp.rows.set(store);
@@ -397,11 +419,20 @@ impl TickWindow {
                 let on_row = focus.as_ref().is_some_and(|f| {
                     f.parent().as_ref() == Some(w.imp().task_list.upcast_ref::<gtk::Widget>())
                 });
-                if on_row && w.focused_row_is_task() {
+                if on_row && w.focused_row_is_task() && !w.view_is_read_only() {
                     w.complete_focused();
                     return glib::Propagation::Stop;
                 }
                 return glib::Propagation::Proceed;
+            }
+            // Left collapses a parent or moves to it, Right expands (4.4).
+            if matches!(key, Key::Left | Key::KP_Left | Key::Right | Key::KP_Right) {
+                let right = matches!(key, Key::Right | Key::KP_Right);
+                return if w.collapse_key(right) {
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                };
             }
             let down = match key {
                 Key::Down | Key::KP_Down | Key::j => true,
@@ -652,6 +683,10 @@ impl TickWindow {
         self.imp().stack.set_visible_child_name("main");
     }
 
+    pub(crate) fn show_login_page(&self) {
+        self.show_login();
+    }
+
     fn show_login(&self) {
         let imp = self.imp();
         imp.stack.set_visible_child_name("login");
@@ -699,11 +734,19 @@ impl TickWindow {
         glib::spawn_future_local(async move {
             while let Ok(ev) = events.recv().await {
                 let Some(w) = weak.upgrade() else { break };
-                w.on_engine_event(ev);
+                // Logging out: the old account's last events are of no interest.
+                if !w.imp().logging_out.get() {
+                    w.on_engine_event(ev);
+                }
+            }
+            // The engine stopped (log out).
+            if let Some(w) = weak.upgrade() {
+                w.engine_stopped();
             }
         });
         // A filter view opened from the cache may need its server part now.
         self.fetch_filter_if_needed();
+        self.completed_engine_started();
     }
 
     /// The token lookup finished (keyring, after the first frame).
@@ -732,6 +775,9 @@ impl TickWindow {
                 self.imp().ui.borrow_mut().filter_loading.clear();
                 self.refresh_rows();
                 self.refresh_sidebar();
+            }
+            EngineEvent::Error(f) if f.request == tick_core::FailedRequest::Completed => {
+                self.completed_failed(f.offline);
             }
             EngineEvent::Error(f) => {
                 if let tick_core::FailedRequest::Filter(q) = &f.request {
@@ -762,12 +808,17 @@ impl TickWindow {
                     }
                 }
             }
-            EngineEvent::CompletedLoaded { .. } => {}
+            EngineEvent::CompletedLoaded {
+                has_more, since, ..
+            } => self.completed_loaded(has_more, &since),
         }
     }
 
     fn on_changes(&self, c: &Changes) {
         self.remap_ids(&c.id_map);
+        if c.full || Self::reminders_affected(&c.kinds.iter().copied().collect::<Vec<_>>()) {
+            self.check_reminders();
+        }
         let only_queue = !c.full && c.kinds.iter().all(|k| *k == Kind::Queue);
         if !only_queue {
             self.refresh_rows_with(&c.id_map);
@@ -820,6 +871,12 @@ impl TickWindow {
             self.refresh_rows();
             if !offline {
                 self.fetch_filter_if_needed();
+                // Back online in the history before any answer: refresh it now.
+                if self.current_view() == ViewId::Completed
+                    && imp.ui.borrow().completed.has_more.is_none()
+                {
+                    self.start_completed();
+                }
             }
         }
         self.refresh_sync();
@@ -893,8 +950,16 @@ impl TickWindow {
                 ui.section_edit = None;
                 ui.renaming_title = false;
             }
-            imp.view.replace(Some(view.clone()));
-            self.save_setting("last-view", &view.to_setting());
+            let old = imp.view.replace(Some(view.clone()));
+            if view == ViewId::Search {
+                if let Some(old) = old.filter(|o| *o != ViewId::Search) {
+                    imp.previous_view.replace(Some(old));
+                }
+                imp.focus_search.set(true);
+            } else {
+                // Search is not restored at startup (it would open empty).
+                self.save_setting("last-view", &view.to_setting());
+            }
             imp.ui.borrow_mut().filter_rejected.clear();
             if let Some(sel) = imp.selection.get() {
                 sel.set_selected(gtk::INVALID_LIST_POSITION);
@@ -906,7 +971,11 @@ impl TickWindow {
             imp.task_bound.set(false);
             imp.list_scroller.vadjustment().set_value(0.0);
             self.set_title_shown(false);
-            self.refresh_rows();
+            if view == ViewId::Completed {
+                self.start_completed();
+            } else {
+                self.refresh_rows();
+            }
             self.fetch_filter_if_needed();
         }
         if let Some(sb) = imp.sidebar.get() {
@@ -1267,6 +1336,11 @@ impl TickWindow {
             RowAction::TitleCancel => self.commit_title(None),
             RowAction::DragBegin => self.drag_began(),
             RowAction::DragEnd => self.drag_ended(),
+            RowAction::SearchChanged(text) => self.search_changed(&text),
+            RowAction::SearchActivate(text) => self.search_activate(&text),
+            RowAction::SearchDown => self.search_down(),
+            RowAction::SearchEscape => self.search_escape(),
+            RowAction::LoadMore => self.load_more_completed(),
             RowAction::Menu { key, x, y } => {
                 if let Some(store) = self.imp().rows.get()
                     && let Some(pos) = (0..store.n_items()).find(|i| {
@@ -1831,6 +1905,9 @@ impl TickWindow {
         let in_list = focus
             .as_ref()
             .is_none_or(|f| f.is_ancestor(&*imp.task_list));
+        // The history is read-only: no task shortcuts act on it (Enter opens, the menu
+        // offers Reopen).
+        let editable = in_list && !self.view_is_read_only();
         let pending_g = imp
             .g_pending
             .take()
@@ -1847,6 +1924,10 @@ impl TickWindow {
             }
             Key::g => {
                 imp.g_pending.set(Some(Instant::now()));
+                true
+            }
+            Key::slash | Key::KP_Divide => {
+                self.open_search();
                 true
             }
             Key::i if pending_g => goto(ViewId::Inbox),
@@ -1870,7 +1951,7 @@ impl TickWindow {
                 }
                 true
             }
-            Key::e if in_list => {
+            Key::e if editable => {
                 self.complete_selected();
                 true
             }
@@ -1878,7 +1959,7 @@ impl TickWindow {
                 self.close_task(true);
                 true
             }
-            Key::_1 | Key::_2 | Key::_3 | Key::_4 if in_list => {
+            Key::_1 | Key::_2 | Key::_3 | Key::_4 if editable => {
                 let p = match key {
                     Key::_1 => 1,
                     Key::_2 => 2,
@@ -1890,11 +1971,11 @@ impl TickWindow {
                 }
                 true
             }
-            Key::t if in_list => WidgetExt::activate_action(self, "win.task-date", None).is_ok(),
-            Key::l if in_list => WidgetExt::activate_action(self, "win.task-labels", None).is_ok(),
-            Key::v if in_list => WidgetExt::activate_action(self, "win.task-move", None).is_ok(),
+            Key::t if editable => WidgetExt::activate_action(self, "win.task-date", None).is_ok(),
+            Key::l if editable => WidgetExt::activate_action(self, "win.task-labels", None).is_ok(),
+            Key::v if editable => WidgetExt::activate_action(self, "win.task-move", None).is_ok(),
             Key::Delete | Key::KP_Delete
-                if in_list && mods.contains(gtk::gdk::ModifierType::SHIFT_MASK) =>
+                if editable && mods.contains(gtk::gdk::ModifierType::SHIFT_MASK) =>
             {
                 if let Some(id) = self.selected_task() {
                     self.delete_task(&id);
@@ -1928,6 +2009,41 @@ impl TickWindow {
         (0..store.n_items())
             .filter_map(|i| store.item(i).and_downcast::<TickRow>())
             .find(|r| r.key() == key)
+    }
+
+    /// Left on a focused task: collapse its sub-tasks, else focus its parent. Right:
+    /// expand them. Returns whether the key did something.
+    fn collapse_key(&self, right: bool) -> bool {
+        let Some(t) = self.focused_row().and_then(|r| r.row().task().cloned()) else {
+            return false;
+        };
+        if t.read_only {
+            return false;
+        }
+        if t.has_children && t.collapsed == right {
+            self.toggle_subtasks(&t.id);
+            return true;
+        }
+        if right {
+            return false;
+        }
+        let parent = self
+            .store()
+            .task(&t.id)
+            .ok()
+            .flatten()
+            .and_then(|x| x.parent_id.clone());
+        match parent.and_then(|p| self.row_position(&p)) {
+            Some(pos) => {
+                self.imp().task_list.scroll_to(
+                    pos,
+                    gtk::ListScrollFlags::FOCUS | gtk::ListScrollFlags::SELECT,
+                    None,
+                );
+                true
+            }
+            None => false,
+        }
     }
 
     fn focused_row_is_task(&self) -> bool {
@@ -1983,7 +2099,14 @@ impl TickWindow {
         } else {
             (0..pos).rev().find(|i| interactive(&rows[*i]))
         };
-        let Some(next) = next else { return false };
+        let Some(next) = next else {
+            // Up from the first result goes back to the search entry (4.15).
+            if !down && self.current_view() == ViewId::Search {
+                self.focus_search_entry();
+                return true;
+            }
+            return false;
+        };
         let mut flags = gtk::ListScrollFlags::FOCUS;
         if matches!(&*rows[next].row(), Row::Task(_)) {
             flags |= gtk::ListScrollFlags::SELECT;

@@ -258,7 +258,11 @@ impl TickWindow {
                 main.append_item(&item(&fav_label(f.is_favorite), "win.filter-favorite", id));
                 danger.append_item(&item(&gettext("Delete Filter..."), "win.filter-delete", id));
             }
-            ViewId::Inbox | ViewId::Today | ViewId::Upcoming => return None,
+            ViewId::Inbox
+            | ViewId::Today
+            | ViewId::Upcoming
+            | ViewId::Search
+            | ViewId::Completed => return None,
         }
         menu.append_section(None, &main);
         menu.append_section(None, &danger);

@@ -27,6 +27,10 @@ pub enum ViewId {
     Inbox,
     Today,
     Upcoming,
+    /// Local full-text search over active tasks (4.15).
+    Search,
+    /// Read-only history of the last 30 days and more (4.21).
+    Completed,
     Project(String),
     /// By label id.
     Label(String),
@@ -41,6 +45,8 @@ impl ViewId {
             ViewId::Inbox => "inbox".into(),
             ViewId::Today => "today".into(),
             ViewId::Upcoming => "upcoming".into(),
+            ViewId::Search => "search".into(),
+            ViewId::Completed => "completed".into(),
             ViewId::Project(id) => format!("project:{id}"),
             ViewId::Label(id) => format!("label:{id}"),
             ViewId::Filter(id) => format!("filter:{id}"),
@@ -53,6 +59,8 @@ impl ViewId {
                 "inbox" => ViewId::Inbox,
                 "today" => ViewId::Today,
                 "upcoming" => ViewId::Upcoming,
+                "completed" => ViewId::Completed,
+                // Search is not restored: it would open with an empty entry.
                 _ => return None,
             },
             Some(("project", id)) => ViewId::Project(id.into()),
@@ -173,12 +181,19 @@ pub struct TaskRow {
     pub assignee: Option<String>,
     /// The server rejected a change to this task.
     pub failed: Option<String>,
+    /// A completed task in the history (4.21): disabled checked ring, nothing editable.
+    pub read_only: bool,
+    /// Completion time ("14:05"), first in a history row's meta line.
+    pub done_at: Option<String>,
 }
 
 impl TaskRow {
     /// The meta line read as text, for the row's accessible description (4.4).
     pub fn meta_description(&self) -> String {
         let mut parts = Vec::new();
+        if let Some(t) = &self.done_at {
+            parts.push(fill(&gettext("Completed {time}"), &[("time", t)]));
+        }
         if self.completed_pending {
             parts.push(gettext("Completing"));
         }
@@ -254,6 +269,17 @@ pub enum Row {
         id: Option<String>,
         name: String,
     },
+    /// The Search view's entry, in place of the view header (4.15). `query` and `count`
+    /// update the bound widget in place (`task_list.rs`), so typing never rebuilds it.
+    SearchHeader {
+        query: String,
+        count: usize,
+    },
+    /// "Load More" at the end of the Completed view (4.21).
+    LoadMore {
+        loading: bool,
+        sensitive: bool,
+    },
 }
 
 impl Row {
@@ -271,6 +297,8 @@ impl Row {
             Row::DayHeader(d) => d.key.clone(),
             Row::Task(t) => t.key.clone(),
             Row::Empty(_) => "empty".into(),
+            Row::SearchHeader { .. } => "search-header".into(),
+            Row::LoadMore { .. } => "load-more".into(),
         }
     }
 
@@ -300,6 +328,24 @@ pub struct UiState {
     pub section_edit: Option<SectionEdit>,
     /// The project title is being renamed in place (4.2).
     pub renaming_title: bool,
+    /// The Search view's text.
+    pub search_query: String,
+    /// The Completed view's paging state.
+    pub completed: CompletedState,
+}
+
+/// What the Completed view knows about its requests (4.21).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct CompletedState {
+    /// Waiting for the first page of this visit (refresh of the cached rows).
+    pub refreshing: bool,
+    /// "Load More" is waiting for its page.
+    pub loading_more: bool,
+    /// The history is complete from this instant on (RFC 3339, the oldest window loaded in
+    /// this visit); `None` before the first answer: the last 30 days.
+    pub since: Option<String>,
+    /// Older pages exist. `None` before the first answer.
+    pub has_more: Option<bool>,
 }
 
 /// An open inline section editor.
@@ -528,6 +574,8 @@ impl<'s> Lookup<'s> {
             project,
             assignee,
             failed: ui.failed.get(&t.id).cloned(),
+            read_only: false,
+            done_at: None,
         }
     }
 }
@@ -676,6 +724,8 @@ pub fn build(store: &Store, view: &ViewId, ui: &UiState) -> Result<Content> {
         },
         ViewId::Today => today(&lk, ui),
         ViewId::Upcoming => upcoming(&lk, ui),
+        ViewId::Search => search(&lk, ui),
+        ViewId::Completed => completed(&lk, ui),
         ViewId::Project(id) => project(&lk, id, false, ui),
         ViewId::Label(id) => label(&lk, id, ui),
         ViewId::Filter(id) => filter(&lk, id, ui),
@@ -1003,6 +1053,191 @@ fn upcoming(lk: &Lookup<'_>, ui: &UiState) -> Result<Content> {
         title,
         rows,
         task_count: count,
+        prefill: String::new(),
+        server_query: None,
+        exists: true,
+    })
+}
+
+/// Most results the Search view shows.
+const SEARCH_LIMIT: usize = 200;
+
+fn search(lk: &Lookup<'_>, ui: &UiState) -> Result<Content> {
+    let query = ui.search_query.trim();
+    let tasks = if query.is_empty() {
+        Vec::new()
+    } else {
+        lk.store.search(query, SEARCH_LIMIT)?
+    };
+    let mut rows = vec![Row::SearchHeader {
+        query: ui.search_query.clone(),
+        count: tasks.len(),
+    }];
+    if query.is_empty() {
+        rows.push(empty(
+            "system-search-symbolic",
+            gettext("Search your tasks"),
+            gettext("Titles and descriptions of active tasks."),
+        ));
+    } else if tasks.is_empty() {
+        rows.push(empty(
+            "system-search-symbolic",
+            fill(&gettext("No results for \"{query}\""), &[("query", query)]),
+            gettext("Completed tasks and comments are not searched."),
+        ));
+    }
+    let mode = RowMode {
+        time_only: false,
+        own_project: None,
+        group: None,
+    };
+    for t in &tasks {
+        rows.push(Row::Task(Box::new(lk.task_row(t, 0, false, mode, ui))));
+    }
+    Ok(Content {
+        title: gettext("Search"),
+        rows,
+        task_count: tasks.len(),
+        prefill: String::new(),
+        server_query: None,
+        exists: true,
+    })
+}
+
+/// Days the Completed view starts with (4.21, SPEC).
+pub const COMPLETED_DAYS: i64 = 30;
+
+/// The default start of the Completed view: 30 days before now, written like the API's
+/// `completed_at` so cached rows compare with it.
+pub fn completed_default_since(now: &Now) -> String {
+    (now.utc() - chrono::Duration::days(COMPLETED_DAYS))
+        .format("%Y-%m-%dT%H:%M:%S%.6fZ")
+        .to_string()
+}
+
+fn completed_day_header(lk: &Lookup<'_>, date: NaiveDate) -> DayHeader {
+    let diff = (lk.today - date).num_days();
+    let weekday = format::weekday_long(date.weekday());
+    let (label, dim) = match diff {
+        0 => (gettext("Today"), Some(weekday)),
+        1 => (gettext("Yesterday"), Some(weekday)),
+        2..=6 => (weekday, None),
+        _ => (
+            weekday,
+            Some(format::date_plain(date, lk.today, lk.settings)),
+        ),
+    };
+    DayHeader {
+        key: format!("day:{}", iso(date)),
+        number: Some(date.day()),
+        label,
+        dim,
+        first: false,
+        after_month: false,
+    }
+}
+
+fn completed(lk: &Lookup<'_>, ui: &UiState) -> Result<Content> {
+    let state = &ui.completed;
+    let default_since = completed_default_since(&lk.now);
+    let since = state.since.clone().unwrap_or(default_since.clone());
+    let done = lk.store.completed_since(&since)?;
+    let title = gettext("Completed");
+    let mut head = header(&title, 0);
+    let since_date = chrono::DateTime::parse_from_rfc3339(&since)
+        .ok()
+        .map(|d| d.with_timezone(&lk.now.offset()).date_naive());
+    head.subtitle = Some(match (state.since.as_ref(), since_date) {
+        (Some(s), Some(d)) if *s != default_since => fill(
+            &gettext("Since {date}"),
+            &[("date", &format::day_month(d, lk.settings))],
+        ),
+        _ => gettext("Last 30 days"),
+    });
+    if ui.offline {
+        head.source = Some((gettext("Offline. Showing saved results."), false));
+    } else if state.refreshing && !done.is_empty() {
+        head.source = Some((gettext("Updating"), true));
+    }
+    let mut rows = vec![Row::ViewHeader(head)];
+    if done.is_empty() {
+        if state.refreshing && !ui.offline {
+            rows.push(Row::Loading {
+                key: "loading:completed".into(),
+                text: gettext("Loading completed tasks"),
+            });
+        } else {
+            rows.push(empty(
+                "object-select-symbolic",
+                gettext("No completed tasks"),
+                gettext("Tasks you complete in the next 30 days show up here."),
+            ));
+        }
+    }
+    let mode = RowMode {
+        time_only: false,
+        own_project: None,
+        group: None,
+    };
+    let mut month = (lk.today.year(), lk.today.month());
+    let mut day = None;
+    for c in &done {
+        let Ok(at) = chrono::DateTime::parse_from_rfc3339(&c.completed_at) else {
+            continue;
+        };
+        let local = at.with_timezone(&lk.now.offset()).naive_local();
+        let date = local.date();
+        if day != Some(date) {
+            day = Some(date);
+            let m = (date.year(), date.month());
+            if m != month {
+                month = m;
+                rows.push(Row::MonthHeader {
+                    key: format!("month:{}-{:02}", m.0, m.1),
+                    title: format::month_header(date, lk.today),
+                });
+            }
+            let mut h = completed_day_header(lk, date);
+            h.after_month = matches!(rows.last(), Some(Row::MonthHeader { .. }));
+            rows.push(Row::DayHeader(h));
+        }
+        let task = Task {
+            item: c.item.clone(),
+            pending: false,
+            due: None,
+        };
+        let mut row = lk.task_row(&task, 0, false, mode, ui);
+        row.key = format!("done:{}", c.item.id);
+        row.read_only = true;
+        row.checked = true;
+        row.completing = false;
+        row.completed_pending = false;
+        row.fading = false;
+        row.due = None;
+        row.deadline = None;
+        row.subtasks = None;
+        row.comments = 0;
+        row.labels.clear();
+        row.assignee = None;
+        row.failed = None;
+        row.done_at = Some(format::time(local.time(), lk.settings));
+        rows.push(Row::Task(Box::new(row)));
+    }
+    let more = match state.has_more {
+        Some(more) => more,
+        // Before the first answer: offline, older cached pages may still exist.
+        None => ui.offline && !done.is_empty(),
+    };
+    if more {
+        rows.push(Row::LoadMore {
+            loading: state.loading_more,
+            sensitive: !ui.offline && !state.loading_more && !state.refreshing,
+        });
+    }
+    Ok(Content {
+        title,
+        rows,
+        task_count: 0,
         prefill: String::new(),
         server_query: None,
         exists: true,
