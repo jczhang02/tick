@@ -410,3 +410,75 @@ async fn rejected_filter_offers_edit() {
     s.click(&edit).await.unwrap();
     named(&window, Role::Dialog, "Edit Filter").await;
 }
+
+/// Confirmation bodies name the consequence with real counts; a clause whose count is 0 is
+/// dropped (4.25). Each dialog is cancelled with Escape, and nothing is deleted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn confirmation_bodies_count_what_goes() {
+    let mut f = app::fixture();
+    f["projects"].as_array_mut().unwrap().push(
+        serde_json::json!({"id": "pc", "name": "Slides", "color": "red",
+                                 "parent_id": "pw", "child_order": 1}),
+    );
+    f["items"].as_array_mut().unwrap().push(
+        serde_json::json!({"id": "c1", "project_id": "pc", "content": "Draw charts",
+                                 "child_order": 1}),
+    );
+    let server = app::server_with(f).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    let cancel = || async {
+        s.key(keysym::ESCAPE).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    };
+
+    // Work: 4 tasks of its own, 1 in its sub-project.
+    app::open_view(&s, &window, "Work").await;
+    view_menu(&s, &window, 5).await;
+    named(&window, Role::Label, "Delete \"Work\"?").await;
+    named(
+        &window,
+        Role::Label,
+        "Its 5 tasks and 1 sub-project will be deleted too. This can't be undone.",
+    )
+    .await;
+    cancel().await;
+    // Home: no sub-projects, so no sub-project clause.
+    app::open_view(&s, &window, "Home").await;
+    view_menu(&s, &window, 5).await;
+    named(
+        &window,
+        Role::Label,
+        "Its 2 tasks will be deleted too. This can't be undone.",
+    )
+    .await;
+    cancel().await;
+    // A section with one task (singular).
+    app::open_view(&s, &window, "Work").await;
+    s.click(&button(&window, "Later section menu").await)
+        .await
+        .unwrap();
+    menu_choose(&s, &window, 2).await;
+    named(
+        &window,
+        Role::Label,
+        "Its 1 task will be deleted too. This can't be undone.",
+    )
+    .await;
+    cancel().await;
+    // A label on two tasks.
+    sidebar_menu(&s, &window, "errand, 2 tasks", 2).await;
+    named(&window, Role::Label, "Delete label \"errand\"?").await;
+    named(
+        &window,
+        Role::Label,
+        "It will be removed from 2 tasks. The tasks stay.",
+    )
+    .await;
+    cancel().await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    for kind in ["project_delete", "section_delete", "label_delete"] {
+        assert!(app::commands_sent(&server, kind).is_empty(), "{kind} sent");
+    }
+}

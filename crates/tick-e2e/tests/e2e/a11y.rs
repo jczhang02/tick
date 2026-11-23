@@ -46,9 +46,10 @@ async fn audit(root: &Node) -> Vec<String> {
         if role == Role::Panel {
             continue;
         }
-        // Links inside rendered text (descriptions) are exemption 1 in DESIGN 1.2.1: GTK 4.22
-        // exposes them as unnamed objects with no real extents.
-        if role == Role::Link {
+        // Links inside rendered text (a description or comment label) are exemption 1 in
+        // DESIGN 1.2.1: GTK 4.22 exposes them as unnamed children of the label with no real
+        // extents. Any other link is checked like a button.
+        if role == Role::Link && parent_role(&node).await == Some(Role::Label) {
             continue;
         }
         let interactive = states.contains(State::Focusable) || ACTIONABLE.contains(&role);
@@ -63,13 +64,13 @@ async fn audit(root: &Node) -> Vec<String> {
         }
         // Lists and scroll panes are containers, not targets; text fields measure the
         // whole row or entry they sit in.
-        // Labels are text: a focusable one is selectable text (comments), read, not
-        // clicked. The one label that is a click target, the description, is measured on
-        // its own in `editing_surfaces_have_named_44px_targets`.
-        let container = matches!(
-            role,
-            Role::List | Role::ScrollPane | Role::Frame | Role::Label
-        );
+        // Selectable text (comments) is read, not clicked: it is exempt. GTK 4.22 reports
+        // no selectable state on a label; a selectable one has a popup (its Copy menu).
+        // Every other focusable label is a target (the description) and is measured.
+        let selectable_text = role == Role::Label
+            && (states.contains(State::Selectable) || states.contains(State::HasPopup));
+        let container =
+            matches!(role, Role::List | Role::ScrollPane | Role::Frame) || selectable_text;
         if let Some(r) = rect
             && !container
             && (r.width < 44 || r.height < 44)
@@ -79,6 +80,10 @@ async fn audit(root: &Node) -> Vec<String> {
         }
     }
     problems
+}
+
+async fn parent_role(node: &Node) -> Option<Role> {
+    node.parent().await.ok().flatten()?.role().await.ok()
 }
 
 /// A `GtkMenuButton` carries the 44 px hit area on its outer node (technique 2 in 2.7: the

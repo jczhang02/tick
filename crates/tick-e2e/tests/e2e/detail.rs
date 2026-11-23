@@ -783,7 +783,13 @@ async fn narrow_escape_closes_picker_then_pane() {
     s.click(&field(&window, "Labels").await).await.unwrap();
     picker_row(&window, "phone").await;
     s.key(keysym::ESCAPE).await.unwrap();
-    // The pane stays.
+    // The picker closes...
+    let app_node = window.parent().await.unwrap().unwrap();
+    app_node
+        .wait_gone(&Query::role(Role::CheckBox).name("phone").showing(), WAIT)
+        .await
+        .unwrap();
+    // ...and the pane stays.
     tokio::time::sleep(Duration::from_millis(500)).await;
     pane_title(&window, "Read the article").await;
     let composer = window
@@ -801,4 +807,524 @@ async fn narrow_escape_closes_picker_then_pane() {
         .unwrap();
     // Still on the list page.
     app::task_row(&window, "Read the article").await;
+}
+
+/// A task added offline is open with drafts in the composer and the description when the
+/// sync replaces its temp id: the drafts stay, and what is sent afterwards names the real id
+/// (`docs/architecture.md` 5: views follow `id_map`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn temp_id_replaced_while_open_keeps_drafts() {
+    let (server, s, window) = open_in_inbox("Read the article").await;
+    server.set_offline(true);
+    window
+        .wait_for(
+            &Query::role(Role::Button).name("Sync Status").showing(),
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+    let add = window
+        .wait_for(
+            &Query::role(Role::Button).name("Add sub-task").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&add).await.unwrap();
+    window
+        .wait_for(
+            &Query::role(Role::Text).name("Sub-task name").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.type_text("Offline child").await.unwrap();
+    s.key(keysym::RETURN).await.unwrap();
+    let open = window
+        .wait_for(
+            &Query::role(Role::Button)
+                .name("Open Offline child")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&open).await.unwrap();
+    pane_title(&window, "Offline child").await;
+
+    // Drafts: a comment in the composer, an uncommitted description in its editor.
+    let composer = window
+        .wait_for(
+            &Query::role(Role::Text).name("Write a comment").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&composer).await.unwrap();
+    s.type_text("draft text").await.unwrap();
+    let desc = window
+        .wait_for(
+            &Query::role(Role::Label).name("Add a description").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&desc).await.unwrap();
+    let editor = window
+        .wait_for(&Query::role(Role::Text).name("Description").showing(), WAIT)
+        .await
+        .unwrap();
+    s.type_text("notes here").await.unwrap();
+
+    // Online: the sync creates the sub-task and maps its temp id.
+    server.set_offline(false);
+    let real = tick_e2e::poll(
+        Duration::from_secs(20),
+        "the sub-task on the server",
+        || async {
+            let st = server.state();
+            st.find("items", "content", "Offline child")
+                .and_then(|v| v["id"].as_str().map(str::to_owned))
+        },
+    )
+    .await
+    .unwrap();
+    window
+        .wait_gone(
+            &Query::role(Role::Button).name("Sync Status").showing(),
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+    // A few more syncs after the mapping.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(composer.text().await.unwrap(), "draft text");
+    assert!(
+        editor.has_state(tick_e2e::State::Showing).await.unwrap(),
+        "the description editor closed"
+    );
+    assert_eq!(editor.text().await.unwrap(), "notes here");
+
+    // Saving now names the real id.
+    s.chord(&[keysym::CONTROL_L, keysym::RETURN]).await.unwrap();
+    wait_item(&server, &real, "description", |v| {
+        v["description"] == "notes here"
+    })
+    .await;
+    s.click(&composer).await.unwrap();
+    s.key(keysym::RETURN).await.unwrap();
+    let r = tick_e2e::poll(Duration::from_secs(15), "the comment", || async {
+        let st = server.state();
+        st.find("notes", "content", "draft text")
+            .map(|n| n["item_id"].clone())
+    })
+    .await
+    .unwrap();
+    assert_eq!(r, real.as_str());
+}
+
+/// Escape reverts the title and the description and sends nothing; focus-out saves the
+/// description (4.8).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn escape_reverts_and_focus_out_saves() {
+    let (server, s, window) = open_in_inbox("Read the article").await;
+    let title = pane_title(&window, "Read the article").await;
+    s.click(&title).await.unwrap();
+    s.chord(&[keysym::CONTROL_L, u32::from(b'a')])
+        .await
+        .unwrap();
+    s.type_text("Not this title").await.unwrap();
+    s.key(keysym::ESCAPE).await.unwrap();
+    pane_title(&window, "Read the article").await;
+
+    // The description: Escape shows the placeholder again.
+    let desc = window
+        .wait_for(
+            &Query::role(Role::Label).name("Add a description").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&desc).await.unwrap();
+    window
+        .wait_for(&Query::role(Role::Text).name("Description").showing(), WAIT)
+        .await
+        .unwrap();
+    s.type_text("Not these notes").await.unwrap();
+    s.key(keysym::ESCAPE).await.unwrap();
+    window
+        .wait_gone(&Query::role(Role::Text).name("Description").showing(), WAIT)
+        .await
+        .unwrap();
+    let desc = window
+        .wait_for(
+            &Query::role(Role::Label).name("Add a description").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    // The pane is still open (Escape went to the editor, not to the window).
+    pane_title(&window, "Read the article").await;
+    // Several syncs later nothing was sent.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let sent = app::commands_sent(&server, "item_update");
+    assert!(sent.is_empty(), "{sent:?}");
+    assert_eq!(
+        server.state().get("items", "i3").unwrap()["content"],
+        "Read the article"
+    );
+
+    // Focus-out saves: type a description, then click the title.
+    s.click(&desc).await.unwrap();
+    window
+        .wait_for(&Query::role(Role::Text).name("Description").showing(), WAIT)
+        .await
+        .unwrap();
+    s.type_text("Saved on leaving").await.unwrap();
+    let title = pane_title(&window, "Read the article").await;
+    s.click(&title).await.unwrap();
+    wait_item(&server, "i3", "description on focus-out", |v| {
+        v["description"] == "Saved on leaving"
+    })
+    .await;
+    window
+        .wait_for(
+            &Query::role(Role::Label).name("Saved on leaving").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+}
+
+/// A calendar day keeps the task's time (the floating `YYYY-MM-DDTHH:MM:SS`, 4.9); the month
+/// buttons page without picking.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn calendar_day_keeps_the_time() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Work").await;
+    open_task(&s, &window, "Plan the deck").await;
+    s.click(&field(&window, "Date").await).await.unwrap();
+    let app_node = window.parent().await.unwrap().unwrap();
+    app_node
+        .wait_for(
+            &Query::role(Role::Label).name("November 2026").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let next = app_node
+        .wait_for(
+            &Query::role(Role::Button).name("Next Month").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&next).await.unwrap();
+    app_node
+        .wait_for(
+            &Query::role(Role::Label).name("December 2026").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let prev = app_node
+        .wait_for(
+            &Query::role(Role::Button).name("Previous Month").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&prev).await.unwrap();
+    app_node
+        .wait_for(
+            &Query::role(Role::Label).name("November 2026").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    // Paging is not a pick: the picker is still open and nothing was sent.
+    assert!(app::commands_sent(&server, "item_update").is_empty());
+
+    // November 25: the second "25" in the grid (the first is 25 October).
+    let days = tick_e2e::poll(WAIT, "day 25", || async {
+        let all = app_node
+            .find_all(&Query::role(Role::Label).name("25").showing())
+            .await;
+        (all.len() >= 2).then_some(all)
+    })
+    .await
+    .unwrap();
+    let mut best = None;
+    for d in days {
+        let r = d.extents().await.unwrap();
+        if best.as_ref().is_none_or(|(y, _)| r.y > *y) {
+            best = Some((r.y, d));
+        }
+    }
+    s.click(&best.unwrap().1).await.unwrap();
+    wait_item(&server, "w1", "due 25 Nov 14:00", |v| {
+        v["due"]["date"] == "2026-11-25T14:00:00"
+    })
+    .await;
+    let sent = app::commands_sent(&server, "item_update");
+    assert_eq!(
+        sent.last().unwrap()["args"]["due"],
+        serde_json::json!({"date": "2026-11-25T14:00:00"}),
+        "{sent:?}"
+    );
+    field(&window, "Date: Wed 25 Nov 14:00").await;
+}
+
+/// A link in the description opens on click without entering edit mode; a link with a scheme
+/// other than http, https or mailto is plain text (4.8).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn description_link_opens_without_editing() {
+    let mut f = app::fixture();
+    f["items"][2]["description"] =
+        serde_json::json!("[docs](https://example.com/docs) and [notes](file:///etc/passwd)");
+    let server = app::server_with(f).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Inbox").await;
+    open_task(&s, &window, "Read the article").await;
+    // The pane's label (the list row previews the text too, further left) starts with the
+    // link: click its first letters. The file link stays as typed, as plain text.
+    let r = tick_e2e::poll(WAIT, "the description in the pane", || async {
+        let mut best: Option<tick_e2e::Rect> = None;
+        for n in window
+            .find_all(
+                &Query::role(Role::Label)
+                    .name("docs and [notes](file:///etc/passwd)")
+                    .showing(),
+            )
+            .await
+        {
+            let r = n.extents().await.ok()?;
+            if best.is_none_or(|b| r.x > b.x) {
+                best = Some(r);
+            }
+        }
+        best.filter(|b| b.x > 900)
+    })
+    .await
+    .unwrap();
+    s.input()
+        .await
+        .unwrap()
+        .click(r.x + 12, r.y + r.height / 2)
+        .await
+        .unwrap();
+    let uri = s.wait_for_log_value("TICK_OPEN_URI", WAIT).await.unwrap();
+    assert_eq!(uri, "https://example.com/docs");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        window
+            .find(&Query::role(Role::Text).name("Description").showing())
+            .await
+            .is_none(),
+        "the click on the link entered edit mode"
+    );
+    // The file link is text: a click there edits the description instead of opening it.
+    s.input()
+        .await
+        .unwrap()
+        .click(r.x + r.width - 8, r.y + r.height / 2)
+        .await
+        .unwrap();
+    window
+        .wait_for(&Query::role(Role::Text).name("Description").showing(), WAIT)
+        .await
+        .unwrap();
+    assert!(
+        !s.app_log().contains("TICK_OPEN_URI=file"),
+        "{}",
+        s.app_log()
+    );
+}
+
+/// Unchecking the open task's ring in the pane reopens it (`item_uncomplete`), and a
+/// sub-task unchecked during the completion hold is never closed (4.3, 4.8).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn uncheck_in_the_pane() {
+    let server = app::server_with(app::fixture()).await;
+    let s = app::session(&server)
+        .env("TICK_TEST_HOLD", "1")
+        .start()
+        .await
+        .unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+    app::open_view(&s, &window, "Work").await;
+    open_task(&s, &window, "Plan the deck").await;
+    // A sub-task: check, then uncheck within the 800 ms hold.
+    let open = window
+        .wait_for(
+            &Query::role(Role::Button)
+                .name("Open Collect metrics")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let r = open.extents().await.unwrap();
+    let input = s.input().await.unwrap();
+    input.click(r.x - 22, r.y + 22).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    input.click(r.x - 22, r.y + 22).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(app::commands_sent(&server, "item_close").is_empty());
+    assert_eq!(
+        server.state().get("items", "w2").unwrap()["checked"],
+        serde_json::json!(false)
+    );
+    window
+        .wait_for(
+            &Query::role(Role::Button)
+                .name("Open Collect metrics")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+
+    // The open task: complete it, let the completion go, then uncheck it.
+    let ring = window
+        .wait_for(
+            &Query::role(Role::CheckBox).name("Complete task").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    let pane_ring = tick_e2e::poll(WAIT, "the pane's ring", || async {
+        for n in window
+            .find_all(&Query::role(Role::CheckBox).name("Complete task").showing())
+            .await
+        {
+            if n.description().await.ok().as_deref() == Some("Plan the deck") {
+                let r = n.extents().await.ok()?;
+                // The pane is the right column.
+                if r.x > 900 {
+                    return Some(n);
+                }
+            }
+        }
+        None
+    })
+    .await
+    .unwrap();
+    let _ = ring;
+    s.click(&pane_ring).await.unwrap();
+    wait_item(&server, "w1", "closed", |v| v["checked"] == true).await;
+    let ring = window
+        .wait_for(
+            &Query::role(Role::CheckBox)
+                .name("Mark as not done")
+                .showing(),
+            Duration::from_secs(15),
+        )
+        .await
+        .unwrap();
+    s.click(&ring).await.unwrap();
+    wait_item(&server, "w1", "reopened", |v| v["checked"] == false).await;
+    let sent = app::commands_sent(&server, "item_uncomplete");
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0]["args"]["id"], "w1");
+}
+
+/// The send button sends; Escape in a comment editor cancels the edit (4.8); Shift+Enter
+/// breaks a line in the composer and Enter sends both lines.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn comment_send_button_newline_and_cancel() {
+    let (server, s, window) = open_in_inbox("Read the article").await;
+    let composer = window
+        .wait_for(
+            &Query::role(Role::Text).name("Write a comment").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&composer).await.unwrap();
+    s.type_text("Line one").await.unwrap();
+    s.chord(&[keysym::SHIFT_L, keysym::RETURN]).await.unwrap();
+    s.type_text("line two").await.unwrap();
+    assert_eq!(composer.text().await.unwrap(), "Line one\nline two");
+    s.click(
+        &window
+            .wait_for(
+                &Query::role(Role::Button).name("Send Comment").showing(),
+                WAIT,
+            )
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    let note = tick_e2e::poll(Duration::from_secs(15), "note_add", || async {
+        let st = server.state();
+        st.find("notes", "content", "Line one\nline two").cloned()
+    })
+    .await
+    .unwrap();
+    assert_eq!(note["item_id"], "i3");
+    tick_e2e::poll(WAIT, "composer emptied", || async {
+        composer.text().await.ok().filter(|t| t.is_empty())
+    })
+    .await
+    .unwrap();
+
+    // Edit, then Escape: the text stays and nothing is sent.
+    let actions = window
+        .wait_for(
+            &Query::role(Role::Button).name("Comment Actions").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.click(&actions).await.unwrap();
+    menu_choose(&s, &window, 0).await;
+    let editor = window
+        .wait_for(
+            &Query::role(Role::Text).name("Edit comment").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    tick_e2e::poll(WAIT, "comment editor focused", || async {
+        editor
+            .has_state(tick_e2e::State::Focused)
+            .await
+            .ok()
+            .filter(|f| *f)
+    })
+    .await
+    .unwrap();
+    s.chord(&[keysym::CONTROL_L, u32::from(b'a')])
+        .await
+        .unwrap();
+    s.type_text("Discarded").await.unwrap();
+    s.key(keysym::ESCAPE).await.unwrap();
+    window
+        .wait_gone(
+            &Query::role(Role::Text).name("Edit comment").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    window
+        .wait_for(
+            &Query::role(Role::Label)
+                .name("Line one\nline two")
+                .showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    // The pane stays open.
+    pane_title(&window, "Read the article").await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(app::commands_sent(&server, "note_update").is_empty());
 }

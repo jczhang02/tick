@@ -563,11 +563,13 @@ async fn editing(scheme: ColorScheme, narrow: bool) {
         tokio::time::sleep(Duration::from_millis(400)).await;
         shoot(&s, &name("move-picker")).await;
         esc().await;
-        // Editing the description: the raw text in place.
+        // Editing the description: the raw text in place. (The list row previews only the
+        // first line, so "metrics.xlsx" finds the pane's label.) A click at the end of the
+        // first line, past its text, edits too.
         let desc = window
             .wait_for(
                 &Query::role(Role::Label)
-                    .name_contains("Outline for")
+                    .name_contains("metrics.xlsx")
                     .showing(),
                 WAIT,
             )
@@ -575,7 +577,10 @@ async fn editing(scheme: ColorScheme, narrow: bool) {
             .unwrap();
         let d = desc.extents().await.unwrap();
         input.click(d.x + d.width - 20, d.y + 10).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        window
+            .wait_for(&Query::role(Role::Text).name("Description").showing(), WAIT)
+            .await
+            .unwrap();
         shoot(&s, &name("description-edit")).await;
         esc().await;
     }

@@ -198,12 +198,25 @@ Editing (milestone 3), both schemes: `detail` (Markdown description, fields, sub
 `detail-scrolled` (comments), `date-picker`, `label-picker`, `project-dialog`, `dragging` (a
 drag in progress: dimmed source row, drag icon, insertion line), `section-editor` and
 `delete-project`, wide and narrow; wide only: `deadline-picker`, `priority-picker`,
-`assignee-picker`, `move-picker`, `description-edit`, `task-menu`, `view-menu`,
-`title-rename`, `label-dialog-duplicate`, `filter-dialog`, `sidebar-menu`; a 1024 x 600 window:
+`assignee-picker`, `move-picker`, `description-edit` (the raw-text editor, entered by a click
+at the end of the description's first line), `task-menu`, `view-menu`, `title-rename` (F2 on
+a scrolled list scrolls the title back into view), `label-dialog-duplicate`, `filter-dialog`,
+`sidebar-menu`; a 1024 x 600 window:
 `date-picker-short-<scheme>` (the calendar collapsed behind "Pick a Date"); in Chinese:
 `detail`, `date-picker`, `delete-project` and `project-dialog` (`<view>-zh-wide-<scheme>`).
-The drag icon is a surface of its own: in test mode the app remembers it and the pointer
-position, and `app.test-screenshot` draws it there.
+The drag icon is a surface of its own: in test mode the app remembers the `GtkDragIcon` and
+the pointer position, and `app.test-screenshot` draws the icon there, its 20 px margin (room
+for the floating shadow) included. Headless mutter shows no real drag surface, so the shot
+checks Tick's icon widget, not the compositor's rendering of it.
+
+Finding the pane's widgets: the list row previews a task's description (first line, Markdown
+stripped), so a label query by description text can match the list row first. Query text that
+only the pane shows (a later line), or pick the match furthest right.
+
+The accessibility audit (`a11y.rs`) skips only links inside a label (exemption 1 in DESIGN
+1.2.1) and only selectable labels for the 44 px rule (GTK 4.22 reports a selectable label with
+`has-popup`, its Copy menu, not with a selectable state). Every other link and focusable label
+is checked for a name and a 44 x 44 target.
 
 Wide only, both schemes: `p4-hover` and `p4-checked` (a recurring p4 task in its
 completed-pending state), `completing` (the 800 ms hold, kept with `TICK_TEST_HOLD=1`),
