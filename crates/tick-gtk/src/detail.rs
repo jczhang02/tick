@@ -392,8 +392,11 @@ impl TaskDetail {
         comment_view.update_property(&[gtk::accessible::Property::Label(&gettext(
             "Write a comment",
         ))]);
+        // No scrollbar: a vertical one would hold the field at its own minimum height (58 px),
+        // above the 44 px of one line; the text still scrolls with the cursor and the wheel.
         let comment_scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::External)
             .propagate_natural_height(true)
             .max_content_height(140)
             .focusable(false)
