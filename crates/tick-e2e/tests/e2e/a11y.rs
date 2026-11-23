@@ -357,3 +357,62 @@ async fn editing_surfaces_have_named_44px_targets() {
         .unwrap();
     check(&window, "project dialog").await;
 }
+
+/// Milestone 4 surfaces: Search with results, the Completed history with "Load More", a
+/// read-only history task, Preferences and the main menu (the shortcuts dialog is checked in
+/// `prefs.rs`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn search_history_and_preferences_have_named_44px_targets() {
+    let server = app::server_with(crate::completed::fixture()).await;
+    let s = app::session(&server).start().await.unwrap();
+    let window = s.window().await.unwrap();
+    app::wait_first_sync(&server).await;
+
+    s.type_text("/").await.unwrap();
+    crate::search::entry(&window).await;
+    check(&window, "Search, empty").await;
+    s.type_text("still").await.unwrap();
+    app::wait_tasks(&window, &["Still open"]).await;
+    check(&window, "Search with results").await;
+    s.key(tick_e2e::keysym::ESCAPE).await.unwrap();
+
+    app::open_view(&s, &window, "Completed").await;
+    app::task_row(&window, "Done 00").await;
+    check(&window, "Completed").await;
+    crate::completed::scroll_to(&s, &window, &Query::role(Role::Button).name("Load More")).await;
+    check(&window, "Completed, Load More").await;
+    let row = app::task_row(&window, "Done 49").await;
+    let r = row.extents().await.unwrap();
+    s.input()
+        .await
+        .unwrap()
+        .click(r.x + 120, r.y + 22)
+        .await
+        .unwrap();
+    crate::detail::pane_title(&window, "Done 49").await;
+    check(&window, "read-only detail").await;
+    s.key(tick_e2e::keysym::ESCAPE).await.unwrap();
+
+    s.chord(&[tick_e2e::keysym::CONTROL_L, u32::from(b',')])
+        .await
+        .unwrap();
+    window
+        .wait_for(&Query::role(Role::Label).name("Appearance").showing(), WAIT)
+        .await
+        .unwrap();
+    check(&window, "Preferences").await;
+    s.key(tick_e2e::keysym::ESCAPE).await.unwrap();
+
+    let menu = window
+        .wait_for(&Query::role(Role::Button).name("Main Menu").showing(), WAIT)
+        .await
+        .unwrap();
+    s.click(&menu).await.unwrap();
+    s.app()
+        .await
+        .unwrap()
+        .wait_for(&Query::role(Role::MenuItem).name("Log Out").showing(), WAIT)
+        .await
+        .unwrap();
+    check(&s.app().await.unwrap(), "main menu").await;
+}
