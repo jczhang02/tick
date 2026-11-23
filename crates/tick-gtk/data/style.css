@@ -611,3 +611,17 @@ dialog.tick-entity-dialog sheet {
   background-color: var(--dialog-bg-color);
   color: var(--dialog-fg-color);
 }
+
+/* ---------- drag and drop (4.1, 4.4) ---------- */
+.tick-drop-indicator { min-height: 6px; }
+.tick-drop-dot {
+  min-width: 6px;
+  min-height: 6px;
+  border-radius: 9999px;
+  background-color: var(--accent-color);
+}
+.navigation-sidebar > row.tick-drag-source { opacity: 0.4; }
+.navigation-sidebar > row.tick-drop-into { box-shadow: inset 0 0 0 2px var(--accent-color); }
+listview.tick-task-list > row.tick-drop-into { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.tick-drag-icon { min-height: 44px; }
+.tick-project-drag { padding: 0 18px; }

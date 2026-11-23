@@ -58,19 +58,34 @@ template $TickWindow: Adw.ApplicationWindow {
                 }
               }
 
-              content: Gtk.ScrolledWindow {
-                hscrollbar-policy: never;
-                focusable: false;
+              content: Gtk.Overlay sidebar_overlay {
+                child: Gtk.ScrolledWindow {
+                  hscrollbar-policy: never;
+                  focusable: false;
 
-                child: Gtk.ListView sidebar_list {
-                  styles [
-                    "navigation-sidebar",
-                  ]
+                  child: Gtk.ListView sidebar_list {
+                    styles [
+                      "navigation-sidebar",
+                    ]
 
-                  accessibility {
-                    label: _("Views");
-                  }
+                    accessibility {
+                      label: _("Views");
+                    }
+                  };
                 };
+
+                [overlay]
+                Gtk.Box sidebar_drop_line {
+                  visible: false;
+                  can-target: false;
+                  halign: start;
+                  valign: start;
+                  accessible-role: presentation;
+
+                  styles [
+                    "tick-drop-indicator",
+                  ]
+                }
               };
             };
           };
@@ -133,24 +148,39 @@ template $TickWindow: Adw.ApplicationWindow {
                   }
                 }
 
-                content: Gtk.ScrolledWindow list_scroller {
-                  hscrollbar-policy: never;
-                  focusable: false;
+                content: Gtk.Overlay list_overlay {
+                  child: Gtk.ScrolledWindow list_scroller {
+                    hscrollbar-policy: never;
+                    focusable: false;
 
-                  child: Adw.ClampScrollable {
-                    maximum-size: 720;
-                    tightening-threshold: 560;
+                    child: Adw.ClampScrollable {
+                      maximum-size: 720;
+                      tightening-threshold: 560;
 
-                    child: Gtk.ListView task_list {
-                      styles [
-                        "tick-task-list",
-                      ]
+                      child: Gtk.ListView task_list {
+                        styles [
+                          "tick-task-list",
+                        ]
 
-                      accessibility {
-                        label: _("Tasks");
-                      }
+                        accessibility {
+                          label: _("Tasks");
+                        }
+                      };
                     };
                   };
+
+                  [overlay]
+                  Gtk.Box drop_line {
+                    visible: false;
+                    can-target: false;
+                    halign: start;
+                    valign: start;
+                    accessible-role: presentation;
+
+                    styles [
+                      "tick-drop-indicator",
+                    ]
+                  }
                 };
               };
 

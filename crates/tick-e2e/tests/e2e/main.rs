@@ -6,6 +6,7 @@
 mod a11y;
 mod app;
 mod detail;
+mod dnd;
 mod fixture;
 mod flows;
 mod harness;

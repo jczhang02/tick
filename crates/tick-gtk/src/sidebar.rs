@@ -144,7 +144,10 @@ pub enum ProjectMove {
 /// What the sidebar asks the window to do.
 pub enum SidebarEvent {
     /// Open a view; `push` also shows the content page on narrow windows.
-    Open { view: ViewId, push: bool },
+    Open {
+        view: ViewId,
+        push: bool,
+    },
     /// A section header was collapsed or expanded (persist it).
     SectionToggled,
     /// "Add Project", "Add Label", "Add Filter".
@@ -156,7 +159,13 @@ pub enum SidebarEvent {
         rect: gtk::gdk::Rectangle,
     },
     /// Alt+Shift+arrows on a project row.
-    MoveProject { id: String, how: ProjectMove },
+    MoveProject {
+        id: String,
+        how: ProjectMove,
+    },
+    /// A project drag started or ended.
+    DragBegin,
+    DragEnd,
 }
 
 pub struct Sidebar {
@@ -617,6 +626,26 @@ impl Sidebar {
                     }
                 });
                 content.add_controller(click);
+                if let ItemKind::View(ViewId::Project(id)) = &d.kind {
+                    let (w1, w2) = (Rc::downgrade(self), Rc::downgrade(self));
+                    let name = d.name.clone();
+                    let color = d.color.clone().unwrap_or_default();
+                    crate::dnd::drag_source(
+                        content.upcast_ref(),
+                        format!("{}{}", crate::dnd::PROJECT, id),
+                        move || project_drag_icon(&name, &color),
+                        move || {
+                            if let Some(s) = w1.upgrade() {
+                                (s.events)(SidebarEvent::DragBegin);
+                            }
+                        },
+                        move || {
+                            if let Some(s) = w2.upgrade() {
+                                (s.events)(SidebarEvent::DragEnd);
+                            }
+                        },
+                    );
+                }
                 if !matches!(
                     &d.kind,
                     ItemKind::View(ViewId::Inbox | ViewId::Today | ViewId::Upcoming)
@@ -856,6 +885,23 @@ impl Sidebar {
     pub fn list(&self) -> &gtk::ListView {
         &self.list
     }
+}
+
+/// The drag icon of a project row: dot and name on the floating surface (4.1).
+fn project_drag_icon(name: &str, color: &str) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .css_classes(["tick-drag-icon", "tick-project-drag"])
+        .build();
+    root.append(
+        &gtk::Box::builder()
+            .valign(gtk::Align::Center)
+            .css_classes(["tick-dot".to_owned(), color_class(color)])
+            .build(),
+    );
+    root.append(&gtk::Label::new(Some(name)));
+    root.upcast()
 }
 
 fn view_item(view: ViewId, name: String, icon: &'static str, count: Option<usize>) -> SidebarItem {

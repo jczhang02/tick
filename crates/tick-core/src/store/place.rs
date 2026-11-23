@@ -57,6 +57,24 @@ impl Store {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    /// Task `id` and its active siblings (same project, section and parent) in display
+    /// order: the keyboard equivalent of dragging moves among these (`DESIGN.md` 4.4).
+    pub fn task_siblings(&self, id: &str) -> Result<Vec<String>> {
+        let Some(task) = self.task(id)? else {
+            return Ok(Vec::new());
+        };
+        Ok(self
+            .siblings(&TaskPlace::of(&task), "")?
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect())
+    }
+
+    /// Active direct sub-tasks of `id` in display order.
+    pub fn child_ids(&self, id: &str) -> Result<Vec<String>> {
+        Ok(self.subtasks(id)?.into_iter().map(|t| t.item.id).collect())
+    }
+
     /// Whether `ancestor` is `id` or one of its parents.
     fn is_ancestor_or_self(&self, ancestor: &str, id: &str) -> Result<bool> {
         let mut cur = Some(id.to_owned());

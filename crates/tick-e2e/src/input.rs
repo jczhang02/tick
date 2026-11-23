@@ -135,7 +135,11 @@ impl Input {
             self.motion(dx, dy).await?;
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Small relative steps are subject to pointer acceleration and can end several
+        // pixels off: land exactly on the target (clamp, then one jump, as for clicks).
+        self.move_to_locked(to.0, to.1).await?;
+        self.motion(0.0, 0.0).await?;
+        tokio::time::sleep(Duration::from_millis(150)).await;
         self.button(BTN_LEFT, false).await?;
         tokio::time::sleep(KEY_DELAY).await;
         Ok(())
@@ -165,6 +169,16 @@ impl Input {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
+        Ok(())
+    }
+
+    /// Moves the pointer exactly to (x, y) during a drag (button held), then releases.
+    pub async fn drop_at(&self, x: i32, y: i32) -> Result<()> {
+        let _guard = self.lock.lock().await;
+        self.move_to_locked(x, y).await?;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        self.button(BTN_LEFT, false).await?;
+        tokio::time::sleep(KEY_DELAY).await;
         Ok(())
     }
 

@@ -1,4 +1,5 @@
 mod detail;
+mod dnd;
 mod edit;
 mod format;
 mod i18n;

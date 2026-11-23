@@ -87,6 +87,14 @@ mod imp {
         #[template_child]
         pub list_scroller: TemplateChild<gtk::ScrolledWindow>,
         #[template_child]
+        pub list_overlay: TemplateChild<gtk::Overlay>,
+        #[template_child]
+        pub drop_line: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub sidebar_overlay: TemplateChild<gtk::Overlay>,
+        #[template_child]
+        pub sidebar_drop_line: TemplateChild<gtk::Box>,
+        #[template_child]
         pub task_list: TemplateChild<gtk::ListView>,
         #[template_child]
         pub view_menu_button: TemplateChild<gtk::MenuButton>,
@@ -136,6 +144,12 @@ mod imp {
         pub open_task: RefCell<Option<String>>,
         /// The visible toast's Undo for moves, deletes and archives.
         pub undo_action: RefCell<Option<crate::edit::UndoAction>>,
+        /// A drag is in progress: model refreshes wait (`refresh_pending`) so the dragged
+        /// row keeps its widget.
+        pub dragging: Cell<bool>,
+        pub refresh_pending: Cell<bool>,
+        /// The row showing the "drop into" outline.
+        pub drop_into: RefCell<Option<gtk::Widget>>,
     }
 
     impl TickWindow {
@@ -211,6 +225,7 @@ impl TickWindow {
         win.setup_lists();
         win.setup_detail();
         win.setup_manage();
+        win.setup_dnd();
         win.setup_actions();
         win.setup_keys();
         win.setup_focus_guard();
@@ -344,6 +359,21 @@ impl TickWindow {
             if gtk::prelude::GtkWindowExt::focus(&w).is_some_and(|f| f.is::<gtk::Text>()) {
                 return glib::Propagation::Proceed;
             }
+            // Alt+Shift+arrows: the keyboard path of dragging a task (4.4).
+            if mods.contains(ModifierType::ALT_MASK | ModifierType::SHIFT_MASK) {
+                let how = match key {
+                    Key::Up | Key::KP_Up => crate::sidebar::ProjectMove::Up,
+                    Key::Down | Key::KP_Down => crate::sidebar::ProjectMove::Down,
+                    Key::Right | Key::KP_Right => crate::sidebar::ProjectMove::In,
+                    Key::Left | Key::KP_Left => crate::sidebar::ProjectMove::Out,
+                    _ => return glib::Propagation::Proceed,
+                };
+                return if w.move_task_key(how) {
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                };
+            }
             if mods.intersects(
                 ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SHIFT_MASK,
             ) {
@@ -385,6 +415,8 @@ impl TickWindow {
                     SidebarEvent::Add(section) => w.add_from_sidebar(section),
                     SidebarEvent::Menu { kind, rect } => w.sidebar_menu(&kind, rect),
                     SidebarEvent::MoveProject { id, how } => w.move_project_key(&id, how),
+                    SidebarEvent::DragBegin => w.drag_began(),
+                    SidebarEvent::DragEnd => w.drag_ended(),
                 }
             }),
         );
@@ -882,6 +914,10 @@ impl TickWindow {
 
     fn refresh_rows_with(&self, id_map: &[(String, String)]) {
         let imp = self.imp();
+        if imp.dragging.get() {
+            imp.refresh_pending.set(true);
+            return;
+        }
         let view = self.current_view();
         self.update_failed_map();
         let built = {
@@ -972,6 +1008,10 @@ impl TickWindow {
 
     pub(crate) fn refresh_sidebar(&self) {
         let imp = self.imp();
+        if imp.dragging.get() {
+            imp.refresh_pending.set(true);
+            return;
+        }
         let data = {
             let store = imp.store.borrow();
             let Some(store) = store.as_ref() else { return };
@@ -1139,6 +1179,8 @@ impl TickWindow {
             RowAction::RenameTitle => self.rename_title(),
             RowAction::TitleCommit(name) => self.commit_title(Some(name)),
             RowAction::TitleCancel => self.commit_title(None),
+            RowAction::DragBegin => self.drag_began(),
+            RowAction::DragEnd => self.drag_ended(),
             RowAction::Menu { key, x, y } => {
                 if let Some(store) = self.imp().rows.get()
                     && let Some(pos) = (0..store.n_items()).find(|i| {

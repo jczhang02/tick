@@ -44,6 +44,9 @@ pub enum RowAction {
     RenameTitle,
     TitleCommit(String),
     TitleCancel,
+    /// A task row drag started or ended.
+    DragBegin,
+    DragEnd,
 }
 
 /// A frameless inline editor: Enter or focus-out commits, Escape cancels. `select` selects
@@ -281,6 +284,21 @@ fn render(li: &gtk::ListItem, obj: &TickRow, ctx: &RenderCtx) {
             if let Some(b) = w.downcast_ref::<gtk::Box>() {
                 row_gestures(b, &t.id, &t.key, ctx);
             }
+            let d1 = ctx.dispatch.clone();
+            let d2 = ctx.dispatch.clone();
+            let title = t.title.clone();
+            let p = t.p;
+            let weak = w.downgrade();
+            crate::dnd::drag_source(
+                &w,
+                format!("{}{}", crate::dnd::TASK, t.id),
+                move || {
+                    let width = weak.upgrade().map_or(-1, |w| w.width());
+                    drag_icon(&title, p, width)
+                },
+                move || d1(RowAction::DragBegin),
+                move || d2(RowAction::DragEnd),
+            );
             w
         }
         Row::Ghost { prefill, .. } => ghost_row(prefill, ctx),
@@ -881,6 +899,27 @@ fn task_row(t: &TaskRow, ctx: &RenderCtx) -> gtk::Widget {
             });
         }
     }
+    root.upcast()
+}
+
+/// The drag icon (4.4): the row's ring and title on the floating surface, at its width.
+fn drag_icon(title: &str, p: u8, width: i32) -> gtk::Widget {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .width_request(width)
+        .css_classes(["tick-drag-icon"])
+        .build();
+    let ring = gtk::CheckButton::builder()
+        .valign(gtk::Align::Center)
+        .can_target(false)
+        .css_classes(["tick-ring".to_owned(), format!("p{p}")])
+        .build();
+    root.append(&ring);
+    let l = label(title, &["body"]);
+    l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    l.set_margin_end(12);
+    l.set_hexpand(true);
+    root.append(&l);
     root.upcast()
 }
 
