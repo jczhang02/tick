@@ -961,6 +961,30 @@ async fn background_engine_emits_events() {
     handle.shutdown();
 }
 
+/// `tick --background`: the engine is told it runs in the background before its first
+/// sync; that sync still goes out at once (not after the 5 min cadence).
+#[tokio::test]
+async fn background_start_syncs_at_once() {
+    let e = env().await;
+    let dir = tempfile::tempdir().unwrap();
+    let config = tick_core::EngineConfig {
+        api_base: e.server.base_url(),
+        token: e.server.token(),
+        db_path: dir.path().join("bg.sqlite3"),
+        foreground_interval: Duration::from_secs(60),
+        background_interval: Duration::from_secs(300),
+        clock: Some(fixed_clock()),
+    };
+    let (handle, _events) = tick_core::Engine::spawn(config).unwrap();
+    handle.set_foreground(false);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while e.server.requests_to("/api/v1/sync").is_empty() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(e.server.requests_to("/api/v1/sync").len(), 1);
+    handle.shutdown();
+}
+
 /// Log out (docs/architecture.md, Store): a stop does not wait for a request in flight, and
 /// the event stream ends only once the engine no longer writes, so a cache cleared then
 /// stays empty when the slow response finally arrives.

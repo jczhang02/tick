@@ -900,7 +900,9 @@ async fn run_loop(
                 foreground = f;
                 want_sync = f && !was;
                 if !f {
-                    next_sync = Instant::now() + config.background_interval;
+                    // The 5 min cadence from now on, but a sync already due sooner (the
+                    // first one of a `--background` start) still goes out.
+                    next_sync = next_sync.min(Instant::now() + config.background_interval);
                 }
             }
             Ok(Ok(Request::LoadCompleted { restart })) => {
