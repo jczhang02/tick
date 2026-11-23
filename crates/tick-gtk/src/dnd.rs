@@ -399,7 +399,7 @@ impl TickWindow {
                 let last = {
                     let store = self.store();
                     // The last active sibling of that list.
-                    let probe = store
+                    store
                         .project_view(&place.project_id)
                         .ok()
                         .flatten()
@@ -413,13 +413,8 @@ impl TickWindow {
                                     .map(|g| g.tasks)
                                     .unwrap_or_default(),
                             };
-                            nodes
-                                .into_iter()
-                                .map(|n| n.task.item.id)
-                                .filter(|n| n != id)
-                                .next_back()
-                        });
-                    probe
+                            nodes.into_iter().map(|n| n.task.item.id).rfind(|n| n != id)
+                        })
                 };
                 line(place, last, by, 0)
             }
@@ -502,8 +497,7 @@ impl TickWindow {
                         .child_ids(&parent)
                         .unwrap_or_default()
                         .into_iter()
-                        .filter(|c| c != id)
-                        .next_back();
+                        .rfind(|c| c != id);
                     (
                         TaskPlace {
                             parent_id: Some(parent.clone()),
