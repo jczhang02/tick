@@ -247,8 +247,11 @@ async fn sideways_drag_changes_depth() {
     let (fx, fy, _) = title_point(&window, "Read the article").await;
     let input = s.input().await.unwrap();
     input.press_at(fx, fy).await.unwrap();
-    input.drag_by(0, 8, 4).await.unwrap();
-    input.drag_by(48, 0, 8).await.unwrap();
+    // Well past GTK's 8 px drag threshold (it must be exceeded, not met) before the
+    // sideways move, and a pause before the drop for a busy runner.
+    input.drag_by(0, 12, 4).await.unwrap();
+    input.drag_by(48, 0, 12).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
     input.release().await.unwrap();
     wait_item(&server, "i3", "one level in", |v| v["parent_id"] == "i2").await;
     let moves = app::commands_sent(&server, "item_move");
@@ -258,8 +261,11 @@ async fn sideways_drag_changes_depth() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let (fx, fy, _) = title_point(&window, "Read the article").await;
     input.press_at(fx, fy).await.unwrap();
-    input.drag_by(0, 8, 4).await.unwrap();
-    input.drag_by(-48, 0, 8).await.unwrap();
+    // Well past GTK's 8 px drag threshold (it must be exceeded, not met) before the
+    // sideways move, and a pause before the drop for a busy runner.
+    input.drag_by(0, 12, 4).await.unwrap();
+    input.drag_by(-48, 0, 12).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
     input.release().await.unwrap();
     wait_item(&server, "i3", "back out", |v| v["parent_id"].is_null()).await;
     tick_e2e::poll(Duration::from_secs(15), "after Renew passport", || async {

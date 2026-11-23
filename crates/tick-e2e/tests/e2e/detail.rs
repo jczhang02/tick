@@ -275,6 +275,14 @@ async fn due_by_picker_text_and_clear() {
     s.click(&field(&window, "Date").await).await.unwrap();
     let app_node = window.parent().await.unwrap().unwrap();
     s.click(&november_day(&app_node, "25").await).await.unwrap();
+    // The picker closes before the next one opens.
+    app_node
+        .wait_gone(
+            &Query::role(Role::Label).name("November 2026").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
     wait_item(&server, "i3", "occurrence on the 25th", |v| {
         v["due"]["date"] == "2026-11-25"
     })
@@ -287,6 +295,7 @@ async fn due_by_picker_text_and_clear() {
         &serde_json::json!({"date": "2026-11-25", "string": "every monday",
                             "lang": "en", "is_recurring": true})
     );
+    field(&window, "Date: Wed 25 Nov").await;
 
     // "No Date" clears.
     s.click(&field(&window, "Date").await).await.unwrap();
