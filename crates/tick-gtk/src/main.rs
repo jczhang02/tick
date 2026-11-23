@@ -16,6 +16,7 @@ mod style;
 mod sync_status;
 mod task_list;
 mod test_mode;
+mod views;
 mod window;
 
 use std::cell::RefCell;

@@ -1,8 +1,8 @@
 //! The sidebar (`DESIGN.md` 4.1): a `GtkListView` with `.navigation-sidebar` over a
 //! `GtkTreeListModel` of system views, favorites, the project tree, labels and filters.
 //!
-//! Search and Completed (milestone 4) and the "Add Project/Label/Filter" buttons (their
-//! dialogs come later) are not shown yet.
+//! While a task or project is dragged over a collapsed project, the project expands after
+//! 600 ms ([`Sidebar::hover_drag`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -662,7 +662,13 @@ impl Sidebar {
                 }
                 if !matches!(
                     &d.kind,
-                    ItemKind::View(ViewId::Inbox | ViewId::Today | ViewId::Upcoming)
+                    ItemKind::View(
+                        ViewId::Inbox
+                            | ViewId::Today
+                            | ViewId::Upcoming
+                            | ViewId::Search
+                            | ViewId::Completed
+                    )
                 ) {
                     self.menu_gestures(&content, d.kind.clone());
                 }
@@ -797,6 +803,18 @@ impl Sidebar {
                 ViewId::Upcoming,
                 gettext("Upcoming"),
                 "x-office-calendar-symbolic",
+                None,
+            ),
+            view_item(
+                ViewId::Search,
+                gettext("Search"),
+                "system-search-symbolic",
+                None,
+            ),
+            view_item(
+                ViewId::Completed,
+                gettext("Completed"),
+                "object-select-symbolic",
                 None,
             ),
         ];

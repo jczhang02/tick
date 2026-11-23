@@ -238,6 +238,19 @@ checkbutton.tick-ring > check:checked {
   -gtk-icon-source: -gtk-icontheme("object-select-symbolic");
 }
 
+/* the completed history's ring (4.3 "disabled", 4.21): --tick-p4 ring and check, no fill */
+checkbutton.tick-ring.tick-done > check,
+checkbutton.tick-ring.tick-done > check:checked {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 2px var(--tick-p4);
+  color: var(--tick-p4);
+  -gtk-icon-source: -gtk-icontheme("object-select-symbolic");
+}
+
+/* ---------- search entry and "Load More" (4.15, 4.21) ---------- */
+/* min-height is the content box (7.4 pitfall 18): 34 + 2 x 5 px button padding = 44 */
+button.tick-load-more { min-height: 34px; }
+
 /* ---------- meta line and due states (4.4, 2.4.3) ---------- */
 .tick-meta image { -gtk-icon-size: 12px; }
 .tick-due.overdue,

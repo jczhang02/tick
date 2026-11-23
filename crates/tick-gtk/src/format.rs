@@ -191,6 +191,18 @@ pub fn long_date(date: NaiveDate, s: DateSettings) -> String {
     fill_date(&template, date)
 }
 
+/// Day and full month, for "Since 23 October" (4.21): "23 October" / "October 23".
+pub fn day_month(date: NaiveDate, s: DateSettings) -> String {
+    let template = if s.month_first {
+        // Translators: a day and full month name, month first. Chinese: "{month} 月 {day} 日".
+        pgettext("date", "{month_name} {day}")
+    } else {
+        // Translators: a day and full month name, day first. Chinese: "{month} 月 {day} 日".
+        pgettext("date", "{day} {month_name}")
+    };
+    fill_date(&template, date)
+}
+
 /// Upcoming month header: "December", with the year when it is not the current year.
 pub fn month_header(date: NaiveDate, today: NaiveDate) -> String {
     if date.year() == today.year() {

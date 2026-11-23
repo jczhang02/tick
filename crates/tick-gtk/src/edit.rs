@@ -119,6 +119,12 @@ impl TickWindow {
                 }
             }),
             ("task-complete", |w| w.complete_selected()),
+            ("task-reopen", |w| w.reopen_selected()),
+            ("detail-reopen", |w| {
+                if let Some(id) = w.open_task_id() {
+                    w.reopen_completed(&id);
+                }
+            }),
             ("task-date", |w| w.pick_for_selected(Field::Date)),
             ("task-deadline", |w| w.pick_for_selected(Field::Deadline)),
             ("task-priority", |w| w.pick_for_selected(Field::Priority)),
@@ -209,13 +215,48 @@ impl TickWindow {
         let data = {
             let store = imp.store.borrow();
             let Some(store) = store.as_ref() else { return };
-            detail::load(store, &id)
+            // A history task has no active row: read-only from the history cache (4.21).
+            match detail::load(store, &id) {
+                Ok(None) if self.view_is_read_only() => detail::load_completed(store, &id),
+                other => other,
+            }
         };
+        if let Ok(Some(d)) = &data {
+            self.set_detail_menu(d.read_only);
+        }
         match data {
             Ok(Some(d)) => self.detail().set_data(Some(d)),
             Ok(None) => self.close_task(false),
             Err(e) => eprintln!("tick: reading the task: {e}"),
         }
+    }
+
+    /// The pane's task menu: Complete, Move to..., Delete; or Reopen for a history task.
+    fn set_detail_menu(&self, read_only: bool) {
+        let button = self.imp().detail_menu_button.get();
+        let has_reopen = button
+            .menu_model()
+            .is_some_and(|m| m.n_items() == 1 && m.item_link(0, "section").is_none());
+        if read_only == has_reopen {
+            return;
+        }
+        let menu = if read_only {
+            let m = gio::Menu::new();
+            m.append(Some(&gettext("Reopen")), Some("win.detail-reopen"));
+            m.upcast::<gio::MenuModel>()
+        } else {
+            let m = gio::Menu::new();
+            let main = gio::Menu::new();
+            main.append(Some(&gettext("Complete")), Some("win.detail-complete"));
+            main.append(Some(&gettext("Move to...")), Some("win.detail-move"));
+            m.append_section(None, &main);
+            let danger = gio::Menu::new();
+            danger.append(Some(&gettext("Delete Task")), Some("win.detail-delete"));
+            m.append_section(None, &danger);
+            m.upcast()
+        };
+        button.set_menu_model(Some(&menu));
+        crate::menus::name_button(&button);
     }
 
     fn detail_complete(&self) {
@@ -252,6 +293,11 @@ impl TickWindow {
 
     /// Uncheck a task: take back a completion in progress, else reopen it.
     fn reopen(&self, id: &str) {
+        if self.store().task(id).ok().flatten().is_none() {
+            // Only in the completed history.
+            self.reopen_completed(id);
+            return;
+        }
         self.uncheck(id);
         let still = self
             .store()
@@ -795,6 +841,19 @@ impl TickWindow {
     pub(crate) fn task_menu(&self, rect: gtk::gdk::Rectangle) -> gtk::PopoverMenu {
         let menu = gio::Menu::new();
         let main = gio::Menu::new();
+        if self.view_is_read_only() {
+            // A history row: open it, or reopen it (4.21).
+            main.append(Some(&gettext("Open")), Some("win.task-open"));
+            main.append(Some(&gettext("Reopen")), Some("win.task-reopen"));
+            menu.append_section(None, &main);
+            let pop = gtk::PopoverMenu::from_model(Some(&menu));
+            crate::menus::name_items(&pop);
+            pop.set_has_arrow(false);
+            pop.set_position(gtk::PositionType::Bottom);
+            let list = self.imp().task_list.get();
+            pickers::present(pop.upcast_ref(), &list, Some(rect));
+            return pop;
+        }
         main.append(Some(&gettext("Open")), Some("win.task-open"));
         main.append(Some(&gettext("Complete")), Some("win.task-complete"));
         main.append(Some(&gettext("Date...")), Some("win.task-date"));

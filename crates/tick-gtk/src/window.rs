@@ -154,6 +154,10 @@ mod imp {
         pub refresh_pending: Cell<bool>,
         /// The row showing the "drop into" outline.
         pub drop_into: RefCell<Option<gtk::Widget>>,
+        /// The search entry takes focus when it is built (`views.rs`).
+        pub focus_search: Rc<Cell<bool>>,
+        /// The view before Search (Escape in the empty search entry goes back to it).
+        pub previous_view: RefCell<Option<ViewId>>,
     }
 
     impl TickWindow {
@@ -347,6 +351,7 @@ impl TickWindow {
             narrow: imp.narrow_cell.clone(),
             task_bound: imp.task_bound.clone(),
             header_height: imp.header_height.clone(),
+            focus_search: imp.focus_search.clone(),
         };
         let (store, selection) = task_list::setup(&imp.task_list, ctx);
         let _ = imp.rows.set(store);
@@ -397,7 +402,7 @@ impl TickWindow {
                 let on_row = focus.as_ref().is_some_and(|f| {
                     f.parent().as_ref() == Some(w.imp().task_list.upcast_ref::<gtk::Widget>())
                 });
-                if on_row && w.focused_row_is_task() {
+                if on_row && w.focused_row_is_task() && !w.view_is_read_only() {
                     w.complete_focused();
                     return glib::Propagation::Stop;
                 }
@@ -704,6 +709,7 @@ impl TickWindow {
         });
         // A filter view opened from the cache may need its server part now.
         self.fetch_filter_if_needed();
+        self.completed_engine_started();
     }
 
     /// The token lookup finished (keyring, after the first frame).
@@ -732,6 +738,9 @@ impl TickWindow {
                 self.imp().ui.borrow_mut().filter_loading.clear();
                 self.refresh_rows();
                 self.refresh_sidebar();
+            }
+            EngineEvent::Error(f) if f.request == tick_core::FailedRequest::Completed => {
+                self.completed_failed(f.offline);
             }
             EngineEvent::Error(f) => {
                 if let tick_core::FailedRequest::Filter(q) = &f.request {
@@ -762,7 +771,9 @@ impl TickWindow {
                     }
                 }
             }
-            EngineEvent::CompletedLoaded { .. } => {}
+            EngineEvent::CompletedLoaded {
+                has_more, since, ..
+            } => self.completed_loaded(has_more, &since),
         }
     }
 
@@ -820,6 +831,12 @@ impl TickWindow {
             self.refresh_rows();
             if !offline {
                 self.fetch_filter_if_needed();
+                // Back online in the history before any answer: refresh it now.
+                if self.current_view() == ViewId::Completed
+                    && imp.ui.borrow().completed.has_more.is_none()
+                {
+                    self.start_completed();
+                }
             }
         }
         self.refresh_sync();
@@ -893,8 +910,16 @@ impl TickWindow {
                 ui.section_edit = None;
                 ui.renaming_title = false;
             }
-            imp.view.replace(Some(view.clone()));
-            self.save_setting("last-view", &view.to_setting());
+            let old = imp.view.replace(Some(view.clone()));
+            if view == ViewId::Search {
+                if let Some(old) = old.filter(|o| *o != ViewId::Search) {
+                    imp.previous_view.replace(Some(old));
+                }
+                imp.focus_search.set(true);
+            } else {
+                // Search is not restored at startup (it would open empty).
+                self.save_setting("last-view", &view.to_setting());
+            }
             imp.ui.borrow_mut().filter_rejected.clear();
             if let Some(sel) = imp.selection.get() {
                 sel.set_selected(gtk::INVALID_LIST_POSITION);
@@ -906,7 +931,11 @@ impl TickWindow {
             imp.task_bound.set(false);
             imp.list_scroller.vadjustment().set_value(0.0);
             self.set_title_shown(false);
-            self.refresh_rows();
+            if view == ViewId::Completed {
+                self.start_completed();
+            } else {
+                self.refresh_rows();
+            }
             self.fetch_filter_if_needed();
         }
         if let Some(sb) = imp.sidebar.get() {
@@ -1267,6 +1296,11 @@ impl TickWindow {
             RowAction::TitleCancel => self.commit_title(None),
             RowAction::DragBegin => self.drag_began(),
             RowAction::DragEnd => self.drag_ended(),
+            RowAction::SearchChanged(text) => self.search_changed(&text),
+            RowAction::SearchActivate(text) => self.search_activate(&text),
+            RowAction::SearchDown => self.search_down(),
+            RowAction::SearchEscape => self.search_escape(),
+            RowAction::LoadMore => self.load_more_completed(),
             RowAction::Menu { key, x, y } => {
                 if let Some(store) = self.imp().rows.get()
                     && let Some(pos) = (0..store.n_items()).find(|i| {
@@ -1831,6 +1865,9 @@ impl TickWindow {
         let in_list = focus
             .as_ref()
             .is_none_or(|f| f.is_ancestor(&*imp.task_list));
+        // The history is read-only: no task shortcuts act on it (Enter opens, the menu
+        // offers Reopen).
+        let editable = in_list && !self.view_is_read_only();
         let pending_g = imp
             .g_pending
             .take()
@@ -1847,6 +1884,10 @@ impl TickWindow {
             }
             Key::g => {
                 imp.g_pending.set(Some(Instant::now()));
+                true
+            }
+            Key::slash | Key::KP_Divide => {
+                self.open_search();
                 true
             }
             Key::i if pending_g => goto(ViewId::Inbox),
@@ -1870,7 +1911,7 @@ impl TickWindow {
                 }
                 true
             }
-            Key::e if in_list => {
+            Key::e if editable => {
                 self.complete_selected();
                 true
             }
@@ -1878,7 +1919,7 @@ impl TickWindow {
                 self.close_task(true);
                 true
             }
-            Key::_1 | Key::_2 | Key::_3 | Key::_4 if in_list => {
+            Key::_1 | Key::_2 | Key::_3 | Key::_4 if editable => {
                 let p = match key {
                     Key::_1 => 1,
                     Key::_2 => 2,
@@ -1890,11 +1931,11 @@ impl TickWindow {
                 }
                 true
             }
-            Key::t if in_list => WidgetExt::activate_action(self, "win.task-date", None).is_ok(),
-            Key::l if in_list => WidgetExt::activate_action(self, "win.task-labels", None).is_ok(),
-            Key::v if in_list => WidgetExt::activate_action(self, "win.task-move", None).is_ok(),
+            Key::t if editable => WidgetExt::activate_action(self, "win.task-date", None).is_ok(),
+            Key::l if editable => WidgetExt::activate_action(self, "win.task-labels", None).is_ok(),
+            Key::v if editable => WidgetExt::activate_action(self, "win.task-move", None).is_ok(),
             Key::Delete | Key::KP_Delete
-                if in_list && mods.contains(gtk::gdk::ModifierType::SHIFT_MASK) =>
+                if editable && mods.contains(gtk::gdk::ModifierType::SHIFT_MASK) =>
             {
                 if let Some(id) = self.selected_task() {
                     self.delete_task(&id);
@@ -1983,7 +2024,14 @@ impl TickWindow {
         } else {
             (0..pos).rev().find(|i| interactive(&rows[*i]))
         };
-        let Some(next) = next else { return false };
+        let Some(next) = next else {
+            // Up from the first result goes back to the search entry (4.15).
+            if !down && self.current_view() == ViewId::Search {
+                self.focus_search_entry();
+                return true;
+            }
+            return false;
+        };
         let mut flags = gtk::ListScrollFlags::FOCUS;
         if matches!(&*rows[next].row(), Row::Task(_)) {
             flags |= gtk::ListScrollFlags::SELECT;
