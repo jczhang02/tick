@@ -993,8 +993,23 @@ impl TickWindow {
             }
         };
         if !content.exists {
+            // The server may have replaced a temp id between the lookup above and the read
+            // (a sync committed meanwhile): follow it and read again.
+            let id = match &view {
+                ViewId::Project(id) | ViewId::Label(id) | ViewId::Filter(id) => Some(id.clone()),
+                _ => None,
+            };
+            if let Some(id) = id {
+                let real = self.live_id(&id);
+                if real != id {
+                    self.remap_view(&[(id, real)]);
+                    self.refresh_rows_with(id_map);
+                    return;
+                }
+            }
             // The project, label or filter is gone (deleted elsewhere): fall back to Today.
             if view != ViewId::Today {
+                eprintln!("tick: {} is gone, showing Today", view.to_setting());
                 self.open_view(ViewId::Today, false);
             }
             return;
