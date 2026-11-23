@@ -12,6 +12,7 @@ mod harness;
 mod layout;
 mod login;
 mod screenshots;
+mod shortcuts;
 mod startup;
 mod tasks;
 mod views;
