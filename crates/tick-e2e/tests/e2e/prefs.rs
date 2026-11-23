@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use tick_e2e::{Node, PortalMode, Query, Role, Session, keysym};
-use tick_fake_server::FakeServer;
+use tick_fake_server::{Failure, FakeServer};
 
 use crate::{WAIT, app};
 
@@ -321,16 +321,15 @@ async fn shortcuts_dialog_lists_the_shortcuts() {
         .unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn log_out_returns_to_login_and_clears_the_cache() {
-    let (server, s, window) = start(|b| b).await;
-    open_prefs(&s, &window).await;
+/// Preferences, "Log Out": waits for the confirmation (4.25) and returns its "Log Out"
+/// response.
+async fn ask_to_log_out(s: &Session, window: &Node) -> Node {
+    open_prefs(s, window).await;
     let button = window
         .wait_for(&Query::role(Role::Button).name("Log Out").showing(), WAIT)
         .await
         .unwrap();
     s.click(&button).await.unwrap();
-    // The confirmation (4.25).
     window
         .wait_for(
             &Query::role(Role::Label).name("Log out of Tick?").showing(),
@@ -338,7 +337,7 @@ async fn log_out_returns_to_login_and_clears_the_cache() {
         )
         .await
         .unwrap();
-    let confirm = tick_e2e::poll(WAIT, "Log Out response", || async {
+    tick_e2e::poll(WAIT, "Log Out response", || async {
         let all = window
             .find_all(&Query::role(Role::Button).name("Log Out").showing())
             .await;
@@ -346,7 +345,22 @@ async fn log_out_returns_to_login_and_clears_the_cache() {
         all.into_iter().last()
     })
     .await
-    .unwrap();
+    .unwrap()
+}
+
+/// Nothing of the account is left on this computer.
+fn assert_cache_empty(s: &Session) {
+    let store = tick_core::Store::open(s.data_home().join("tick/cache.sqlite3")).unwrap();
+    assert!(store.user().unwrap().is_none());
+    assert!(store.task("i1").unwrap().is_none());
+    assert_eq!(store.sync_token().unwrap(), None);
+    assert!(store.pending_commands().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn log_out_returns_to_login_and_clears_the_cache() {
+    let (server, s, window) = start(|b| b).await;
+    let confirm = ask_to_log_out(&s, &window).await;
     s.click(&confirm).await.unwrap();
     window
         .wait_for(
@@ -356,17 +370,55 @@ async fn log_out_returns_to_login_and_clears_the_cache() {
         .await
         .unwrap();
     s.wait_for_log_value("TICK_LOGGED_OUT", WAIT).await.unwrap();
-
-    // Nothing of the account is left on this computer.
-    let store = tick_core::Store::open(s.data_home().join("tick/cache.sqlite3")).unwrap();
-    assert!(store.user().unwrap().is_none());
-    assert!(store.task("i1").unwrap().is_none());
-    assert_eq!(store.sync_token().unwrap(), None);
-    assert!(store.pending_commands().unwrap().is_empty());
+    assert_cache_empty(&s);
     // And no syncing goes on.
     let n = app::requests(&server, "/api/v1/sync").len();
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(app::requests(&server, "/api/v1/sync").len(), n);
+}
+
+/// Logging out while a sync hangs on the network (longer than any timer the UI could
+/// use): the engine stops at once, and the late response never reaches the cleared cache.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn log_out_during_a_slow_sync_keeps_the_cache_empty() {
+    let (server, s, window) = start(|b| b).await;
+    let confirm = ask_to_log_out(&s, &window).await;
+    server.inject(Failure::Delay {
+        ms: 15_000,
+        count: 100,
+    });
+    let n = app::requests(&server, "/api/v1/sync").len();
+    tick_e2e::poll(WAIT, "a slow sync", || async {
+        (app::requests(&server, "/api/v1/sync").len() > n).then_some(())
+    })
+    .await
+    .unwrap();
+    let asked = std::time::Instant::now();
+    s.click(&confirm).await.unwrap();
+    window
+        .wait_for(
+            &Query::role(Role::Label).name("Welcome to Tick").showing(),
+            WAIT,
+        )
+        .await
+        .unwrap();
+    s.wait_for_log_value("TICK_LOGGED_OUT", WAIT).await.unwrap();
+    assert!(
+        asked.elapsed() < Duration::from_secs(8),
+        "log out waited for the slow sync: {:?}",
+        asked.elapsed()
+    );
+    assert_cache_empty(&s);
+    // The held response is answered now; nothing writes it into the cache.
+    tokio::time::sleep(Duration::from_secs(16)).await;
+    assert_cache_empty(&s);
+    let store = tick_core::Store::open(s.data_home().join("tick/cache.sqlite3")).unwrap();
+    assert!(store.projects_tree().unwrap().is_empty());
+    assert!(
+        !s.app_log().contains("tick: clearing the cache"),
+        "{}",
+        s.app_log()
+    );
 }
 
 /// Ctrl+W closes (hides) the window; the app keeps running.

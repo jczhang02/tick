@@ -734,7 +734,10 @@ impl TickWindow {
         glib::spawn_future_local(async move {
             while let Ok(ev) = events.recv().await {
                 let Some(w) = weak.upgrade() else { break };
-                w.on_engine_event(ev);
+                // Logging out: the old account's last events are of no interest.
+                if !w.imp().logging_out.get() {
+                    w.on_engine_event(ev);
+                }
             }
             // The engine stopped (log out).
             if let Some(w) = weak.upgrade() {

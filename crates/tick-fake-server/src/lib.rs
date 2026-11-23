@@ -93,6 +93,13 @@ pub enum Failure {
         #[serde(default = "one")]
         count: u32,
     },
+    /// Hold the next `count` `/sync` requests for `ms` milliseconds before processing and
+    /// answering them (a slow network: the request is logged when it arrives).
+    Delay {
+        ms: u64,
+        #[serde(default = "one")]
+        count: u32,
+    },
     /// Fail matching commands with `error` (a `sync_status` error object). Matches on
     /// `command_type` and, if given, a substring of the command's JSON args.
     CommandError {
@@ -389,6 +396,22 @@ impl State {
         Some((status, retry_after))
     }
 
+    fn take_delay(&mut self) -> Option<std::time::Duration> {
+        let idx = self
+            .failures
+            .iter()
+            .position(|f| matches!(f, Failure::Delay { .. }))?;
+        let Failure::Delay { ms, count } = self.failures[idx].clone() else {
+            return None;
+        };
+        if count <= 1 {
+            self.failures.remove(idx);
+        } else if let Failure::Delay { count: c, .. } = &mut self.failures[idx] {
+            *c -= 1;
+        }
+        Some(std::time::Duration::from_millis(ms))
+    }
+
     fn take_after_commit(&mut self) -> Option<u16> {
         let idx = self
             .failures
@@ -628,13 +651,21 @@ async fn sync_handler(
         };
         logged.insert(k.clone(), parsed);
     }
+    let (log_idx, delay) = {
+        let mut st = lock(&state);
+        if let Gate::Reject(r) = gate(&mut st, &method, &uri, &headers, Value::Object(logged)) {
+            return r;
+        }
+        if body.len() > MAX_BODY_BYTES {
+            return finish(&mut st, too_large());
+        }
+        (st.log.len() - 1, st.take_delay())
+    };
+    if let Some(delay) = delay {
+        // Other requests go on meanwhile.
+        tokio::time::sleep(delay).await;
+    }
     let mut st = lock(&state);
-    if let Gate::Reject(r) = gate(&mut st, &method, &uri, &headers, Value::Object(logged)) {
-        return r;
-    }
-    if body.len() > MAX_BODY_BYTES {
-        return finish(&mut st, too_large());
-    }
     let resp = match run_sync(&mut st, &form) {
         Ok(v) => {
             if let Some(status) = st.take_after_commit() {
@@ -645,7 +676,10 @@ async fn sync_handler(
         }
         Err(r) => r,
     };
-    finish(&mut st, resp)
+    if let Some(l) = st.log.get_mut(log_idx) {
+        l.status = resp.status().as_u16();
+    }
+    resp
 }
 
 fn parse_resource_types(s: Option<&String>) -> Result<Vec<String>, Response> {

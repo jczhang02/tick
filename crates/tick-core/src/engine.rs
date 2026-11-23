@@ -727,14 +727,15 @@ enum Request {
     LoadCompleted { restart: bool },
     FetchFilter(String),
     SetToken(String),
-    Shutdown,
 }
 
-/// Handle to a running background engine. Cheap to clone; dropping all handles does not
-/// stop the engine, call [`EngineHandle::shutdown`].
+/// Handle to a running background engine. Cheap to clone. [`EngineHandle::shutdown`] (or
+/// dropping every handle) stops the engine.
 #[derive(Clone, Debug)]
 pub struct EngineHandle {
     tx: async_channel::Sender<Request>,
+    /// Out of band, so a stop never waits behind queued requests.
+    stop: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 impl EngineHandle {
@@ -758,8 +759,13 @@ impl EngineHandle {
     pub fn set_token(&self, token: &str) {
         let _ = self.tx.try_send(Request::SetToken(token.to_owned()));
     }
+    /// Stop the engine at once: a request in flight is abandoned and its response never
+    /// applied, queued requests are dropped. The engine finishes the store write it may be
+    /// in (a transaction is never cut short), then closes its connection and drops its event
+    /// sender: the event stream ends only once the engine can no longer write, so a caller
+    /// that clears the cache (log out) waits for that.
     pub fn shutdown(&self) {
-        let _ = self.tx.try_send(Request::Shutdown);
+        self.stop.send_replace(true);
     }
 }
 
@@ -777,6 +783,7 @@ impl Engine {
         }
         let (req_tx, req_rx) = async_channel::unbounded();
         let (ev_tx, ev_rx) = async_channel::unbounded();
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         std::thread::Builder::new()
             .name("tick-sync".into())
             .spawn(move || {
@@ -784,10 +791,16 @@ impl Engine {
                     .enable_all()
                     .build()
                     .expect("tokio runtime");
-                rt.block_on(run(config, store, req_rx, ev_tx));
+                rt.block_on(run(config, store, req_rx, ev_tx, stop_rx));
             })
             .map_err(StoreError::Io)?;
-        Ok((EngineHandle { tx: req_tx }, ev_rx))
+        Ok((
+            EngineHandle {
+                tx: req_tx,
+                stop: std::sync::Arc::new(stop_tx),
+            },
+            ev_rx,
+        ))
     }
 }
 
@@ -833,7 +846,25 @@ impl Backoff {
     }
 }
 
+/// The background loop until [`EngineHandle::shutdown`] (or every handle is gone). The loop
+/// owns the store connection and the event sender, so both are dropped when the stop wins
+/// the race, wherever the loop was waiting (an HTTP request included).
 async fn run(
+    config: EngineConfig,
+    store: Store,
+    rx: async_channel::Receiver<Request>,
+    events: async_channel::Sender<EngineEvent>,
+    mut stop: tokio::sync::watch::Receiver<bool>,
+) {
+    tokio::select! {
+        biased;
+        // `Err`: every handle was dropped.
+        _ = stop.wait_for(|s| *s) => {}
+        () = run_loop(config, store, rx, events) => {}
+    }
+}
+
+async fn run_loop(
     config: EngineConfig,
     store: Store,
     rx: async_channel::Receiver<Request>,
@@ -863,7 +894,6 @@ async fn run(
         match tokio::time::timeout(wait, rx.recv()).await {
             Err(_) => want_sync = true, // timer
             Ok(Err(_)) => return,       // all handles dropped
-            Ok(Ok(Request::Shutdown)) => return,
             Ok(Ok(Request::SyncNow)) => want_sync = true,
             Ok(Ok(Request::Foreground(f))) => {
                 let was = foreground;

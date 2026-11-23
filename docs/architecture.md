@@ -55,8 +55,12 @@
   `collapsed-sections` (comma-separated).
 - Log out (`Store::clear_account`): every cached object, the queue, failed changes, the history
   and filter caches, reminder state and the settings except `color-scheme` and `run-at-login`.
-  The UI stops the engine first (its event stream ends) and clears after that; the token is
-  removed from the keyring on a worker thread (not in test mode).
+  The UI stops the engine first and clears after that; the token is removed from the keyring
+  on a worker thread (not in test mode). `EngineHandle::shutdown` is out of band (it never
+  waits behind queued requests): the engine abandons a request in flight without applying
+  its response, finishes a store write it may be in, then drops its connection and its event
+  sender. The UI clears only when the event stream has ended, and the login page (the only
+  way to start another engine) comes back only then.
 - Keep raw server JSON per object alongside the indexed columns, so unknown fields survive and
   future features need no migration.
 - Schema migrations are versioned with `PRAGMA user_version`.

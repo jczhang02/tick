@@ -961,6 +961,65 @@ async fn background_engine_emits_events() {
     handle.shutdown();
 }
 
+/// Log out (docs/architecture.md, Store): a stop does not wait for a request in flight, and
+/// the event stream ends only once the engine no longer writes, so a cache cleared then
+/// stays empty when the slow response finally arrives.
+#[tokio::test]
+async fn shutdown_abandons_a_request_in_flight() {
+    let e = env().await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("bg.sqlite3");
+    let config = tick_core::EngineConfig {
+        api_base: e.server.base_url(),
+        token: e.server.token(),
+        db_path: db.clone(),
+        foreground_interval: Duration::from_millis(200),
+        background_interval: Duration::from_secs(60),
+        clock: Some(fixed_clock()),
+    };
+    let (handle, events) = tick_core::Engine::spawn(config).unwrap();
+    // The first sync goes through, then every sync hangs for 5 s.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while e.server.requests_to("/api/v1/sync").is_empty() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    e.server.inject(Failure::Delay {
+        ms: 5000,
+        count: 10,
+    });
+    let n = e.server.requests_to("/api/v1/sync").len();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while e.server.requests_to("/api/v1/sync").len() == n && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        e.server.requests_to("/api/v1/sync").len() > n,
+        "a slow sync is on the wire"
+    );
+    let asked = Instant::now();
+    handle.shutdown();
+    // Queued requests do not hold the stop back either.
+    handle.sync_now();
+    handle.load_completed(true);
+    let ended = tokio::time::timeout(Duration::from_secs(2), async {
+        while events.recv().await.is_ok() {}
+    })
+    .await;
+    assert!(
+        ended.is_ok(),
+        "the event stream ends without waiting for the response"
+    );
+    assert!(asked.elapsed() < Duration::from_secs(2));
+    let mut ui = Store::open(&db).unwrap();
+    ui.clear_account().unwrap();
+    // The slow response would have arrived by now: nothing was written after the stop.
+    tokio::time::sleep(Duration::from_millis(5500)).await;
+    let ui = Store::open(&db).unwrap();
+    assert_eq!(ui.sync_token().unwrap(), None);
+    assert!(ui.user().unwrap().is_none());
+    assert!(ui.projects_tree().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn background_engine_honors_retry_after() {
     let e = env().await;

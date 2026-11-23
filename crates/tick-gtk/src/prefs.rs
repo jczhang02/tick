@@ -222,18 +222,12 @@ impl TickWindow {
         }
         imp.logging_out.set(true);
         match imp.engine.take() {
-            // The engine has its own connection and may be mid-sync: the cache is cleared
-            // once its event stream ends (`engine_stopped`).
-            Some(e) => {
-                e.shutdown();
-                let weak = self.downgrade();
-                // In case the engine never answers (a request hanging on the network).
-                glib::timeout_add_local_once(std::time::Duration::from_secs(10), move || {
-                    if let Some(w) = weak.upgrade() {
-                        w.finish_log_out();
-                    }
-                });
-            }
+            // The engine has its own connection and may be mid-sync. It stops at once (a
+            // request in flight is abandoned, never applied), and its event stream ends only
+            // when it can no longer write: the cache is cleared then (`engine_stopped`), never
+            // before, so a late response cannot refill it and no second engine starts while
+            // the old one runs (the login page comes back only then).
+            Some(e) => e.shutdown(),
             None => self.finish_log_out(),
         }
     }
